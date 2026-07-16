@@ -12,11 +12,8 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// User-forced effort overrides the inbound client's output_config.effort on
-// Anthropic adaptive targets: a Claude Code client asking for adaptive+high
-// gets downgraded to "low" when the user pinned the session to x-weave-effort
-// = low. The wire value is whatever ResolveForceEffort returns (canonical +
-// per-model cap applied).
+// TestForceEffort_AnthropicOverrides verifies ForceEffort overrides the
+// inbound output_config.effort on adaptive targets.
 func TestForceEffort_AnthropicOverrides(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -97,10 +94,8 @@ func TestForceEffort_AnthropicPassesThroughAlias(t *testing.T) {
 	assert.Equal(t, "xhigh", oc["effort"])
 }
 
-// User-forced effort skips on Anthropic non-adaptive (legacy extended-
-// thinking) targets: no output_config.effort knob, no rewrite, the
-// request goes through unchanged so a user who wrote "force low" on a
-// sonnet-4-5 still gets whatever thinking.budget_tokens they sent.
+// TestForceEffort_NonAdaptiveTargetNoOp verifies ForceEffort is a no-op on
+// legacy extended-thinking targets (no output_config.effort knob).
 func TestForceEffort_NonAdaptiveTargetNoOp(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":16384}}`)
 	env, err := translate.ParseAnthropic(body)

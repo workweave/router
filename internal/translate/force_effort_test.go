@@ -138,11 +138,7 @@ func TestCanonicalizeEffort(t *testing.T) {
 	}
 }
 
-// IsValidEffort accepts canonical wire-format levels AND alias forms (fast,
-// minimal, ultra) — aliases canonicalize to a known level, so we accept them
-// too. Mirrors what the middleware does: a value headers receive could be
-// either form, and we want to flag a typo (`garbage`) without rejecting
-// legitimate aliases.
+// IsValidEffort accepts canonical levels and alias forms; rejects typos.
 func TestIsValidEffort(t *testing.T) {
 	valid := []string{
 		"low", "medium", "high", "max", "xhigh",

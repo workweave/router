@@ -238,10 +238,7 @@ func (s *Service) applyForceModelHeader(
 	log := observability.FromContext(ctx)
 	canonicalModel, provider, known, effortLevel := resolveForceModelWithEffort(raw)
 	if effortLevel != "" {
-		// Stash on the request context so routingKnobsForRequest +
-		// the proxy's EmitOptions build both pick it up on the same
-		// turn. Merge with any existing knobs so ForceEffort doesn't
-		// silently drop a separately-configured Alpha/QualityBias.
+		// Merge with any existing knobs so ForceEffort doesn't drop Alpha/QualityBias.
 		merged := router.Overrides{ForceEffort: effortLevel}
 		if existing := router.RoutingKnobsFromContext(r.Context()); existing != nil {
 			merged.Alpha = existing.Alpha

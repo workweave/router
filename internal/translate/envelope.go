@@ -1044,11 +1044,7 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		SanitizeAnthropicToolSchemas: true,
 	}
 
-	// User-forced effort (x-weave-effort header / :level suffix on /force-model)
-	// wins over the inbound heuristic: a user expressing "make this fast" or
-	// "use max thinking" is more specific than the budget-derived tier. Only
-	// applies on adaptive targets — legacy extended-thinking has no effort
-	// knob (forward thinking block untouched).
+	// User-forced effort wins over inbound heuristic; no-op on non-adaptive targets.
 	if forced := resolveForceEffort(opts); forced != "" && opts.Capabilities.Supports(router.CapAdaptiveThinking) {
 		ov.RewriteThinkingAdaptive = true
 		ov.OutputConfigEffort = forced
