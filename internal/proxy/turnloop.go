@@ -229,8 +229,7 @@ func (s *Service) runTurnLoop(
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
 	// Explicit user-forced pins outrank every automatic fast path, including
-	// the turn-type hard pin. Only look up this pin for hard-pinned turns so
-	// ordinary turns retain the normal pin/planner flow below.
+	// the turn-type hard pin; only check here so ordinary turns use the normal flow.
 	threadSessionKey := DeriveSessionKey(env, apiKeyID)
 	hardPinnedTurn := s.isHardPinnedTurn(ctx, res.TurnType)
 	if s.pinStore != nil && hardPinnedTurn {
@@ -251,8 +250,7 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Automatic hard pins bypass pin lookup/write, planner, and scorer entirely.
-	// Probes
-	// and title-gen must never create a session pin: the Anthropic SDK fires
+	// Probes and title-gen must never create a session pin: the Anthropic SDK fires
 	// probes before the first real turn, and Claude Code fires title-gen
 	// ~25ms before the real-conv call — an anchored pin would leak the
 	// cheap-model decision into the conversation that follows.
