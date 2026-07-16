@@ -510,11 +510,10 @@ func TestTrimLastN_GeminiNoOpWhenUnderLimit(t *testing.T) {
 	require.Len(t, contents, 2)
 }
 
+// TrimLastN drops a trailing orphan functionResponse-only user turn.
 func TestTrimLastN_GeminiStripsOrphanFunctionResponse(t *testing.T) {
 	t.Parallel()
 
-	// TrimLastN(2) keeps only the trailing functionResponse user turn —
-	// without orphan strip that would 400 at Google (no matching functionCall).
 	const body = `{
   "contents": [
     {"role": "user", "parts": [{"text": "edit a.go"}]},

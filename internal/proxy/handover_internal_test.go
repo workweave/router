@@ -165,6 +165,7 @@ func TestProviderSummarizer_NilEnvelopeReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Summarize accepts a Gemini envelope.
 func TestProviderSummarizer_AcceptsGeminiEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -185,10 +186,11 @@ func TestProviderSummarizer_AcceptsGeminiEnvelope(t *testing.T) {
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
 	got, _, err := s.Summarize(context.Background(), env)
-	require.NoError(t, err, "ProviderSummarizer must ingest Gemini envelopes for SWITCH handover")
+	require.NoError(t, err)
 	assert.Equal(t, "Refactor in progress: step 1 done, step 2 pending.", got)
 }
 
+// SummarizeForCompaction accepts a Gemini envelope.
 func TestProviderSummarizer_CompactionAcceptsGeminiEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +210,6 @@ func TestProviderSummarizer_CompactionAcceptsGeminiEnvelope(t *testing.T) {
 	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
 
 	got, _, err := s.SummarizeForCompaction(context.Background(), env, "claude-haiku-4-5", 512)
-	require.NoError(t, err, "compaction path must also ingest Gemini envelopes")
+	require.NoError(t, err)
 	assert.Equal(t, "Refactor in progress: step 1 done, step 2 pending.", got)
 }

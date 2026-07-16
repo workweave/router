@@ -279,7 +279,7 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	preserved := 0
 	if latestUser.Exists() {
 		// Strip functionResponse parts: the summary has no functionCall parts,
-		// so any functionResponse would be orphaned (Google 400).
+		// so any functionResponse would be orphaned.
 		cleaned := stripGeminiFunctionResponseEntry(latestUser, nil)
 		if cleaned != "" {
 			rebuilt = append(rebuilt, cleaned)
@@ -300,7 +300,7 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 
 // stripGeminiFunctionResponseEntry removes functionResponse parts whose name
 // is not in knownNames (nil knownNames = strip all). Returns "" if nothing
-// remains — matching stripAnthropicToolResultMsg for Anthropic handover.
+// remains — matching stripAnthropicToolResultMsg.
 func stripGeminiFunctionResponseEntry(entry gjson.Result, knownNames map[string]struct{}) string {
 	parts := entry.Get("parts")
 	if !parts.IsArray() {

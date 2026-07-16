@@ -22,8 +22,7 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// Gemini SWITCH with a working summarizer must RewriteEnvelope so the
-// forwarded body is summary-bounded (not full history).
+// Gemini SWITCH with a working summarizer forwards [summary, latestUser].
 func TestGeminiSwitch_SummarizerBoundsHistory(t *testing.T) {
 	t.Parallel()
 
@@ -80,7 +79,7 @@ func TestGeminiSwitch_SummarizerBoundsHistory(t *testing.T) {
 	assert.NotContains(t, string(googleUp.proxyBodies[0]), chunk[:40], "long prior user text must be elided")
 }
 
-// Mid-tool Gemini SWITCH must not forward an orphan functionResponse after rewrite.
+// Mid-tool Gemini SWITCH strips orphan functionResponse from the forwarded body.
 func TestGeminiSwitch_MidToolStripsOrphanFunctionResponse(t *testing.T) {
 	t.Parallel()
 
@@ -136,8 +135,8 @@ func TestGeminiSwitch_MidToolStripsOrphanFunctionResponse(t *testing.T) {
 		})
 		return true
 	})
-	assert.Equal(t, 0, frCount, "orphan functionResponse must not reach Google after handover rewrite")
-	assert.Equal(t, 1, len(contents.Array()), "functionResponse-only latest user drops; only summary remains")
+	assert.Equal(t, 0, frCount, "no functionResponse in forwarded body")
+	assert.Equal(t, 1, len(contents.Array()), "only summary remains")
 }
 
 type recordingSummarizerClient struct {
@@ -162,6 +161,7 @@ func (c *recordingSummarizerClient) Passthrough(context.Context, providers.Prepa
 	return nil
 }
 
+// ProviderSummarizer converts Gemini history and bounds the SWITCH body.
 func TestGeminiSwitch_RealProviderSummarizerBoundsHistory(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("bbbb ", 8000)
@@ -213,7 +213,7 @@ func TestGeminiSwitch_RealProviderSummarizerBoundsHistory(t *testing.T) {
 	require.NoError(t, svc.ProxyGeminiGenerateContent(ctx, body, rec, httpReq))
 
 	assert.Equal(t, "gemini-3.1-flash-lite-preview", rec.Header().Get(proxy.HeaderRouterModel))
-	require.Equal(t, int32(1), sumClient.calls.Load(), "real ProviderSummarizer must reach Anthropic upstream")
+	require.Equal(t, int32(1), sumClient.calls.Load(), "summarizer Proxy was called")
 
 	sumBody := sumClient.lastBody
 	require.NotEmpty(t, sumBody)
@@ -221,11 +221,11 @@ func TestGeminiSwitch_RealProviderSummarizerBoundsHistory(t *testing.T) {
 	assert.Equal(t, "be careful", gjson.GetBytes(sumBody, "system.0.text").String())
 	assert.Contains(t, gjson.GetBytes(sumBody, "messages").Raw, `"tool_use"`)
 	assert.Contains(t, gjson.GetBytes(sumBody, "messages").Raw, `"tool_result"`)
-	assert.NotContains(t, string(sumBody), "functionCall", "Gemini wire must be converted before Anthropic upstream")
+	assert.NotContains(t, string(sumBody), "functionCall", "no Gemini functionCall in Anthropic summarizer body")
 
 	require.NotEmpty(t, googleUp.proxyBodies)
 	contents := gjson.GetBytes(googleUp.proxyBodies[0], "contents").Array()
-	require.Len(t, contents, 2, "bounded [summary, latestUser]")
+	require.Len(t, contents, 2, "expect [summary, latestUser]")
 	assert.True(t, strings.HasPrefix(contents[0].Get("parts.0.text").String(), translate.HandoverSummaryTag))
 	assert.Contains(t, contents[0].Get("parts.0.text").String(), "Edited a.go")
 	assert.Equal(t, "continue please", contents[1].Get("parts.0.text").String())
@@ -233,6 +233,7 @@ func TestGeminiSwitch_RealProviderSummarizerBoundsHistory(t *testing.T) {
 	assert.NotContains(t, string(googleUp.proxyBodies[0]), chunk[:40])
 }
 
+// Summarizer error keeps the full prior Gemini contents unchanged.
 func TestGeminiSwitch_SummarizerFailureKeepsFullHistory(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("cccc ", 8000)
@@ -275,12 +276,13 @@ func TestGeminiSwitch_SummarizerFailureKeepsFullHistory(t *testing.T) {
 
 	require.NotEmpty(t, googleUp.proxyBodies)
 	raw := string(googleUp.proxyBodies[0])
-	assert.Contains(t, raw, "functionCall", "failure must keep full history including functionCall")
-	assert.Contains(t, raw, "functionResponse", "failure must keep full history including functionResponse")
-	assert.NotContains(t, raw, translate.HandoverSummaryTag, "RewriteEnvelope must not run on summarizer failure")
+	assert.Contains(t, raw, "functionCall", "full history keeps functionCall")
+	assert.Contains(t, raw, "functionResponse", "full history keeps functionResponse")
+	assert.NotContains(t, raw, translate.HandoverSummaryTag, "no handover summary tag on failure")
 	assert.Equal(t, int32(1), sz.calls.Load())
 }
 
+// Empty summarizer text keeps the full prior Gemini contents unchanged.
 func TestGeminiSwitch_EmptySummaryKeepsFullHistory(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("dddd ", 8000)
@@ -292,7 +294,7 @@ func TestGeminiSwitch_EmptySummaryKeepsFullHistory(t *testing.T) {
     {"role":"user","parts":[{"text":"continue"}]}
   ]
 }`)
-	sz := &fakeSummarizer{summary: ""} // success with empty text → same fallback as error
+	sz := &fakeSummarizer{summary: ""}
 	googleUp := &fakeProvider{}
 	store := newFakePinStore()
 	store.hasPin = true
@@ -323,12 +325,13 @@ func TestGeminiSwitch_EmptySummaryKeepsFullHistory(t *testing.T) {
 
 	require.NotEmpty(t, googleUp.proxyBodies)
 	raw := string(googleUp.proxyBodies[0])
-	assert.Contains(t, raw, chunk[:40], "empty summary must preserve full history")
+	assert.Contains(t, raw, chunk[:40], "full history preserved")
 	assert.NotContains(t, raw, translate.HandoverSummaryTag)
 	assert.Equal(t, int32(1), sz.calls.Load())
 	assert.Equal(t, "gemini-3.1-flash-lite-preview", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
+// Concurrent Gemini SWITCH requests each get a summary-bounded body.
 func TestGeminiSwitch_ConcurrentRequestsRaceSafe(t *testing.T) {
 	t.Parallel()
 	chunk := strings.Repeat("eeee ", 4000)

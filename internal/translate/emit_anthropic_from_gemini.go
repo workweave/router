@@ -7,9 +7,8 @@ import (
 )
 
 // buildAnthropicFromGemini converts a native Gemini generateContent body into
-// an Anthropic Messages request. Used by the handover/compaction summarizer
-// (ProviderSummarizer → PrepareAnthropic); product Gemini→non-Google dispatch
-// remains deferred at the proxy layer.
+// an Anthropic Messages request. Product Gemini→non-Google dispatch remains
+// deferred at the proxy layer.
 func (e *RequestEnvelope) buildAnthropicFromGemini(opts EmitOptions) ([]byte, error) {
 	jw := newJSONWriter()
 	jw.Obj()
@@ -145,8 +144,7 @@ func buildAnthropicUserFromGeminiParts(parts gjson.Result, toolIDsByName map[str
 		name := resp.Get("name").String()
 		id := toolIDsByName[name]
 		if id == "" {
-			// No matching prior functionCall in this conversion — still emit a
-			// tool_result so the summarizer sees the tool output text.
+			// No matching prior functionCall — still emit a tool_result with the tool output.
 			id = sanitizeToolUseID("gemini_" + name + "_orphan")
 		}
 		blocks = append(blocks, anthropicToolResultBlock(id, geminiFunctionResponseText(resp)))

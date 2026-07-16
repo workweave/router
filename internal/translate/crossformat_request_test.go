@@ -1157,7 +1157,7 @@ func TestCrossFormat_GeminiToAnthropic_TextAndTools(t *testing.T) {
 	require.NoError(t, err)
 
 	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-haiku-4-5"})
-	require.NoError(t, err, "Gemini→Anthropic must succeed for summarizer ingest")
+	require.NoError(t, err)
 
 	assert.Equal(t, "claude-haiku-4-5", gjson.GetBytes(prep.Body, "model").String())
 	assert.Equal(t, "be helpful", gjson.GetBytes(prep.Body, "system.0.text").String())

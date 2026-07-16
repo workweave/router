@@ -141,13 +141,13 @@ func TestGeminiToAnthropic_DoesNotCopyGeminiToolsArray(t *testing.T) {
 
 	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-haiku-4-5"})
 	require.NoError(t, err)
-	assert.False(t, gjson.GetBytes(prep.Body, "tools").Exists(), "summarizer ingest must not forward Gemini tools schemas")
+	assert.False(t, gjson.GetBytes(prep.Body, "tools").Exists(), "tools array is not copied")
 }
 
 func TestGeminiToAnthropic_SameNameToolsPairToLatestCall(t *testing.T) {
 	t.Parallel()
 
-	// Two edit calls; name→id map keeps the latest. Documented pairing rule.
+	// Same-name tool calls pair each functionResponse to the latest functionCall id.
 	body := []byte(`{
 		"contents": [
 			{"role": "model", "parts": [
