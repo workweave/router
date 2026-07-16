@@ -94,6 +94,18 @@ func TestResponsesToChatCompletions_ToolsFlatToNested(t *testing.T) {
 	assert.True(t, tools[0].Get("function.parameters").IsObject())
 }
 
+func TestResponsesToChatCompletions_ToolChoiceRequiresTools(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": "hi",
+		"tool_choice": "auto"
+	}`)
+
+	out, _, _, err := translate.ResponsesToChatCompletions(body)
+	require.NoError(t, err)
+	assert.False(t, gjson.GetBytes(out, "tool_choice").Exists())
+}
+
 func TestResponsesToChatCompletions_StripsRoutingBadgeFromAssistantHistory(t *testing.T) {
 	// The egress badge must not survive ingress, or repeated turns leak
 	// router bytes that break prompt-cache reuse.
@@ -115,6 +127,22 @@ func TestResponsesToChatCompletions_StripsRoutingBadgeFromAssistantHistory(t *te
 	require.Len(t, messages, 3)
 	assert.Equal(t, "assistant", messages[1].Get("role").Str)
 	assert.Equal(t, "Hello there!", messages[1].Get("content").Str)
+}
+
+func TestResponsesToChatCompletions_StripsVerboseRoutingMarker(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "message", "role": "assistant", "content": "✦ **WEAVE ROUTER** → minimax/minimax-m3 · best pick for this turn\n↳ classifier balanced\n↳ bandit arm minimax\n\nbody"}
+		]
+	}`)
+
+	out, _, _, err := translate.ResponsesToChatCompletions(body)
+	require.NoError(t, err)
+
+	messages := gjson.GetBytes(out, "messages").Array()
+	require.Len(t, messages, 1)
+	assert.Equal(t, "body", messages[0].Get("content").Str)
 }
 
 func TestResponsesToChatCompletions_StripsBadgeFromStringContent(t *testing.T) {
@@ -405,6 +433,33 @@ func TestResponsesWriter_UsesRoutedModelFromHeader(t *testing.T) {
 	require.NotNil(t, completed)
 	assert.Equal(t, "claude-opus-4-7", created["model"])
 	assert.Equal(t, "claude-opus-4-7", completed["model"])
+}
+
+func TestResponsesWriter_UsesCustomBadgeText(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-5")
+	w.SetBadgeText("✦ **Weave Router** → minimax/minimax-m3 · best pick for this turn\n↳ classifier balanced")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("x-router-model", "minimax/minimax-m3")
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte("data: [DONE]\n\n"))
+	require.NoError(t, err)
+	require.NoError(t, w.Finalize())
+
+	events := parseSSEEvents(t, rec.Body.Bytes())
+	var firstDelta string
+	for _, e := range events {
+		if e["type"] == "response.output_text.delta" {
+			firstDelta = e["delta"].(string)
+			break
+		}
+	}
+	assert.Contains(t, firstDelta, "best pick for this turn")
+	assert.Contains(t, firstDelta, "↳ classifier balanced")
+	assert.True(t, strings.HasSuffix(firstDelta, "\n\n"))
 }
 
 func TestResponsesWriter_StreamingToolCall(t *testing.T) {

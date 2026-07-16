@@ -460,7 +460,7 @@ func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 
 	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, 0, store.getCalls, "compaction must not consult the pin store")
+	assert.Equal(t, 1, store.getCalls, "compaction must check for an explicit user-forced pin before the hard-pin fast path")
 
 	select {
 	case <-store.upsertCh:
@@ -1153,6 +1153,8 @@ func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
 	require.NotNil(t, forced, "header must write a user_forced pin upsert")
 	assert.Equal(t, "claude-opus-4-8", forced.Model, "alias 'opus' resolves to the canonical id")
 	assert.Equal(t, providers.ProviderAnthropic, forced.Provider)
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, "claude-opus-4-8", fr.capturedReq.ForceModel, "valid force-model header must bypass router decorators")
 }
 
 // An unrecognized x-weave-force-model value must be ignored, so a typo

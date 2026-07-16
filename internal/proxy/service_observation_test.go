@@ -84,6 +84,14 @@ func (c *captureTelemetry) GetTelemetryRowsAll(context.Context, time.Time, time.
 	return nil, nil
 }
 
+func (c *captureTelemetry) GetTelemetryModelBreakdown(context.Context, string, time.Time, time.Time, string) ([]proxy.TelemetryModelBucket, error) {
+	return nil, nil
+}
+
+func (c *captureTelemetry) GetTelemetryModelBreakdownAll(context.Context, time.Time, time.Time, string) ([]proxy.TelemetryModelBucket, error) {
+	return nil, nil
+}
+
 func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {
 	t.Helper()
 	select {

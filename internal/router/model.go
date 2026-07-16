@@ -102,10 +102,18 @@ var registry = map[string]ModelSpec{
 	"claude-sonnet-4-5": NewSpec(),
 	"claude-sonnet-4-0": NewSpec(),
 
+	"gpt-5.6-sol":   openaiReasoning,
+	"gpt-5.6-terra": openaiReasoning,
+	"gpt-5.6-luna":  openaiReasoning,
+
 	"gpt-5.5":      openaiReasoning,
 	"gpt-5.5-pro":  openaiReasoning,
 	"gpt-5.5-mini": openaiReasoning,
 	"gpt-5.5-nano": openaiReasoning,
+
+	// grok-4.5: reasoning_effort low/medium/high (default high); cannot disable;
+	// rejects stop / presence / frequency penalties (CapReasoning strips stop).
+	"grok-4.5": openaiReasoning,
 
 	"gpt-5.4":      openaiReasoning,
 	"gpt-5.4-pro":  openaiReasoning,

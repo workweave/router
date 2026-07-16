@@ -50,6 +50,24 @@ func New(baseURL string, client *http.Client, timeout time.Duration) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), client: client, timeout: timeout}
 }
 
+// CheckHealth verifies that the policy sidecar is ready to serve traffic.
+func (c *Client) CheckHealth(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/readyz", nil)
+	if err != nil {
+		return fmt.Errorf("build policy readiness request: %w", err)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("call policy readiness endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("policy readiness status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ReportOutcome posts final dispatch usage/status to the policy sidecar.
 func (c *Client) ReportOutcome(ctx context.Context, payload map[string]interface{}) error {
 	return c.post(ctx, "/outcome", payload, "outcome")

@@ -100,6 +100,24 @@ func TestSessionAffinity_OpenAIUsesPromptCacheKeyBody(t *testing.T) {
 	assert.Empty(t, out.Headers.Get("x-session-id"))
 }
 
+func TestSessionAffinity_XAIUsesGrokConvIDHeader(t *testing.T) {
+	env, err := translate.ParseAnthropic(anthropicSrc())
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:     "grok-4.5",
+		TargetProvider:  providers.ProviderXAI,
+		SessionAffinity: affinityKey,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, affinityKey, out.Headers.Get("x-grok-conv-id"))
+	assert.Empty(t, out.Headers.Get("x-session-affinity"))
+	assert.Empty(t, out.Headers.Get("x-session-id"))
+	_, hasBody := promptCacheKey(t, out.Body)
+	assert.False(t, hasBody, "xAI chat/completions must not carry prompt_cache_key")
+}
+
 func TestSessionAffinity_BedrockGetsNoHint(t *testing.T) {
 	env, err := translate.ParseAnthropic(anthropicSrc())
 	require.NoError(t, err)

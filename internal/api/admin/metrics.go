@@ -116,6 +116,61 @@ func MetricsTimeseriesHandler(proxySvc *proxy.Service) gin.HandlerFunc {
 	}
 }
 
+type modelBreakdownBucket struct {
+	Bucket        string  `json:"bucket"`
+	DecisionModel string  `json:"decision_model"`
+	RequestCount  int64   `json:"request_count"`
+	TotalTokens   int64   `json:"total_tokens"`
+	ActualCostUSD float64 `json:"actual_cost_usd"`
+}
+
+type metricsModelBreakdownResponse struct {
+	Buckets []modelBreakdownBucket `json:"buckets"`
+}
+
+// MetricsModelBreakdownHandler serves per-bucket totals grouped by the model
+// the router selected, powering the per-model usage and spend charts.
+func MetricsModelBreakdownHandler(proxySvc *proxy.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		granularity := c.DefaultQuery("granularity", "hour")
+		if granularity != "hour" && granularity != "day" && granularity != "week" {
+			granularity = "hour"
+		}
+		from, to := parseTimeWindow(c)
+
+		allInstallations, installationID, ok := metricsScope(c)
+		if !ok {
+			return
+		}
+
+		var (
+			buckets []proxy.TelemetryModelBucket
+			err     error
+		)
+		if allInstallations {
+			buckets, err = proxySvc.MetricsModelBreakdownAll(c.Request.Context(), from, to, granularity)
+		} else {
+			buckets, err = proxySvc.MetricsModelBreakdown(c.Request.Context(), installationID, from, to, granularity)
+		}
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch model breakdown."})
+			return
+		}
+
+		out := make([]modelBreakdownBucket, 0, len(buckets))
+		for _, b := range buckets {
+			out = append(out, modelBreakdownBucket{
+				Bucket:        b.Bucket.UTC().Format(time.RFC3339),
+				DecisionModel: b.DecisionModel,
+				RequestCount:  b.RequestCount,
+				TotalTokens:   b.TotalTokens,
+				ActualCostUSD: b.ActualCostUSD,
+			})
+		}
+		c.JSON(http.StatusOK, metricsModelBreakdownResponse{Buckets: out})
+	}
+}
+
 type metricsDetailRow struct {
 	Timestamp           string  `json:"timestamp"`
 	RequestID           string  `json:"request_id"`

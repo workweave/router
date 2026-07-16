@@ -20,6 +20,7 @@ var expectedRosterPrefix = map[string]string{
 	providers.ProviderAnthropic: "anthropic/",
 	providers.ProviderOpenAI:    "openai/",
 	providers.ProviderGoogle:    "google/",
+	providers.ProviderXAI:       "x-ai/",
 }
 
 // defaultRosterPrefixProviders are providers intentionally left off

@@ -888,9 +888,18 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		ov.DeleteKeys = append(ov.DeleteKeys, "reasoning_effort")
 	}
 
+	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
+	// CapReasoning models reject stop / presence_penalty / frequency_penalty.
+	if supportsReasoning {
+		for _, key := range []string{"stop", "presence_penalty", "frequency_penalty"} {
+			if gjson.GetBytes(body, key).Exists() {
+				ov.DeleteKeys = append(ov.DeleteKeys, key)
+			}
+		}
+	}
+
 	hasMaxTokens := gjson.GetBytes(body, "max_tokens").Exists()
 	hasMaxComp := gjson.GetBytes(body, "max_completion_tokens").Exists()
-	supportsReasoning := opts.Capabilities.Supports(router.CapReasoning)
 
 	if hasMaxTokens && supportsReasoning {
 		if !hasMaxComp {
@@ -932,6 +941,7 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 // Anthropic adaptive effort levels referenced by emit logic. Every adaptive
 // model accepts low/medium/high/max; xhigh requires router.CapXhighEffort.
 const (
+	effortLow   = "low"
 	effortMax   = "max"
 	effortXhigh = "xhigh"
 )
@@ -944,7 +954,7 @@ func effortForBudget(budgetTokens int64) string {
 	case budgetTokens <= 0:
 		return "medium"
 	case budgetTokens <= 4096:
-		return "low"
+		return effortLow
 	case budgetTokens <= 16384:
 		return "medium"
 	default:
@@ -973,6 +983,18 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 			} else if opts.Capabilities.Supports(router.CapAdaptiveThinking) {
 				ov.RewriteThinkingAdaptive = true
 				ov.OutputConfigEffort = effortForBudget(thinkingResult.Get("budget_tokens").Int())
+			} else {
+				shouldDelete = true
+			}
+		case "disabled":
+			if opts.Capabilities.Supports(router.CapExtendedThinking) {
+				// Legacy extended-thinking models accept thinking.type=disabled.
+			} else if opts.Capabilities.Supports(router.CapAdaptiveThinking) {
+				// Adaptive models are always-on and 400 on thinking.type=disabled
+				// (e.g. claude-fable-5); map the "no thinking" intent to the
+				// lowest adaptive effort instead of forwarding the rejected shape.
+				ov.RewriteThinkingAdaptive = true
+				ov.OutputConfigEffort = effortLow
 			} else {
 				shouldDelete = true
 			}
@@ -1045,7 +1067,9 @@ var modelMaxOutputTokens = map[string]int{
 	"gpt-5.4-mini": 128000, "gpt-5.4-nano": 128000,
 	"gpt-5.5": 128000, "gpt-5.5-pro": 128000, "gpt-5.5-mini": 128000,
 	"gpt-5.5-nano": 128000,
-	"o1":           100000, "o1-pro": 100000, "o1-mini": 65536,
+	"gpt-5.6-sol":  128000, "gpt-5.6-terra": 128000, "gpt-5.6-luna": 128000,
+	"grok-4.5": 131072,
+	"o1":       100000, "o1-pro": 100000, "o1-mini": 65536,
 	"o3": 100000, "o3-pro": 100000, "o3-mini": 100000,
 	"o4-mini":              100000,
 	"gemini-3-pro-preview": 65536, "gemini-3.1-pro-preview": 65536,

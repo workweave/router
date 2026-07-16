@@ -32,6 +32,8 @@ const (
 	// and is fastest on artificialanalysis.ai for several routed models; pair
 	// with NewClientWithModelIDMap to rewrite slugs to Together's "Org/Model" IDs.
 	TogetherBaseURL = "https://api.together.xyz/v1"
+	// XAIBaseURL is SpaceXAI's OpenAI-compatible Chat Completions surface.
+	XAIBaseURL = "https://api.x.ai/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint

@@ -142,14 +142,14 @@ func metricGRPCOpts(endpoint string, insecure bool) []otlpmetricgrpc.Option {
 }
 
 // Middleware wraps each request in an HTTP server span tagged with
-// method/route/status, excluding /health and /validate (infra polling would
+// method/route/status, excluding health probes and /validate (infra polling would
 // swamp trace volume). No-op when Init was never called.
 func Middleware() gin.HandlerFunc {
 	return otelgin.Middleware(
 		serviceName,
 		otelgin.WithGinFilter(func(c *gin.Context) bool {
 			path := c.FullPath()
-			return path != "/health" && path != "/validate"
+			return path != "/health" && path != "/readyz" && path != "/validate"
 		}),
 	)
 }

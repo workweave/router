@@ -97,6 +97,41 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 	return codex, anthropic
 }
 
+// subscriptionServableProviders returns the providers the caller's own
+// subscription can serve inference on: OpenAI for a Codex (ChatGPT) sub,
+// Anthropic for a Claude sub. Empty when the caller presents no usable sub.
+func subscriptionServableProviders(ctx context.Context, headers http.Header) map[string]struct{} {
+	codex, anthropic := presentSubscriptionTokens(ctx, headers)
+	out := make(map[string]struct{}, 2)
+	if codex != "" {
+		out[providers.ProviderOpenAI] = struct{}{}
+	}
+	if anthropic != "" {
+		out[providers.ProviderAnthropic] = struct{}{}
+	}
+	return out
+}
+
+// restrictToSubscriptionProviders intersects enabled with the providers the
+// caller's subscription can serve, so subscription-only mode (balance past the
+// overdraft floor) routes only to the caller's own plan and never a paid model.
+// Returns enabled unchanged when the caller presents no usable subscription
+// (defensive: the balance gate only flags subscription-only when a covering sub
+// is present, so this keeps a misconfiguration from emptying the eligible set).
+func restrictToSubscriptionProviders(ctx context.Context, headers http.Header, enabled map[string]struct{}) map[string]struct{} {
+	sub := subscriptionServableProviders(ctx, headers)
+	if len(sub) == 0 {
+		return enabled
+	}
+	out := make(map[string]struct{}, len(sub))
+	for p := range enabled {
+		if _, ok := sub[p]; ok {
+			out[p] = struct{}{}
+		}
+	}
+	return out
+}
+
 // RequestPresentsCoveringSubscription reports whether the request carries a
 // validated subscription credential capable of serving inference on routePath:
 // a Claude (sk-ant-oat…) sub for /v1/messages, a Codex sub for /v1/chat/completions

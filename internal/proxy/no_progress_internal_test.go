@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"context"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -18,6 +20,33 @@ func sessionKeyFromString(s string) [sessionpin.SessionKeyLen]byte {
 	var k [sessionpin.SessionKeyLen]byte
 	copy(k[:], []byte(s))
 	return k
+}
+
+func TestHandleNoProgressBreak_PreservesUserForcedPin(t *testing.T) {
+	key := sessionKeyFromString("forced-session")
+	store := &overwritingPinStore{
+		pin: sessionpin.Pin{
+			Provider:    "anthropic",
+			Model:       "claude-opus-4-8",
+			Reason:      translate.ReasonUserForceModel,
+			PinnedUntil: time.Now().Add(time.Hour),
+		},
+		found: true,
+	}
+	svc := &Service{pinStore: store}
+	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"retry"}]}`))
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+
+	err = svc.handleNoProgressBreak(
+		context.Background(), rec, env, noProgressMatchThreshold, uuid.New(), key,
+		"default_high", "claude-opus-4-8", "anthropic", 10,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, translate.ReasonUserForceModel, store.pin.Reason,
+		"automatic no-progress recovery must not clear an explicit force-model pin")
+	assert.Contains(t, rec.Body.String(), "preserving the explicit force-model pin")
 }
 
 func TestComputeNoProgressFingerprint_StableAcrossCalls(t *testing.T) {

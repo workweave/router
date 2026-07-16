@@ -36,6 +36,8 @@ func rosterIDFor(m catalog.Model) string {
 		return "openai/" + m.ID
 	case providers.ProviderGoogle:
 		return "google/" + m.ID
+	case providers.ProviderXAI:
+		return "x-ai/" + m.ID
 	}
 	return m.ID
 }

@@ -77,6 +77,24 @@ func TestRoute_NoExplorationWhenBandWidthZero(t *testing.T) {
 	}
 }
 
+func TestRoute_ForceModelBypassesExploration(t *testing.T) {
+	scores := map[string]float32{"haiku": 0.9, "opus": 0.89}
+	inner := clusterDecision(scores, "haiku", "anthropic")
+	e := New(&fakeRouter{dec: inner}, staticProvider(map[string]string{"opus": "anthropic"}), 0.1)
+	withIntn(e, 1) // would select opus without the forced-model bypass
+
+	dec, err := e.Route(context.Background(), router.Request{ForceModel: "claude-opus-4-8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "haiku" {
+		t.Fatalf("forced model must bypass exploration; got model %q", dec.Model)
+	}
+	if dec.Metadata.Propensity != 1.0 {
+		t.Fatalf("forced model must preserve deterministic propensity, got %v", dec.Metadata.Propensity)
+	}
+}
+
 func TestRoute_NilMetadataPassesThrough(t *testing.T) {
 	inner := router.Decision{Provider: "anthropic", Model: "haiku", Reason: "pin"}
 	e := New(&fakeRouter{dec: inner}, staticProvider(nil), 0.1)

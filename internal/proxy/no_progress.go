@@ -242,10 +242,11 @@ func shortSessionKey(sessionKey [sessionpin.SessionKeyLen]byte) string {
 	return fmt.Sprintf("%x", sessionKey[:8])
 }
 
-// handleNoProgressBreak writes a synthetic end_turn response, expires the
-// session pin, and returns a non-nil error so callers treat it as a failed
-// dispatch (skips billing/telemetry). Mirrors handleToolCallLoopBreak's
-// mechanics but with a message that names the cross-envelope loop mode.
+// handleNoProgressBreak writes a synthetic end_turn response, expires an
+// automatic session pin, and returns a non-nil error so callers treat it as a
+// failed dispatch (skips billing/telemetry). Explicit force-model pins remain
+// intact. Mirrors handleToolCallLoopBreak's mechanics but with a message that
+// names the cross-envelope loop mode.
 func (s *Service) handleNoProgressBreak(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -259,15 +260,24 @@ func (s *Service) handleNoProgressBreak(
 	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
+	preserveForcedPin := false
+	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
+		pin, found := s.loadPin(ctx, sessionKey, role)
+		preserveForcedPin = found && isUserForcedReason(pin.Reason)
+	}
+	pinAction := "clearing the session pin so the next message re-routes"
+	if preserveForcedPin {
+		pinAction = "preserving the explicit force-model pin for the next message"
+	}
 
 	msg := fmt.Sprintf(
-		"✦ **Weave Router** → No-progress loop detected: %d consecutive requests under this session routed to `%s` (`%s`) with no observable progress in %s. Stopping this turn and clearing the session pin so the next message re-routes.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",
-		count, decisionModel, decisionProvider, noProgressTimeWindow,
+		"✦ **Weave Router** → No-progress loop detected: %d consecutive requests under this session routed to `%s` (`%s`) with no observable progress in %s. Stopping this turn and %s.\n\nIf the task is genuinely incomplete, send a follow-up message describing what's still needed; the router will pick a different model.\n\n",
+		count, decisionModel, decisionProvider, noProgressTimeWindow, pinAction,
 	)
 	if env.SourceFormat() == translate.FormatOpenAI {
 		msg = fmt.Sprintf(
-			"Weave Router: no-progress loop detected (%d consecutive routes to %s/%s with no progress in %s). Stopping and clearing the session pin.",
-			count, decisionModel, decisionProvider, noProgressTimeWindow,
+			"Weave Router: no-progress loop detected (%d consecutive routes to %s/%s with no progress in %s). Stopping and %s.",
+			count, decisionModel, decisionProvider, noProgressTimeWindow, pinAction,
 		)
 	}
 
@@ -283,7 +293,7 @@ func (s *Service) handleNoProgressBreak(
 
 	// Skip when sessionKey is zero: a zero-keyed pin row would be a zombie
 	// entry shared by every zero-keyed session.
-	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
+	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) && !preserveForcedPin {
 		if err := s.expireSessionPinAndHMMHistory(ctx, installationID, sessionKey, role, "no_progress_loop_break"); err != nil {
 			log.Error("no-progress-break: pin store upsert failed", "err", err)
 		}

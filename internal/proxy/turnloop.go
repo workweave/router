@@ -171,6 +171,24 @@ func (s *Service) isHardPinnedTurn(ctx context.Context, tt turntype.TurnType) bo
 	}
 }
 
+func isUserForcedReason(reason string) bool {
+	return strings.HasPrefix(reason, translate.ReasonUserForceModel)
+}
+
+func forcedPinEligible(pin sessionpin.Pin, req router.Request) bool {
+	if pin.Model == "" || pin.Provider == "" {
+		return false
+	}
+	if _, excluded := req.ExcludedModels[pin.Model]; excluded {
+		return false
+	}
+	if req.EnabledProviders == nil {
+		return true
+	}
+	_, ok := req.EnabledProviders[pin.Provider]
+	return ok
+}
+
 // runTurnLoop is the format-agnostic routing orchestrator: detect turn type,
 // short-circuit hard pins, load pin, run scorer, hand to planner, and on
 // switch attempt bounded-cost handover.
@@ -210,33 +228,33 @@ func (s *Service) runTurnLoop(
 	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
-	// Strict pass-through runs before any pin or scorer so a stale route can't
-	// substitute the caller's subscription-covered model.
-	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-		res.Decision = dec
-		res.UsageBypass = true
-		sessionKey := DeriveSessionKey(env, apiKeyID)
-		res.PrefixTrimmed = s.compaction.checkAndRecord(
-			sessionKey, installationID, res.PinRole,
-			feats.MessageCount, len(env.AssistantToolCallSignatures()),
-		)
-		// Load switch history so Anthropic emission can strip stale signed
-		// thinking blocks from sessions that previously changed models.
-		if s.pinStore != nil {
-			res.SessionKey = sessionKey
-			pin, _ := s.loadPin(ctx, res.SessionKey, res.PinRole)
-			hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
-			res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
+	// Explicit user-forced pins outrank every automatic fast path, including
+	// the turn-type hard pin; only check here so ordinary turns use the normal flow.
+	threadSessionKey := DeriveSessionKey(env, apiKeyID)
+	hardPinnedTurn := s.isHardPinnedTurn(ctx, res.TurnType)
+	if s.pinStore != nil && hardPinnedTurn {
+		if forcedPin, found := s.loadPin(ctx, threadSessionKey, res.PinRole); found &&
+			isUserForcedReason(forcedPin.Reason) && forcedPinEligible(forcedPin, req) {
+			res.SessionKey = threadSessionKey
+			res.PinModel = forcedPin.Model
+			res.PinAgeSec = pinAge(forcedPin)
+			res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(forcedPin, sessionpin.Pin{})
+			res.EscalateEffort = !forcedPin.LastTurnEndedAt.IsZero() &&
+				(forcedPin.LastOutputTokens == 0 || forcedPin.ConsecutiveUpstreamErrors > 0)
+			res.Decision = pinDecision(forcedPin)
+			res.StickyHit = true
+			res.PinTier = forcedPin.Reason
+			s.refreshPin(ctx, installationID, res.SessionKey, forcedPin, res.PinRole, res.Decision)
+			return res, nil
 		}
-		return res, nil
 	}
 
-	// Hard pins bypass pin lookup/write, planner, and scorer entirely. Probes
-	// and title-gen must never create a session pin: the Anthropic SDK fires
+	// Automatic hard pins bypass pin lookup/write, planner, and scorer entirely.
+	// Probes and title-gen must never create a session pin: the Anthropic SDK fires
 	// probes before the first real turn, and Claude Code fires title-gen
 	// ~25ms before the real-conv call — an anchored pin would leak the
 	// cheap-model decision into the conversation that follows.
-	if s.isHardPinnedTurn(ctx, res.TurnType) {
+	if hardPinnedTurn {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// The boot-time hard-pin was computed over every registered provider,
 		// but a BYOK request may only authenticate to a subset. Resolve
@@ -279,7 +297,7 @@ func (s *Service) runTurnLoop(
 
 	// res.SessionKey must stay zero in no-pin-store mode, but trim detection
 	// needs the key either way.
-	sessionKey := DeriveSessionKey(env, apiKeyID)
+	sessionKey := threadSessionKey
 
 	// Runs before routing so the planner can price the pin's cache as dead on
 	// the turn the client rewrote the prompt prefix; env isn't rewritten yet
@@ -298,8 +316,14 @@ func (s *Service) runTurnLoop(
 		)
 	}
 
-	// Without a pin store, run the scorer and return its decision.
+	// Without a pin store, run the scorer and return its decision. The usage
+	// bypass intercepts the fresh scorer decision here too (no pins to honor).
 	if s.pinStore == nil {
+		if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+			res.Decision = dec
+			res.UsageBypass = true
+			return res, nil
+		}
 		decision, err := s.routeFor(ctx, req)
 		if err != nil {
 			return res, err
@@ -346,7 +370,7 @@ func (s *Service) runTurnLoop(
 	// the scorer call further down constrains the fresh decision to this tier
 	// instead of collapsing to the cheap tier-default. TierUnknown = no constraint.
 	forcedTierFloor := catalog.TierUnknown
-	if pinFound && (pin.Reason == translate.ReasonUserForceModel || pin.Reason == translate.ReasonLoopEscalation) {
+	if pinFound && (isUserForcedReason(pin.Reason) || pin.Reason == translate.ReasonLoopEscalation) {
 		_, excluded := req.ExcludedModels[pin.Model]
 		_, providerEnabled := req.EnabledProviders[pin.Provider]
 		providerEligible := req.EnabledProviders == nil || providerEnabled
@@ -498,6 +522,18 @@ func (s *Service) runTurnLoop(
 		)
 		pinFound = false
 		pin = sessionpin.Pin{}
+	}
+
+	// Positioned after hard-pin/forced-pin (higher precedence) and after all
+	// pin-drop guards (context overflow, provider disabled, images, maxed-out),
+	// but before the tool-result/planner-disabled stickies and scorer, so a
+	// stale pin from a prior routed stretch can't make a tool_result
+	// continuation diverge from the bypassed tool_use turn. The pin itself is
+	// untouched and resumes once utilization crosses the threshold.
+	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+		res.Decision = dec
+		res.UsageBypass = true
+		return res, nil
 	}
 
 	// Tool-result turns: by default, fall through to the scorer + planner for

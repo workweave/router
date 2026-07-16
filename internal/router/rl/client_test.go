@@ -60,6 +60,33 @@ func TestHTTPDeciderPostsContractAndParsesResult(t *testing.T) {
 	assert.Equal(t, "implementing a fix", res.StateLabel)
 }
 
+func TestHTTPDeciderAttachesStaticHeaders(t *testing.T) {
+	var gotKey, gotSecret string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("Modal-Key")
+		gotSecret = r.Header.Get("Modal-Secret")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "anthropic/claude-opus-4-8",
+			"score": 1.0,
+		})
+	}))
+	defer server.Close()
+
+	d := rl.NewHTTPDeciderWithHeaders(server.URL, nil, 0, map[string]string{
+		"Modal-Key":    "mk_test",
+		"Modal-Secret": "ms_test",
+	})
+	_, err := d.Decide(context.Background(), rl.Query{
+		PromptText: "x",
+		Candidates: []rl.Candidate{
+			{RosterID: "anthropic/claude-opus-4-8", Provider: providers.ProviderAnthropic},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "mk_test", gotKey)
+	assert.Equal(t, "ms_test", gotSecret)
+}
+
 func TestHTTPDeciderSurfacesSidecarError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

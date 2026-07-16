@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"workweave/router/internal/api/admin"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
@@ -253,6 +254,15 @@ func main() {
 			providers.ProviderTogether, "Together", "TOGETHER_API_KEY", togetherBaseURL, byokOnly,
 			func(key, baseURL string) providers.Client {
 				return openaiCompatProvider.NewClientWithModelIDMap(key, baseURL, upstreamIDsForProvider(providers.ProviderTogether))
+			})
+	}
+
+	{
+		xaiBaseURL := config.GetOr("XAI_BASE_URL", openaiCompatProvider.XAIBaseURL)
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderXAI, "XAI", "XAI_API_KEY", xaiBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClient(key, baseURL)
 			})
 	}
 
@@ -563,8 +573,19 @@ func main() {
 	var rlRouter router.Router
 	if rlSidecarURL := config.GetOr("ROUTER_RL_SIDECAR_URL", ""); rlSidecarURL != "" {
 		rlTimeout := parseEnvDurationMs("ROUTER_RL_SIDECAR_TIMEOUT_MS", rl.DefaultTimeout)
-		rlRouter = rl.New(rl.NewHTTPDecider(rlSidecarURL, nil, rlTimeout), availableModels, availableProviders)
-		logger.Info("RL policy router wired", "sidecar_url", rlSidecarURL, "timeout_ms", rlTimeout.Milliseconds(), "candidate_models", len(availableModels))
+		rlHeaders := rlSidecarHeadersFromEnv()
+		rlRouter = rl.New(
+			rl.NewHTTPDeciderWithHeaders(rlSidecarURL, nil, rlTimeout, rlHeaders),
+			availableModels,
+			availableProviders,
+		)
+		logger.Info(
+			"RL policy router wired",
+			"sidecar_url", rlSidecarURL,
+			"timeout_ms", rlTimeout.Milliseconds(),
+			"candidate_models", len(availableModels),
+			"modal_proxy_auth", len(rlHeaders) > 0,
+		)
 	} else {
 		logger.Info("RL policy router disabled (ROUTER_RL_SIDECAR_URL unset); x-weave-router-strategy: rl will return 503")
 	}
@@ -573,6 +594,7 @@ func main() {
 	// hmm then routes through it. Unset fails closed with 503.
 	var hmmRouter router.Router
 	var hmmCapabilities policy.Capabilities
+	var hmmReadinessChecker admin.HealthChecker
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
 		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
 		hmmAuthMode := config.GetOr("ROUTER_HMM_SIDECAR_AUTH", policySidecarAuthNone)
@@ -581,6 +603,7 @@ func main() {
 			logger.Error("HMM policy sidecar client failed to build; refusing to boot", "auth_mode", hmmAuthMode, "err", clientErr)
 			panic(clientErr)
 		}
+		hmmReadinessChecker = hmmClient
 		capabilityCtx, cancelCapabilityDiscovery := context.WithTimeout(context.Background(), hmmTimeout)
 		var capabilityErr error
 		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)
@@ -794,7 +817,7 @@ func main() {
 	// Lets the admin model-selection handler surface deployed models; nil
 	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, hmmReadinessChecker)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),
@@ -1167,6 +1190,37 @@ func boolDefault(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// rlSidecarHeadersFromEnv builds auth headers for the RL sidecar when both
+// ROUTER_RL_SIDECAR_MODAL_KEY and ROUTER_RL_SIDECAR_MODAL_SECRET are set.
+//
+// Sends X-Weave-Band-Key / X-Weave-Band-Secret (and Authorization Bearer) for
+// the Modal tip_k3 band serve — Modal's edge strips Modal-Key/Modal-Secret
+// before they reach ASGI when requires_proxy_auth is false. Also still sends
+// Modal-Key/Modal-Secret for true Modal proxy-auth endpoints.
+func rlSidecarHeadersFromEnv() map[string]string {
+	key := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_KEY", ""))
+	secret := strings.TrimSpace(config.GetOr("ROUTER_RL_SIDECAR_MODAL_SECRET", ""))
+	if key == "" && secret == "" {
+		return nil
+	}
+	if key == "" || secret == "" {
+		observability.Get().Error(
+			"Partial Modal RL sidecar proxy auth config; omitting headers",
+			"has_key", key != "",
+			"has_secret", secret != "",
+			"hint", "set both ROUTER_RL_SIDECAR_MODAL_KEY and ROUTER_RL_SIDECAR_MODAL_SECRET",
+		)
+		return nil
+	}
+	return map[string]string{
+		"X-Weave-Band-Key":    key,
+		"X-Weave-Band-Secret": secret,
+		"Authorization":       "Bearer " + key + ":" + secret,
+		"Modal-Key":           key,
+		"Modal-Secret":        secret,
+	}
 }
 
 // parseEnvDurationMs reads an env var as a millisecond integer and returns

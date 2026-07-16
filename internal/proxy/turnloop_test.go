@@ -1071,3 +1071,9 @@ func (recordingTelemetry) GetTelemetryRows(ctx context.Context, installationID s
 func (recordingTelemetry) GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]proxy.TelemetryRow, error) {
 	return nil, nil
 }
+func (recordingTelemetry) GetTelemetryModelBreakdown(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]proxy.TelemetryModelBucket, error) {
+	return nil, nil
+}
+func (recordingTelemetry) GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]proxy.TelemetryModelBucket, error) {
+	return nil, nil
+}

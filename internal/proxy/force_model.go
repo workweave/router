@@ -27,33 +27,46 @@ import (
 const ForceModelHeader = "x-weave-force-model"
 
 var forceModelAliases = map[string]string{
-	"anthropic":      "claude-opus-4-8",
-	"claude":         "claude-opus-4-8",
-	"opus":           "claude-opus-4-8",
-	"claude-opus":    "claude-opus-4-8",
-	"opus-4-8":       "claude-opus-4-8",
-	"opus-4.8":       "claude-opus-4-8",
-	"claude-4-8":     "claude-opus-4-8",
-	"claude-4.8":     "claude-opus-4-8",
-	"fable":          "claude-fable-5",
-	"fable-5":        "claude-fable-5",
-	"fable5":         "claude-fable-5",
-	"claude-fable":   "claude-fable-5",
-	"sonnet":         "claude-sonnet-5",
-	"claude-sonnet":  "claude-sonnet-5",
-	"sonnet-5":       "claude-sonnet-5",
-	"sonnet-4-6":     "claude-sonnet-4-6",
-	"sonnet-4.6":     "claude-sonnet-4-6",
-	"haiku":          "claude-haiku-4-5",
-	"claude-haiku":   "claude-haiku-4-5",
-	"haiku-4-5":      "claude-haiku-4-5",
-	"haiku-4.5":      "claude-haiku-4-5",
-	"gpt":            "gpt-5.5",
-	"openai":         "gpt-5.5",
+	"anthropic":     "claude-opus-4-8",
+	"claude":        "claude-opus-4-8",
+	"opus":          "claude-opus-4-8",
+	"claude-opus":   "claude-opus-4-8",
+	"opus-4-8":      "claude-opus-4-8",
+	"opus-4.8":      "claude-opus-4-8",
+	"claude-4-8":    "claude-opus-4-8",
+	"claude-4.8":    "claude-opus-4-8",
+	"fable":         "claude-fable-5",
+	"fable-5":       "claude-fable-5",
+	"fable5":        "claude-fable-5",
+	"claude-fable":  "claude-fable-5",
+	"sonnet":        "claude-sonnet-5",
+	"claude-sonnet": "claude-sonnet-5",
+	"sonnet-5":      "claude-sonnet-5",
+	"sonnet-4-6":    "claude-sonnet-4-6",
+	"sonnet-4.6":    "claude-sonnet-4-6",
+	"haiku":         "claude-haiku-4-5",
+	"claude-haiku":  "claude-haiku-4-5",
+	"haiku-4-5":     "claude-haiku-4-5",
+	"haiku-4.5":     "claude-haiku-4-5",
+	"gpt":           "gpt-5.5",
+	"openai":        "gpt-5.5",
+	// The bare gpt-5.6 alias routes to Sol, matching OpenAI's own alias.
+	"gpt-5.6":        "gpt-5.6-sol",
+	"gpt-5-6":        "gpt-5.6-sol",
+	"sol":            "gpt-5.6-sol",
+	"gpt-5-6-sol":    "gpt-5.6-sol",
+	"terra":          "gpt-5.6-terra",
+	"gpt-5-6-terra":  "gpt-5.6-terra",
+	"luna":           "gpt-5.6-luna",
+	"gpt-5-6-luna":   "gpt-5.6-luna",
 	"gpt-5-5":        "gpt-5.5",
 	"gpt-5-5-pro":    "gpt-5.5-pro",
 	"gpt-5-5-mini":   "gpt-5.5-mini",
 	"gpt-5-5-nano":   "gpt-5.5-nano",
+	"grok":           "grok-4.5",
+	"grok-4.5":       "grok-4.5",
+	"grok4.5":        "grok-4.5",
+	"xai":            "grok-4.5",
 	"gpt-5-4":        "gpt-5.4",
 	"gpt-5-4-pro":    "gpt-5.4-pro",
 	"gpt-5-4-mini":   "gpt-5.4-mini",
@@ -183,13 +196,10 @@ func (s *Service) applyForceModelHeader(
 	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
-) {
-	if s.pinStore == nil {
-		return
-	}
+) string {
 	raw := strings.TrimSpace(r.Header.Get(ForceModelHeader))
 	if raw == "" {
-		return
+		return ""
 	}
 	log := observability.FromContext(ctx)
 	canonicalModel, provider, known := resolveForceModel(raw)
@@ -198,12 +208,15 @@ func (s *Service) applyForceModelHeader(
 			"input_model", raw,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		)
-		return
+		return ""
+	}
+	if s.pinStore == nil {
+		return canonicalModel
 	}
 	role := roleForTier(catalog.TierFor(env.Model()))
 	if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
 		log.Error("x-weave-force-model: pin store upsert failed", "err", err)
-		return
+		return canonicalModel
 	}
 	log.Info("x-weave-force-model applied",
 		"input_model", raw,
@@ -212,6 +225,7 @@ func (s *Service) applyForceModelHeader(
 		"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		"role", role,
 	)
+	return canonicalModel
 }
 
 // handleForceModelCommand processes a /force-model or /unforce-model directive:

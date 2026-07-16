@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	healthTimeout   = 1 * time.Second
-	validateTimeout = 1 * time.Second
+	healthTimeout    = 1 * time.Second
+	readinessTimeout = 2 * time.Second
+	validateTimeout  = 1 * time.Second
 
 	messagesTimeout       = 600 * time.Second
 	chatCompletionTimeout = 600 * time.Second
@@ -57,12 +58,15 @@ const (
 // billingSvc is set only in managed mode when credit-billing is enabled; it
 // gates every inference route on prepaid balance via WithBalanceCheck. nil
 // leaves inference routes open (BYOK/platform key still controls upstream auth).
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service) {
+//
+// readinessChecker gates /readyz only; /health remains process liveness.
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
 
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
+	engine.GET("/readyz", middleware.WithTimeout(readinessTimeout), admin.ReadinessHandler(readinessChecker))
 
 	// /v1/version reports the binary's git commit + build time (via -ldflags),
 	// used by the README's managed-deployment badge. Public build metadata, unauthed like /health.
@@ -117,6 +121,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		metrics.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		metrics.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
 		metrics.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
+		metrics.GET("/metrics/model-breakdown", admin.MetricsModelBreakdownHandler(proxySvc))
 
 		// Mutations: admin cookie REQUIRED. rk_ tokens are rejected so a leaked data-plane key can't mint fresh router keys or rotate provider credentials.
 		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOnly(authSvc))
@@ -187,7 +192,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	)
 	passthroughGroup.POST("/v1/messages/count_tokens", anthropicapi.PassthroughHandler(proxySvc))
-	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
+	passthroughGroup.GET("/v1/models", openaiapi.ModelsHandler(anthropicapi.PassthroughHandler(proxySvc)))
 	passthroughGroup.GET("/v1/models/:model", anthropicapi.PassthroughHandler(proxySvc))
 
 	routeMiddleware := []gin.HandlerFunc{

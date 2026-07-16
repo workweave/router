@@ -181,6 +181,7 @@ func TestCurrentHMMRosterCatalogArmsResolveToCurrentProviders(t *testing.T) {
 		providers.ProviderBedrock:    {},
 		providers.ProviderMakora:     {},
 		providers.ProviderTogether:   {},
+		providers.ProviderXAI:        {},
 	}
 	r := New(&fakeDecider{}, deployed, available)
 

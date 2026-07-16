@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -176,6 +177,17 @@ type failoverInputs struct {
 func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (winnerIdx int, err error) {
 	log := observability.FromContext(ctx)
 	if len(in.bindings) == 0 {
+		if in.initialDecision.Reason == translate.ReasonUserForceModel {
+			err := &providers.UpstreamErrorResponse{
+				Status: http.StatusServiceUnavailable,
+				Body: []byte(fmt.Sprintf(`{"error":{"message":%q,"type":"api_error"}}`,
+					fmt.Sprintf("forced model %s unavailable: provider %s not configured", in.initialDecision.Model, in.initialDecision.Provider))),
+			}
+			if in.flushErr != nil && !in.deferFlushOnExhaustion {
+				in.flushErr(in.w, err)
+			}
+			return -1, err
+		}
 		return -1, &providers.UpstreamStatusError{Status: http.StatusBadGateway}
 	}
 
@@ -381,6 +393,11 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 			// bug upstream) — return nil so dispatch 502s instead of
 			// dispatching to the forbidden provider.
 			return nil
+		}
+		if decision.Reason == translate.ReasonUserForceModel {
+			if _, known := catalog.ByID(decision.Model); known {
+				return nil
+			}
 		}
 		return []catalog.ProviderBinding{primary}
 	}

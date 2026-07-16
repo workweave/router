@@ -18,6 +18,7 @@ const (
 	mechanismGenericHeader sessionAffinityMechanism = iota // x-session-affinity
 	mechanismSessionIDHeader
 	mechanismPromptCacheKeyBody
+	mechanismGrokConvIDHeader // x-grok-conv-id
 	mechanismNone
 )
 
@@ -34,6 +35,7 @@ const (
 var expectedSessionAffinityMechanism = map[string]sessionAffinityMechanism{
 	providers.ProviderOpenRouter: mechanismSessionIDHeader,
 	providers.ProviderOpenAI:     mechanismPromptCacheKeyBody,
+	providers.ProviderXAI:        mechanismGrokConvIDHeader,
 	providers.ProviderBedrock:    mechanismNone,
 }
 
@@ -102,24 +104,34 @@ func TestSessionAffinityMechanismMatchesActualBehavior(t *testing.T) {
 
 			gotSessionID := out.Headers.Get("x-session-id")
 			gotGenericHeader := out.Headers.Get("x-session-affinity")
+			gotGrokConvID := out.Headers.Get("x-grok-conv-id")
 			_, gotBody := promptCacheKey(t, out.Body)
 
 			switch mechanism {
 			case mechanismSessionIDHeader:
 				assert.Equal(t, affinityKey, gotSessionID)
 				assert.Empty(t, gotGenericHeader)
+				assert.Empty(t, gotGrokConvID)
 				assert.False(t, gotBody)
 			case mechanismPromptCacheKeyBody:
 				assert.Empty(t, gotSessionID)
 				assert.Empty(t, gotGenericHeader)
+				assert.Empty(t, gotGrokConvID)
 				assert.True(t, gotBody)
+			case mechanismGrokConvIDHeader:
+				assert.Empty(t, gotSessionID)
+				assert.Empty(t, gotGenericHeader)
+				assert.Equal(t, affinityKey, gotGrokConvID)
+				assert.False(t, gotBody)
 			case mechanismNone:
 				assert.Empty(t, gotSessionID)
 				assert.Empty(t, gotGenericHeader)
+				assert.Empty(t, gotGrokConvID)
 				assert.False(t, gotBody)
 			case mechanismGenericHeader:
 				assert.Empty(t, gotSessionID)
 				assert.Equal(t, affinityKey, gotGenericHeader)
+				assert.Empty(t, gotGrokConvID)
 				assert.False(t, gotBody)
 			}
 		})

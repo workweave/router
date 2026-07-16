@@ -150,6 +150,38 @@ func TestOpenAISameFormat_ReasoningEffortKeptForReasoning(t *testing.T) {
 	assert.Equal(t, "high", out["reasoning_effort"])
 }
 
+func TestOpenAISameFormat_ReasoningStripsUnsupportedSampling(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"messages":[{"role":"user","content":"hi"}],
+		"stop":["END"],
+		"presence_penalty":0.5,
+		"frequency_penalty":0.3
+	}`)
+	for _, model := range []string{"gpt-5.5", "grok-4.5"} {
+		t.Run(model, func(t *testing.T) {
+			opts := translate.EmitOptions{
+				TargetModel:  model,
+				Capabilities: router.Lookup(model),
+			}
+			out := parseAndEmit(t, body, "openai", opts)
+			assert.NotContains(t, out, "stop")
+			assert.NotContains(t, out, "presence_penalty")
+			assert.NotContains(t, out, "frequency_penalty")
+		})
+	}
+}
+
+func TestOpenAISameFormat_GrokMaxCompletionTokensCap(t *testing.T) {
+	body := []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":999999}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "grok-4.5",
+		Capabilities: router.Lookup("grok-4.5"),
+	}
+	out := parseAndEmit(t, body, "openai", opts)
+	assert.Equal(t, float64(131072), out["max_completion_tokens"])
+}
+
 func TestOpenAISameFormat_StreamUsageInjected(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	opts := translate.EmitOptions{
@@ -448,6 +480,53 @@ func TestAnthropicSameFormat_EnabledThinkingUpconvertedToAdaptive(t *testing.T) 
 			assert.Equal(t, tc.wantEffort, outputConfig["effort"])
 		})
 	}
+}
+
+// Claude Code auxiliary/workflow turns send thinking.type=disabled. Adaptive
+// models are always-on and 400 on that shape ("thinking.type.disabled is not
+// supported for this model"), so the router must upconvert to type=adaptive at
+// the lowest effort instead of forwarding the rejected block (prod: remilabs
+// cloud workflows, org_9nmHnsAsK0I74XbWM4UgvZD0).
+func TestAnthropicSameFormat_DisabledThinkingUpconvertedForAdaptiveModel(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"disabled"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-fable-5",
+		Capabilities: router.Lookup("claude-fable-5"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	thinking, _ := out["thinking"].(map[string]any)
+	require.NotNil(t, thinking, "thinking should remain on the body")
+	assert.Equal(t, "adaptive", thinking["type"], "disabled must be upconverted to adaptive for always-on models")
+	outputConfig, _ := out["output_config"].(map[string]any)
+	require.NotNil(t, outputConfig, "output_config.effort is required when adaptive thinking is set")
+	assert.Equal(t, "low", outputConfig["effort"], "disabled maps to the lowest adaptive effort")
+}
+
+// Legacy extended-thinking models (claude-haiku-4-5) accept thinking.type=disabled
+// natively, so it must pass through untouched.
+func TestAnthropicSameFormat_DisabledThinkingKeptForExtendedModel(t *testing.T) {
+	body := []byte(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"disabled"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-haiku-4-5",
+		Capabilities: router.Lookup("claude-haiku-4-5"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	thinking, _ := out["thinking"].(map[string]any)
+	require.NotNil(t, thinking, "disabled thinking must be preserved for extended-thinking models")
+	assert.Equal(t, "disabled", thinking["type"])
+	assert.NotContains(t, out, "output_config")
+}
+
+// A non-thinking model has neither capability, so a disabled thinking block is
+// dropped entirely.
+func TestAnthropicSameFormat_DisabledThinkingStrippedForNonThinkingModel(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":1024,"thinking":{"type":"disabled"}}`)
+	opts := translate.EmitOptions{
+		TargetModel:  "claude-3-haiku-20240307",
+		Capabilities: router.Lookup("claude-3-haiku-20240307"),
+	}
+	out := parseAndEmit(t, body, "anthropic", opts)
+	assert.NotContains(t, out, "thinking")
 }
 
 // An explicit output_config.effort wins over the budget-derived default.

@@ -54,6 +54,7 @@ const (
 	ProviderBedrock    = "bedrock"
 	ProviderMakora     = "makora"
 	ProviderTogether   = "together"
+	ProviderXAI        = "xai"
 )
 
 // TranslationFamily is the wire-format family a provider speaks; the proxy
@@ -70,7 +71,7 @@ const (
 	FamilyAnthropic
 	// FamilyOpenAICompat speaks the OpenAI Chat Completions wire format
 	// (OpenAI itself plus every OpenAI-compatible upstream: OpenRouter,
-	// Fireworks, Bedrock's OpenAI-compat surface, Makora, Together).
+	// Fireworks, Bedrock's OpenAI-compat surface, Makora, Together, XAI).
 	FamilyOpenAICompat
 	// FamilyGemini speaks the Google Generative Language (Gemini) wire format.
 	FamilyGemini
@@ -87,6 +88,7 @@ var ProviderFamilies = map[string]TranslationFamily{
 	ProviderBedrock:    FamilyOpenAICompat,
 	ProviderMakora:     FamilyOpenAICompat,
 	ProviderTogether:   FamilyOpenAICompat,
+	ProviderXAI:        FamilyOpenAICompat,
 }
 
 // FamilyFor returns the translation family for a provider, or FamilyUnknown
@@ -140,6 +142,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderBedrock:    "AWS_BEARER_TOKEN_BEDROCK",
 	ProviderMakora:     "MAKORA_API_KEY",
 	ProviderTogether:   "TOGETHER_API_KEY",
+	ProviderXAI:        "XAI_API_KEY",
 }
 
 // APIKeyEnvVar returns the env-var name for the given provider, or empty
@@ -160,6 +163,7 @@ var CacheTTL = map[string]time.Duration{
 	ProviderOpenRouter: 5 * time.Minute,
 	ProviderFireworks:  5 * time.Minute,
 	ProviderBedrock:    5 * time.Minute,
+	ProviderXAI:        5 * time.Minute,
 }
 
 // DefaultCacheTTL is the conservative fallback cache lifetime for providers

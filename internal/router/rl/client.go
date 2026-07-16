@@ -20,20 +20,35 @@ const DefaultTimeout = 2 * time.Second
 type HTTPDecider struct {
 	baseURL string
 	client  *http.Client
+	headers map[string]string
 }
 
 // NewHTTPDecider builds a Decider that posts to baseURL/route. A nil client
 // uses a default client bounded by timeout; a non-nil client is used as-is.
 func NewHTTPDecider(baseURL string, client *http.Client, timeout time.Duration) *HTTPDecider {
+	return NewHTTPDeciderWithHeaders(baseURL, client, timeout, nil)
+}
+
+// NewHTTPDeciderWithHeaders is NewHTTPDecider plus static request headers
+// (e.g. Modal-Key / Modal-Secret for requires_proxy_auth ASGI apps).
+func NewHTTPDeciderWithHeaders(baseURL string, client *http.Client, timeout time.Duration, headers map[string]string) *HTTPDecider {
 	if client == nil {
 		if timeout <= 0 {
 			timeout = DefaultTimeout
 		}
 		client = &http.Client{Timeout: timeout}
 	}
+	copied := map[string]string{}
+	for k, v := range headers {
+		if strings.TrimSpace(k) == "" || v == "" {
+			continue
+		}
+		copied[k] = v
+	}
 	return &HTTPDecider{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  client,
+		headers: copied,
 	}
 }
 
@@ -76,6 +91,9 @@ func (d *HTTPDecider) Decide(ctx context.Context, q Query) (Result, error) {
 		return Result{}, fmt.Errorf("build route request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
+	for k, v := range d.headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {

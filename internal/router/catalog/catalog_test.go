@@ -34,6 +34,7 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 		providers.ProviderBedrock:    {},
 		providers.ProviderMakora:     {},
 		providers.ProviderTogether:   {},
+		providers.ProviderXAI:        {},
 	}
 	for _, m := range Models {
 		for i, b := range m.Providers {
@@ -258,6 +259,9 @@ func TestContextWindowFor_KnownModels(t *testing.T) {
 	assert.Equal(t, 400_000, ContextWindowFor("gpt-5"))
 	assert.Equal(t, 1_000_000, ContextWindowFor("gpt-5.4"))
 	assert.Equal(t, 1_050_000, ContextWindowFor("gpt-5.5"))
+	assert.Equal(t, 1_050_000, ContextWindowFor("gpt-5.6-sol"))
+	assert.Equal(t, 1_050_000, ContextWindowFor("gpt-5.6-terra"))
+	assert.Equal(t, 1_050_000, ContextWindowFor("gpt-5.6-luna"))
 	// GPT-4.1 family has 1M context.
 	assert.Equal(t, 1_047_576, ContextWindowFor("gpt-4.1"))
 	// Gemini models have 1M context.
