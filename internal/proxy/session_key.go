@@ -64,10 +64,9 @@ func bindRequestLogger(
 	return observability.WithLogger(ctx, log), log, key
 }
 
-// DeriveForceModelSessionKey produces a session-wide key for explicit
-// /force-model state. It intentionally excludes the first user message so one
-// command from the main loop also applies to Task/Explore sub-agents, whose
-// prompts differ but share the same client session metadata.
+// DeriveForceModelSessionKey hashes apiKeyID + client session metadata,
+// deliberately omitting the first user message so sub-agents sharing the
+// same session inherit a /force-model pin set by the main loop.
 func DeriveForceModelSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
 	h := sha256.New()
 	h.Write([]byte(apiKeyID))

@@ -210,9 +210,7 @@ func (s *Service) runTurnLoop(
 	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
-	// res.SessionKey must stay zero for ordinary hard-pinned turns, but an
-	// explicit /force-model pin is session-wide and is allowed to override
-	// SubAgentDispatch hard-pinning.
+	// An explicit /force-model pin overrides SubAgentDispatch hard-pinning.
 	threadSessionKey := DeriveSessionKey(env, apiKeyID)
 	forceModelSessionKey := DeriveForceModelSessionKey(env, apiKeyID)
 	var forceModelPin sessionpin.Pin
