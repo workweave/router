@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"workweave/router/internal/auth"
@@ -9,6 +10,7 @@ import (
 	"workweave/router/internal/subscriptions"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -30,6 +32,13 @@ type SubscriptionCredentialRepo struct {
 // NewSubscriptionCredentialRepo constructs a SubscriptionCredentialRepo.
 func NewSubscriptionCredentialRepo(tx sqlc.DBTX, encryptor auth.Encryptor) *SubscriptionCredentialRepo {
 	return &SubscriptionCredentialRepo{tx: tx, encryptor: encryptor}
+}
+
+// txBeginner is the pgx transaction capability the pgxpool.Pool provides.
+// ReplaceByFingerprint needs it to run the soft-delete + insert atomically;
+// the pool passed at construction satisfies it.
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 func (r *SubscriptionCredentialRepo) Create(ctx context.Context, params subscriptions.CreateParams) (*subscriptions.Credential, error) {
@@ -159,18 +168,62 @@ func (r *SubscriptionCredentialRepo) SoftDelete(ctx context.Context, installatio
 	return rows > 0, nil
 }
 
-func (r *SubscriptionCredentialRepo) SoftDeleteByFingerprint(ctx context.Context, installationID, userEmail, provider, fingerprint string) error {
-	installationUUID, err := uuid.Parse(installationID)
+// ReplaceByFingerprint soft-deletes any existing row for the account and
+// inserts the new credential in a single transaction, so a failed insert
+// rolls back the delete and leaves the prior credential intact.
+func (r *SubscriptionCredentialRepo) ReplaceByFingerprint(ctx context.Context, params subscriptions.CreateParams) (*subscriptions.Credential, error) {
+	installationUUID, err := uuid.Parse(params.InstallationID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	q := sqlc.New(r.tx)
-	return q.SoftDeleteSubscriptionCredentialByFingerprint(ctx, sqlc.SoftDeleteSubscriptionCredentialByFingerprintParams{
+	accessCipher, err := r.encryptor.Encrypt(params.AccessToken, params.ExternalID, params.Provider+aadAccessSuffix)
+	if err != nil {
+		return nil, err
+	}
+	refreshCipher, err := r.encryptor.Encrypt(params.RefreshToken, params.ExternalID, params.Provider+aadRefreshSuffix)
+	if err != nil {
+		return nil, err
+	}
+
+	beginner, ok := r.tx.(txBeginner)
+	if !ok {
+		return nil, errors.New("subscription credential store is not transaction-capable")
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := sqlc.New(tx)
+	if err := q.SoftDeleteSubscriptionCredentialByFingerprint(ctx, sqlc.SoftDeleteSubscriptionCredentialByFingerprintParams{
 		InstallationID:     installationUUID,
-		UserEmail:          userEmail,
-		Provider:           provider,
-		AccountFingerprint: fingerprint,
+		UserEmail:          params.UserEmail,
+		Provider:           params.Provider,
+		AccountFingerprint: params.AccountFingerprint,
+	}); err != nil {
+		return nil, err
+	}
+	row, err := q.CreateSubscriptionCredential(ctx, sqlc.CreateSubscriptionCredentialParams{
+		InstallationID:         installationUUID,
+		ExternalID:             params.ExternalID,
+		UserEmail:              params.UserEmail,
+		Provider:               params.Provider,
+		AccountLabel:           stringPtrOrNil(params.AccountLabel),
+		AccountFingerprint:     params.AccountFingerprint,
+		ChatgptAccountID:       stringPtrOrNil(params.ChatGPTAccountID),
+		AccessTokenCiphertext:  accessCipher,
+		RefreshTokenCiphertext: refreshCipher,
+		AccessTokenExpiresAt:   timestamptzOrNull(params.ExpiresAt),
+		CreatedBy:              stringPtrOrNil(params.CreatedBy),
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return r.toCredential(row)
 }
 
 func (r *SubscriptionCredentialRepo) toCredentials(rows []sqlc.RouterSubscriptionCredential) ([]*subscriptions.Credential, error) {

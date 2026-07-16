@@ -1,7 +1,12 @@
 // Run with: node --test install/npm/login.test.js
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { parseHeaderLines, normalizeProvider, extractAccountId } = require("./login.js");
+const {
+  parseHeaderLines,
+  normalizeProvider,
+  extractAccountId,
+  extractClaudeAccountId,
+} = require("./login.js");
 
 test("parseHeaderLines parses newline-delimited Header: value lines", () => {
   const raw = "X-Weave-Router-Key: rk_abc123\nX-Weave-User-Email: dev@example.com\nX-App: claude-code";
@@ -38,4 +43,16 @@ test("extractAccountId falls back to the organizations claim", () => {
   const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
   const jwt = `header.${payload}.sig`;
   assert.equal(extractAccountId({ access_token: jwt }), "org-5");
+});
+
+test("extractClaudeAccountId prefers the account uuid over the organization uuid", () => {
+  assert.equal(
+    extractClaudeAccountId({ account: { uuid: "acct-9" }, organization: { uuid: "org-1" } }),
+    "acct-9",
+  );
+});
+
+test("extractClaudeAccountId falls back to the organization uuid, then undefined", () => {
+  assert.equal(extractClaudeAccountId({ organization: { uuid: "org-1" } }), "org-1");
+  assert.equal(extractClaudeAccountId({}), undefined);
 });

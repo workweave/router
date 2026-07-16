@@ -39,7 +39,18 @@ type enrollRequest struct {
 	RefreshToken     string `json:"refresh_token"`
 	ExpiresAt        string `json:"expires_at"`
 	ChatGPTAccountID string `json:"chatgpt_account_id"`
+	ClaudeAccountID  string `json:"claude_account_id"`
 	AccountLabel     string `json:"account_label"`
+}
+
+// callerEmail is the authenticated caller's normalized identity, taken from the
+// X-Weave-User-Email header — the same self-asserted identity the proxy scopes
+// a turn's pooled lookup to. Enroll/list/delete bind to it (not an arbitrary
+// request-supplied user_email) so one installation-key holder can't enumerate
+// or delete another user's credentials. Header trust matches the turn path; it
+// is not a cryptographic identity (closing that needs per-user auth).
+func callerEmail(c *gin.Context) string {
+	return proxy.ClientIdentityFromHeaders(c.Request.Header).Email
 }
 
 type credentialResponse struct {
@@ -90,9 +101,13 @@ func EnrollHandler(svc Enroller) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Unsupported provider; expected 'anthropic' or 'openai'."})
 			return
 		}
-		email := proxy.NormalizeEmail(req.UserEmail)
+		email := callerEmail(c)
 		if email == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid user_email is required."})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid X-Weave-User-Email header is required."})
+			return
+		}
+		if bodyEmail := proxy.NormalizeEmail(req.UserEmail); bodyEmail != "" && bodyEmail != email {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "user_email does not match the authenticated X-Weave-User-Email."})
 			return
 		}
 		accessToken := strings.TrimSpace(req.AccessToken)
@@ -114,6 +129,7 @@ func EnrollHandler(svc Enroller) gin.HandlerFunc {
 			Provider:         provider,
 			AccountLabel:     strings.TrimSpace(req.AccountLabel),
 			ChatGPTAccountID: strings.TrimSpace(req.ChatGPTAccountID),
+			ClaudeAccountID:  strings.TrimSpace(req.ClaudeAccountID),
 			AccessToken:      accessToken,
 			RefreshToken:     refreshToken,
 			ExpiresAt:        expiresAt,
@@ -136,9 +152,13 @@ func ListHandler(svc Enroller) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
 			return
 		}
-		email := proxy.NormalizeEmail(c.Query("user_email"))
+		email := callerEmail(c)
 		if email == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid user_email query param is required."})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid X-Weave-User-Email header is required."})
+			return
+		}
+		if q := proxy.NormalizeEmail(c.Query("user_email")); q != "" && q != email {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "user_email does not match the authenticated X-Weave-User-Email."})
 			return
 		}
 		creds, err := svc.List(c.Request.Context(), installation.ID, email)
@@ -164,9 +184,13 @@ func RemoveHandler(svc Enroller) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_key"})
 			return
 		}
-		email := proxy.NormalizeEmail(c.Query("user_email"))
+		email := callerEmail(c)
 		if email == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid user_email query param is required."})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "A valid X-Weave-User-Email header is required."})
+			return
+		}
+		if q := proxy.NormalizeEmail(c.Query("user_email")); q != "" && q != email {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "user_email does not match the authenticated X-Weave-User-Email."})
 			return
 		}
 		id := c.Param("id")

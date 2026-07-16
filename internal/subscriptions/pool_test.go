@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -26,13 +27,17 @@ func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 
 // fakeRepo is an in-memory subscriptions.Repository for unit tests.
 type fakeRepo struct {
-	mu          sync.Mutex
-	byID        map[string]*Credential
-	updateCalls int
+	mu              sync.Mutex
+	byID            map[string]*Credential
+	fingerprintByID map[string]string
+	updateCalls     int
+	// createErr, when set, makes ReplaceByFingerprint fail its insert without
+	// touching existing rows — modeling the transactional rollback guarantee.
+	createErr error
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{byID: make(map[string]*Credential)}
+	return &fakeRepo{byID: make(map[string]*Credential), fingerprintByID: make(map[string]string)}
 }
 
 func (r *fakeRepo) put(c *Credential) {
@@ -110,8 +115,34 @@ func (r *fakeRepo) SoftDelete(_ context.Context, installationID, userEmail, id s
 	return true, nil
 }
 
-func (r *fakeRepo) SoftDeleteByFingerprint(context.Context, string, string, string, string) error {
-	return nil
+func (r *fakeRepo) ReplaceByFingerprint(_ context.Context, p CreateParams) (*Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return nil, r.createErr // rollback: nothing deleted, nothing created
+	}
+	for id, c := range r.byID {
+		if c.InstallationID == p.InstallationID && c.UserEmail == p.UserEmail &&
+			c.Provider == p.Provider && r.fingerprintByID[id] == p.AccountFingerprint {
+			delete(r.byID, id)
+			delete(r.fingerprintByID, id)
+		}
+	}
+	cred := &Credential{
+		ID:             "cred-" + p.ExternalID,
+		ExternalID:     p.ExternalID,
+		InstallationID: p.InstallationID,
+		UserEmail:      p.UserEmail,
+		Provider:       p.Provider,
+		AccountLabel:   p.AccountLabel,
+		AccessToken:    p.AccessToken,
+		RefreshToken:   p.RefreshToken,
+		ExpiresAt:      p.ExpiresAt,
+		CreatedAt:      time.Unix(1_000_000, 0),
+	}
+	r.byID[cred.ID] = cred
+	r.fingerprintByID[cred.ID] = p.AccountFingerprint
+	return cred, nil
 }
 
 func seedExpiredCredential(r *fakeRepo) *Credential {
@@ -155,6 +186,87 @@ func TestService_SelectRefreshesExpiring(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, []byte("fresh"), got.AccessToken, "an expiring credential must be refreshed before use")
 	assert.Equal(t, 1, repo.updateCalls, "rotated tokens must be persisted")
+}
+
+func enrollClaude(t *testing.T, svc *Service, claudeAccountID, refreshToken string) *Credential {
+	t.Helper()
+	cred, err := svc.Enroll(context.Background(), EnrollParams{
+		InstallationID:  testInstallation,
+		UserEmail:       testEmail,
+		Provider:        providers.ProviderAnthropic,
+		ClaudeAccountID: claudeAccountID,
+		AccessToken:     "sk-ant-oat01-x",
+		RefreshToken:    refreshToken,
+	})
+	require.NoError(t, err)
+	return cred
+}
+
+func TestEnroll_SameClaudeAccountReplacesDespiteRotatedRefreshToken(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRefresher{}, testLogger())
+
+	enrollClaude(t, svc, "claude-acct-1", "refresh-old")
+	enrollClaude(t, svc, "claude-acct-1", "refresh-new")
+
+	pool, err := repo.GetActiveForUser(context.Background(), testInstallation, testEmail)
+	require.NoError(t, err)
+	assert.Len(t, pool, 1, "re-enrolling the same Claude account must replace, not duplicate")
+}
+
+func TestEnroll_DistinctClaudeAccountsCoexist(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRefresher{}, testLogger())
+
+	enrollClaude(t, svc, "claude-acct-1", "refresh-1")
+	enrollClaude(t, svc, "claude-acct-2", "refresh-2")
+
+	pool, err := repo.GetActiveForUser(context.Background(), testInstallation, testEmail)
+	require.NoError(t, err)
+	assert.Len(t, pool, 2, "two different Claude accounts for one user stay separate")
+}
+
+func TestEnroll_ChatGPTAccountReplacesDespiteRotatedRefreshToken(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRefresher{}, testLogger())
+
+	for _, refresh := range []string{"refresh-old", "refresh-new"} {
+		_, err := svc.Enroll(context.Background(), EnrollParams{
+			InstallationID:   testInstallation,
+			UserEmail:        testEmail,
+			Provider:         providers.ProviderOpenAI,
+			ChatGPTAccountID: "cg-acct-1",
+			AccessToken:      "jwt",
+			RefreshToken:     refresh,
+		})
+		require.NoError(t, err)
+	}
+
+	pool, err := repo.GetActiveForUser(context.Background(), testInstallation, testEmail)
+	require.NoError(t, err)
+	assert.Len(t, pool, 1, "same ChatGPT account id must dedupe across token rotations")
+}
+
+func TestEnroll_ReplaceFailureKeepsExistingCredential(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRefresher{}, testLogger())
+	original := enrollClaude(t, svc, "claude-acct-1", "refresh-old")
+
+	repo.createErr = errors.New("insert boom")
+	_, err := svc.Enroll(context.Background(), EnrollParams{
+		InstallationID:  testInstallation,
+		UserEmail:       testEmail,
+		Provider:        providers.ProviderAnthropic,
+		ClaudeAccountID: "claude-acct-1",
+		AccessToken:     "sk-ant-oat01-x",
+		RefreshToken:    "refresh-new",
+	})
+	require.Error(t, err)
+
+	pool, err := repo.GetActiveForUser(context.Background(), testInstallation, testEmail)
+	require.NoError(t, err)
+	require.Len(t, pool, 1, "a failed replace must not destroy the prior credential")
+	assert.Equal(t, original.ID, pool[0].ID)
 }
 
 func TestService_PoolExistsAndRemove(t *testing.T) {

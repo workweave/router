@@ -59,6 +59,11 @@ type CreateParams struct {
 // Implemented by internal/postgres, which owns encryption at rest.
 type Repository interface {
 	Create(ctx context.Context, params CreateParams) (*Credential, error)
+	// ReplaceByFingerprint atomically soft-deletes any existing credential with
+	// the same (installation, user, provider, account fingerprint) and inserts
+	// params, in one transaction — so a failed insert can never destroy the
+	// credential it was meant to replace on re-enrollment.
+	ReplaceByFingerprint(ctx context.Context, params CreateParams) (*Credential, error)
 	// GetActiveForUser returns the usable pool (excludes refresh-failed rows),
 	// oldest-enrolled first.
 	GetActiveForUser(ctx context.Context, installationID, userEmail string) ([]*Credential, error)
@@ -71,7 +76,6 @@ type Repository interface {
 	// SoftDelete removes one credential scoped to (installation, email); returns
 	// false when no row matched (foreign or unknown id).
 	SoftDelete(ctx context.Context, installationID, userEmail, id string) (bool, error)
-	SoftDeleteByFingerprint(ctx context.Context, installationID, userEmail, provider, fingerprint string) error
 }
 
 // externalIDPrefix fronts subscription-credential external IDs ("scid_...").
@@ -124,21 +128,22 @@ type EnrollParams struct {
 	Provider         string
 	AccountLabel     string
 	ChatGPTAccountID string
-	AccessToken      string
-	RefreshToken     string
-	ExpiresAt        time.Time
-	CreatedBy        string
+	// ClaudeAccountID is the Claude account's stable uuid (from the OAuth token
+	// response). Used only to fingerprint the account so re-enrolling the same
+	// Claude account replaces its row instead of piling up duplicates — the
+	// refresh token rotates on every login and can't identify the account.
+	ClaudeAccountID string
+	AccessToken     string
+	RefreshToken    string
+	ExpiresAt       time.Time
+	CreatedBy       string
 }
 
 // Enroll stores a new pool credential, replacing any existing enrollment of
 // the same account (matched by fingerprint).
 func (s *Service) Enroll(ctx context.Context, p EnrollParams) (*Credential, error) {
-	fingerprint := accountFingerprint(p.Provider, p.ChatGPTAccountID, p.RefreshToken)
-	err := s.repo.SoftDeleteByFingerprint(ctx, p.InstallationID, p.UserEmail, p.Provider, fingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("replace existing enrollment: %w", err)
-	}
-	cred, err := s.repo.Create(ctx, CreateParams{
+	fingerprint := accountFingerprint(p.Provider, p.ChatGPTAccountID, p.ClaudeAccountID, p.RefreshToken)
+	cred, err := s.repo.ReplaceByFingerprint(ctx, CreateParams{
 		InstallationID:     p.InstallationID,
 		ExternalID:         auth.GenerateID(externalIDPrefix),
 		UserEmail:          p.UserEmail,
@@ -152,7 +157,7 @@ func (s *Service) Enroll(ctx context.Context, p EnrollParams) (*Credential, erro
 		CreatedBy:          p.CreatedBy,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create subscription credential: %w", err)
+		return nil, fmt.Errorf("replace subscription credential: %w", err)
 	}
 	s.cache.evict(p.InstallationID, p.UserEmail)
 	return cred, nil
@@ -306,14 +311,23 @@ func (s *Service) refreshAndPersist(ctx context.Context, cred *Credential) (*Cre
 	return &fresh, nil
 }
 
-// accountFingerprint derives the stable identity of an enrolled account: the
-// ChatGPT account id for Codex (stable across token rotations), or the
-// enrollment refresh token for Claude (the token endpoint exposes no account
-// id in this flow; stable for the lifetime of the enrollment).
-func accountFingerprint(provider, chatGPTAccountID, refreshToken string) string {
+// accountFingerprint derives the stable identity of an enrolled account so a
+// re-enrollment of the same account replaces its row rather than duplicating
+// it: the ChatGPT account id for Codex, the account uuid for Claude — both
+// stable across the token rotations that happen on every fresh OAuth login.
+// Falls back to the refresh token only when the provider account id is absent
+// (identity of last resort; not stable across re-enrollment).
+func accountFingerprint(provider, chatGPTAccountID, claudeAccountID, refreshToken string) string {
 	material := refreshToken
-	if provider == providers.ProviderOpenAI && chatGPTAccountID != "" {
-		material = chatGPTAccountID
+	switch provider {
+	case providers.ProviderOpenAI:
+		if chatGPTAccountID != "" {
+			material = chatGPTAccountID
+		}
+	case providers.ProviderAnthropic:
+		if claudeAccountID != "" {
+			material = claudeAccountID
+		}
 	}
 	sum := sha256.Sum256([]byte(material))
 	return hex.EncodeToString(sum[:])

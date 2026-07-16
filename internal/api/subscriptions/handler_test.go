@@ -54,17 +54,25 @@ func newAuthedContext(w http.ResponseWriter, req *http.Request) *gin.Context {
 	return c
 }
 
-func postJSON(body map[string]any) *http.Request {
+func postJSON(body map[string]any) *http.Request { return postJSONAs("a@b.com", body) }
+
+// postJSONAs builds an enrollment request whose authenticated identity is the
+// X-Weave-User-Email header (empty email omits the header). The server binds to
+// this header, not the body's user_email.
+func postJSONAs(email string, body map[string]any) *http.Request {
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/subscriptions", strings.NewReader(string(b)))
 	req.Header.Set("Content-Type", "application/json")
+	if email != "" {
+		req.Header.Set("X-Weave-User-Email", email)
+	}
 	return req
 }
 
 func TestEnroll_Success(t *testing.T) {
 	fake := &fakeEnroller{}
 	w := httptest.NewRecorder()
-	c := newAuthedContext(w, postJSON(map[string]any{
+	c := newAuthedContext(w, postJSONAs("Dev@Example.com", map[string]any{
 		"provider":      "claude",
 		"user_email":    "Dev@Example.com",
 		"access_token":  "sk-ant-oat01-token",
@@ -76,7 +84,30 @@ func TestEnroll_Success(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 	require.NotNil(t, fake.enrolled)
 	assert.Equal(t, providers.ProviderAnthropic, fake.enrolled.Provider)
-	assert.Equal(t, "dev@example.com", fake.enrolled.UserEmail, "email must be normalized")
+	assert.Equal(t, "dev@example.com", fake.enrolled.UserEmail, "identity must come from the header, normalized")
+}
+
+func TestEnroll_RequiresIdentityHeader(t *testing.T) {
+	fake := &fakeEnroller{}
+	w := httptest.NewRecorder()
+	c := newAuthedContext(w, postJSONAs("", map[string]any{
+		"provider": "claude", "access_token": "sk-ant-oat01-x", "refresh_token": "r",
+	}))
+	EnrollHandler(fake)(c)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Nil(t, fake.enrolled, "an unidentified caller must not reach the service")
+}
+
+func TestEnroll_RejectsBodyEmailImpersonation(t *testing.T) {
+	fake := &fakeEnroller{}
+	w := httptest.NewRecorder()
+	c := newAuthedContext(w, postJSONAs("me@b.com", map[string]any{
+		"provider": "claude", "user_email": "victim@b.com",
+		"access_token": "sk-ant-oat01-x", "refresh_token": "r",
+	}))
+	EnrollHandler(fake)(c)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Nil(t, fake.enrolled, "a body user_email other than the caller must be rejected")
 }
 
 func TestEnroll_RejectsBadTokenShapes(t *testing.T) {
@@ -95,9 +126,6 @@ func TestEnroll_RejectsBadTokenShapes(t *testing.T) {
 		}},
 		{"missing refresh token", map[string]any{
 			"provider": "claude", "user_email": "a@b.com", "access_token": "sk-ant-oat01-x",
-		}},
-		{"bad email", map[string]any{
-			"provider": "claude", "user_email": "not-an-email", "access_token": "sk-ant-oat01-x", "refresh_token": "r",
 		}},
 		{"unknown provider", map[string]any{
 			"provider": "gemini", "user_email": "a@b.com", "access_token": "x", "refresh_token": "r",
@@ -139,6 +167,7 @@ func TestRemove_NotFound(t *testing.T) {
 	fake := &fakeEnroller{removeErr: subscriptions.ErrCredentialNotFound}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/subscriptions/cred-x?user_email=a@b.com", nil)
+	req.Header.Set("X-Weave-User-Email", "a@b.com")
 	removeEngine(fake).ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -147,7 +176,18 @@ func TestRemove_Success(t *testing.T) {
 	fake := &fakeEnroller{}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/subscriptions/cred-1?user_email=a@b.com", nil)
+	req.Header.Set("X-Weave-User-Email", "a@b.com")
 	removeEngine(fake).ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.Equal(t, "cred-1", fake.removed)
+}
+
+func TestRemove_RejectsQueryEmailImpersonation(t *testing.T) {
+	fake := &fakeEnroller{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/subscriptions/cred-1?user_email=victim@b.com", nil)
+	req.Header.Set("X-Weave-User-Email", "me@b.com")
+	removeEngine(fake).ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Empty(t, fake.removed, "a query user_email other than the caller must be rejected")
 }

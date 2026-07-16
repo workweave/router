@@ -72,9 +72,13 @@ async function main(argv) {
     access_token: bundle.accessToken,
     refresh_token: bundle.refreshToken,
     expires_at: bundle.expiresAt ? new Date(bundle.expiresAt).toISOString() : undefined,
-    chatgpt_account_id: bundle.accountId,
     account_label: flags.label || bundle.label || undefined,
   };
+  // The stable account id fingerprints the account so re-enrolling the same one
+  // replaces its row; the field differs per provider (Claude's account uuid vs
+  // ChatGPT's account id).
+  if (provider === "openai") body.chatgpt_account_id = bundle.accountId;
+  else body.claude_account_id = bundle.accountId;
 
   const url = trimTrailingSlashes(config.routerUrl) + "/v1/subscriptions";
   const res = await fetch(url, {
@@ -82,6 +86,9 @@ async function main(argv) {
     headers: {
       "Content-Type": "application/json",
       "X-Weave-Router-Key": config.routerKey,
+      // The server scopes the credential to this identity (not the body's
+      // user_email), matching the header the proxy trusts at turn time.
+      "X-Weave-User-Email": email,
     },
     body: JSON.stringify(body),
   });
@@ -198,7 +205,15 @@ async function loginClaude() {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
     expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
+    accountId: extractClaudeAccountId(tokens),
   };
+}
+
+// extractClaudeAccountId pulls the stable Claude account uuid from the token
+// response so the server can fingerprint the account (the refresh token rotates
+// on every login and can't identify it). Falls back to the organization uuid.
+function extractClaudeAccountId(tokens) {
+  return tokens?.account?.uuid || tokens?.organization?.uuid || undefined;
 }
 
 function buildClaudeAuthorizeUrl(pkce) {
@@ -449,4 +464,11 @@ function printUsage() {
   );
 }
 
-module.exports = { main, discoverConfig, parseHeaderLines, normalizeProvider, extractAccountId };
+module.exports = {
+  main,
+  discoverConfig,
+  parseHeaderLines,
+  normalizeProvider,
+  extractAccountId,
+  extractClaudeAccountId,
+};
