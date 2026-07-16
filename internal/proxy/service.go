@@ -4013,6 +4013,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
 
+	// Subscription-only mode (balance past the overdraft floor): restrict
+	// routing to the providers the caller's own subscription can serve, so the
+	// scorer can't pick a paid model. Mirrors the Anthropic path's forced
+	// usage-bypass; the post-routing guard below refuses if it still can't serve
+	// on the subscription.
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
+	}
+
 	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
 	// caller's original Responses body. Such turns skip the routing marker +
 	// semantic cache below, and dispatch the verbatim body to the Codex
@@ -4115,7 +4124,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
 	// semantic cache (the key doesn't capture headroom-dependent model choice).
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough && len(s.subsidyFactors(ctx, r.Header)) == 0
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -4205,6 +4214,20 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// so single-binding upstream errors don't strand the routing-marker chunk
 	// on the wire when the upstream never produces a first byte.
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
+
+	// Subscription-only mode: the turn must serve on the caller's own
+	// subscription (Codex/Claude OAuth). If routing didn't resolve to a
+	// subscription-served credential, refuse (402) rather than dispatch to a
+	// paid model against an already-negative balance. When it did, pin dispatch
+	// to that single binding so failover can't reroute onto a paid provider.
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		if !servedOnSubscription(ctx) {
+			log.Info("Subscription-only request cannot be served on the subscription; refusing",
+				"requested_model", feats.Model, "external_id", externalID, "decision_provider", decision.Provider)
+			return ErrCreditsExhaustedSubscriptionUnavailable
+		}
+		bindings = []catalog.ProviderBinding{{Provider: decision.Provider}}
+	}
 	// Append the one-click feedback thumbs as a trailing chunk (see
 	// ProxyMessages). Skipped on the Responses-API path (w is a
 	// *ResponsesWriter): wrapping it would defeat maybeCaptureResponse's
@@ -4251,6 +4274,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		// Always surface the depleted-credits warning (not gated by the
+		// routing-marker opt-out): a billing state change the caller must see.
+		marker = subscriptionOnlyWarningMarkerCodex
+	}
 	if codexPassthrough {
 		// The client receives raw Responses SSE from the Codex backend; a
 		// chat-completions routing-marker chunk would corrupt that stream.
@@ -4610,6 +4638,17 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
+
+	// Subscription-only mode: a pre-commit dispatch failure (the sub attempt
+	// failed before any bytes reached the client, e.g. a 429 weekly-limit) must
+	// not surface as a raw upstream error — paid failover is disabled, so refuse
+	// with the controlled credits-exhausted 402 instead. Post-commit errors
+	// already streamed an in-band frame and are left untouched.
+	if proxyErr != nil && billing.SubscriptionOnlyFromContext(ctx) && !committed(preludeBuf) {
+		log.Info("Subscription-only dispatch failed pre-commit; refusing instead of paid reroute",
+			"request_id", requestID, "external_id", externalID)
+		proxyErr = ErrCreditsExhaustedSubscriptionUnavailable
+	}
 	return proxyErr
 }
 

@@ -105,7 +105,7 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 		return DispatchErrorClass{
 			Kind:       DispatchErrorCreditsExhausted,
 			Status:     http.StatusPaymentRequired,
-			Message:    "Your Weave router credits are exhausted and your Anthropic subscription can't serve this turn (rate-limited, or the requested model isn't subscription-covered). Add credits to re-enable paid routing: " + topUpURL,
+			Message:    "Your Weave router credits are exhausted and your subscription can't serve this turn (rate-limited, or the requested model isn't subscription-covered). Add credits to re-enable paid routing: " + topUpURL,
 			LogLevel:   "warn",
 			LogMessage: "Subscription-only request refused: credits exhausted and subscription unavailable",
 		}, true

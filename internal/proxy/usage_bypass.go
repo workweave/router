@@ -185,9 +185,17 @@ const subscriptionOnlyWarningMarker = routingMarkerPrefix +
 	"your Weave router credits are depleted, so this turn is running on your own Anthropic subscription and paid model fallback is disabled. Add credits to restore full routing: " +
 	topUpURL + "\n\n"
 
-// ErrCreditsExhaustedSubscriptionUnavailable is returned by ProxyMessages when
-// the org is in subscription-only mode (balance past the overdraft floor) but
-// the turn cannot be served on the caller's own subscription — it is
+// subscriptionOnlyWarningMarkerCodex is the Codex/OpenAI-surface counterpart to
+// subscriptionOnlyWarningMarker, prepended to a subscription-only turn served on
+// the caller's own ChatGPT (Codex) subscription.
+const subscriptionOnlyWarningMarkerCodex = routingMarkerPrefix +
+	"your Weave router credits are depleted, so this turn is running on your own ChatGPT (Codex) subscription and paid model fallback is disabled. Add credits to restore full routing: " +
+	topUpURL + "\n\n"
+
+// ErrCreditsExhaustedSubscriptionUnavailable is returned by ProxyMessages and
+// ProxyOpenAIChatCompletion when the org is in subscription-only mode (balance
+// past the overdraft floor) but the turn cannot be served on the caller's own
+// subscription (Claude or Codex) — it is
 // rate-limit exhausted, or the requested model is not subscription-covered.
 // Paid failover is disabled in this mode, so the turn is refused (HTTP 402)
 // rather than billed against an already-negative balance.
