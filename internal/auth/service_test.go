@@ -856,6 +856,47 @@ func (n *recordingNotifier) snapshot() []string {
 	return out
 }
 
+func TestService_InvalidateInstallationCache(t *testing.T) {
+	// External writers of installation columns (policy rollout, preferred
+	// models, etc.) have no SQLC/admin write path in this repo, so they must
+	// trigger the same local+pubsub eviction the in-repo write hooks use.
+	// This method must not touch the DB — it only clears cache.
+	const installID = "inst-A"
+
+	cache := newRecordingAPIKeyCache()
+	cache.Set("hash-A", auth.CachedKey{
+		APIKey:       &auth.APIKey{ID: "k1"},
+		Installation: &auth.Installation{ID: installID},
+	})
+	nf := &recordingNotifier{}
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, cache, nil, frozenClock()).
+		WithInstallationChangeNotifier(nf)
+
+	svc.InvalidateInstallationCache(installID)
+
+	assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+		"InvalidateInstallationCache must drop cached keys for the installation")
+	assert.Equal(t, []string{installID}, nf.snapshot(),
+		"InvalidateInstallationCache must publish NOTIFY so peer replicas drop their cache too")
+	assert.Empty(t, installRepo.excludedModelsByID,
+		"InvalidateInstallationCache must not write excluded_models")
+	assert.Empty(t, installRepo.excludedProvidersByID,
+		"InvalidateInstallationCache must not write excluded_providers")
+	assert.Empty(t, installRepo.routingQualityByID,
+		"InvalidateInstallationCache must not write routing_quality_weight")
+	assert.Empty(t, installRepo.subscriptionRoutingDisabledByID,
+		"InvalidateInstallationCache must not write subscription_routing_disabled")
+	assert.Empty(t, installRepo.usageBypassEnabledByID,
+		"InvalidateInstallationCache must not write usage_bypass_*")
+
+	svc.InvalidateInstallationCache("")
+	assert.Equal(t, []string{installID}, cache.invalidationSnapshot(),
+		"empty installation ID must be a no-op")
+	assert.Equal(t, []string{installID}, nf.snapshot(),
+		"empty installation ID must not publish NOTIFY")
+}
+
 func TestService_WriteHooksInvalidateAndNotify(t *testing.T) {
 	// Each per-installation write must drop the cached entries for that
 	// installation AND publish a NOTIFY so peer replicas do the same. The

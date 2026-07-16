@@ -29,6 +29,53 @@ selection after bounded transient retries, the client receives HTTP 503.
 Availability comes from healthy replicas, readiness gates, immutable artifacts,
 and staged rollout rather than a second hidden policy.
 
+## Installation policy-rollout cache invalidation
+
+Migration `0034_installation-policy-routing` added installation columns that
+the router loads into the auth cache on every API-key lookup:
+
+- `routing_strategy`
+- `policy_shadow_strategy`
+- `policy_debug_enabled`
+- `policy_header_overrides_enabled`
+- `routing_rollout_id`
+- `ai_training_allowed`
+- `policy_routing_intent`
+
+These columns are written by the Weave control plane (direct SQL / its own
+data plane), not through this repo's admin API or SQLC update queries. The
+router only reads them.
+
+After committing a change to any of those columns, the external writer
+**must** publish the installation's UUID as the message body on
+`PUBSUB_TOPIC_ROUTER_INVALIDATION`. That is the same fanout
+`auth.Service.invalidateInstallation` already uses for every in-repo write
+that changes what `VerifyAPIKey` returns: API key rotation and deletion;
+BYOK external key upsert/delete; excluded models and excluded providers;
+routing preference; and subscription-routing-disabled. Each router
+replica's invalidation listener drops the installation from its positive
+auth cache so the next request reloads from Postgres.
+
+The positive auth-cache TTL (5 minutes) is a **fallback safety net**, not
+steady-state behavior. Relying on TTL alone means rollout flips, shadow
+toggles, and training-eligibility changes can serve stale values for up to
+five minutes after the control-plane write.
+
+This repo deliberately does **not** expose an HTTP invalidate endpoint.
+Unauthed control-plane routes in the router today (`/v1/router/models`,
+`/v1/router/policies`, …) are read-only and already-public data; an
+unauthed mutation endpoint would be a new security surface with no existing
+auth precedent to protect it. Authenticated inbound service-to-service auth
+also does not exist here yet (only outbound, e.g. `ROUTER_HMM_SIDECAR_AUTH`
+for sidecar calls). If an HTTP-based invalidation option becomes necessary,
+it needs an explicit auth design decision first — not silent adoption of
+the unauthed read-endpoint pattern.
+
+In-process callers can use `auth.Service.InvalidateInstallationCache`, which
+performs the same local eviction + Pub/Sub publish as the private write
+hooks. Publishing to the topic directly from the control plane is the
+production path for managed deployments.
+
 ## Required HTTP surface
 
 Every sidecar exposes:
