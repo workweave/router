@@ -119,7 +119,7 @@ func UpdateExcludedModelsHandler(authSvc *auth.Service, models DeployedModelsSou
 		stored, err := authSvc.SetInstallationExcludedModels(c.Request.Context(), installation.ExternalID, installation.ID, req.Excluded, allowed)
 		if err != nil {
 			if errors.Is(err, auth.ErrUnknownModel) {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "unknown model id in exclusion list"})
 				return
 			}
 			log.Error("Failed to update excluded models", "err", err, "installation_id", installation.ID)
