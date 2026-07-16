@@ -4284,7 +4284,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// verbatimPassthrough (verbatim OpenAI frames can't have chunks injected).
 	verbatimPassthrough := codexPassthrough && decision.Provider == providers.ProviderOpenAI
 	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
-	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !verbatimPassthrough && debugEnabled {
+	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !verbatimPassthrough && (debugEnabled || billing.SubscriptionOnlyFromContext(ctx)) {
 		rw.SetBadgeText(marker)
 	}
 
