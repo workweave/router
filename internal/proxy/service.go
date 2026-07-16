@@ -4280,11 +4280,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		marker = subscriptionOnlyWarningMarkerCodex
 	}
 
-	// Inject verbose routing marker into the Responses badge when policy
-	// debug is enabled; Codex renders the first assistant text delta reliably.
-	// Gated on the same condition as SetPassthrough (verbatim OpenAI passthrough
-	// cannot have frames injected); Codex-sub turns routed to other providers
-	// stay in translate mode and can render the badge.
+	// Inject verbose routing marker when policy debug is enabled; gated on
+	// verbatimPassthrough (verbatim OpenAI frames can't have chunks injected).
 	verbatimPassthrough := codexPassthrough && decision.Provider == providers.ProviderOpenAI
 	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
 	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !verbatimPassthrough && debugEnabled {
