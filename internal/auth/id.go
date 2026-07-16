@@ -12,22 +12,33 @@ const (
 	idLength               = 24
 	alphaNumericCharacters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
-
 func GenerateID(prefix string) string {
 	if len(prefix) > 10 {
 		panic("prefix must be 10 characters or less")
 	}
-	bytes := make([]byte, idLength)
-	if _, err := rand.Read(bytes); err != nil {
-		panic(err)
-	}
 	var b strings.Builder
 	b.WriteString(prefix)
 	b.WriteString("_")
-	for _, x := range bytes {
-		b.WriteByte(alphaNumericCharacters[int(x)%len(alphaNumericCharacters)])
+	for i := 0; i < idLength; i++ {
+		b.WriteByte(alphaNumericCharacters[randInt(len(alphaNumericCharacters))])
 	}
 	return b.String()
+}
+
+func randInt(max int) int {
+	if max <= 0 {
+		panic("max must be positive")
+	}
+	for {
+		var buf [1]byte
+		if _, err := rand.Read(buf[:]); err != nil {
+			panic(err)
+		}
+		v := int(buf[0])
+		if v < 256-(256%max) {
+			return v % max
+		}
+	}
 }
 
 func HasAPIKeyPrefix(token string) bool {
