@@ -2336,14 +2336,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ModelSwitched:         routeRes.modelSwitched(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
 	}
-	// User-forced effort (x-weave-effort header / :level suffix on /force-model)
-	// wins over the escalate-on-failure policy: the user explicitly asked for a
-	// level, so don't let Service.effortEscalation's gpt-5.x "low" default
-	// downrank a "high" ask. resolveForceEffort also handles per-model caps
-	// (xhigh → max on non-CapXhighEffort targets). It then forwards the
-	// canonical level into ForceReasoningEffort for gpt-5.x Responses / gemini
-	// 3.x, where the existing seam handles emit; for Anthropic adaptive it's
-	// consumed by resolveAnthropicOverrides directly via opts.ForceEffort.
+	// User-forced effort wins over effortEscalation; also pre-populate
+	// ForceReasoningEffort so the gpt-5.x/gemini-3.x emit seams honor it.
 	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
 		opts.ForceEffort = knobs.ForceEffort
 		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)

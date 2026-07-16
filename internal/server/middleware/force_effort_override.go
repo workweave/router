@@ -1,15 +1,6 @@
-// force_effort_override.go — parse x-weave-effort request header into a
-// router.Overrides.ForceEffort value the proxy forwards into EmitOptions.
-//
-// Header shape mirrors the sibling knobs in routing_knobs_override.go:
-// value is one of "low", "medium", "high", "max", "xhigh" (canonical) or the
-// alias forms "fast", "minimal", "ultra" (canonicalizeEffort maps them). An
-// unparseable value = 400 with the format-aware envelope (abortInvalidKnob).
-//
-// Mirrors the experience the user gets from the verbose `/force-effort <lvl>`
-// slash command, but rides on every request the eval harness sends so a
-// pin-and-effort bake-off doesn't need to share session state — same shape
-// x-weave-force-model got for the model pin (force_model.go:189).
+// force_effort_override.go — WithForceEffortOverride middleware for x-weave-effort.
+// Accepts canonical levels (low/medium/high/max/xhigh) and aliases (fast/minimal/ultra);
+// invalid values → 400 via abortInvalidKnob.
 
 package middleware
 
@@ -45,8 +36,18 @@ func WithForceEffortOverride() gin.HandlerFunc {
 			return
 		}
 		canonical := translate.CanonicalizeEffort(raw)
-		overrides := router.Overrides{ForceEffort: canonical}
-		ctx := router.WithRoutingKnobs(c.Request.Context(), &overrides)
+		// Merge with any existing routing knobs (e.g. from WithRoutingKnobsOverride)
+		// so ForceEffort doesn't silently drop a separately-configured Alpha/QualityBias.
+		merged := router.Overrides{ForceEffort: canonical}
+		if existing := router.RoutingKnobsFromContext(c.Request.Context()); existing != nil {
+			merged.Alpha = existing.Alpha
+			merged.QualityBias = existing.QualityBias
+			merged.SpeedWeight = existing.SpeedWeight
+			merged.OutputCostRatio = existing.OutputCostRatio
+			merged.ExpectedOutputTokens = existing.ExpectedOutputTokens
+			merged.PerModelVerbosity = existing.PerModelVerbosity
+		}
+		ctx := router.WithRoutingKnobs(c.Request.Context(), &merged)
 		c.Request = c.Request.WithContext(ctx)
 		log := observability.FromGin(c)
 		log.Debug(

@@ -31,16 +31,10 @@ func resolveReasoningEffortFor(opts EmitOptions) string {
 	return opts.ForceReasoningEffort
 }
 
-// reasoningEffortAcceptedOnChatCompletions reports whether the target actually
-// accepts reasoning_effort on /v1/chat/completions. gpt-5.x rejects the field
-// outright (the proxy routes gpt-5.x through the Responses API anyway — see
-// emit_openai_responses.go:18), so we want to skip writing it for those
-// targets to avoid a session-killing 400. Other CapReasoning models
-// (OpenRouter OSS reasoning models today) accept reasoning_effort freely.
+// reasoningEffortAcceptedOnChatCompletions reports whether the target accepts
+// reasoning_effort on /v1/chat/completions. gpt-5.x rejects it (routed through
+// Responses API); other CapReasoning models (OpenRouter OSS) accept it freely.
 func reasoningEffortAcceptedOnChatCompletions(opts EmitOptions) bool {
-	// gpt-5.x on chat/completions rejects reasoning_effort + tools together;
-	// the Responses API carries the knob for those models, so chat-completions
-	// here means OpenRouter OSS reasoning models.
 	if strings.HasPrefix(opts.TargetModel, "gpt-5") {
 		return false
 	}
@@ -194,11 +188,7 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	// User-forced effort on Chat-Completions: write reasoning_effort on cap-
-	// reasoning targets that accept it. gpt-5.x on /v1/chat/completions rejects
-	// this field (the comment at emit_openai_responses.go:18 documents it), so
-	// the proxy routes gpt-5.x through the Responses API anyway; this branch
-	// mainly covers OpenRouter OSS reasoning models that take both shapes.
+	// Write reasoning_effort for CapReasoning targets that accept it on chat/completions.
 	if forced := resolveReasoningEffortFor(opts); forced != "" && opts.Capabilities.Supports(router.CapReasoning) && reasoningEffortAcceptedOnChatCompletions(opts) {
 		body, err = sjson.SetBytes(body, "reasoning_effort", forced)
 		if err != nil {

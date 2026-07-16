@@ -23,13 +23,7 @@ type Overrides struct {
 	PerModelVerbosity    *bool
 	// ForceEffort, when non-empty, overrides the request-derived reasoning
 	// effort for the served model. Wins over Service.effortEscalation's
-	// gpt-5.x/gemini-3.x ForceReasoningEffort (so a user on the new header
-	// can't get their explicit knob downgraded mid-session). Per-model caps
-	// still apply: "xhigh" clamps to "max" on non-CapXhighEffort targets.
-	// Accepted values: low, medium, high, max, xhigh (string form), or the
-	// force-model suffix aliases fast/minimal→low, ultra→xhigh. Empty =
-	// no user override; the existing inbound-client-effort / escalate-on-
-	// failure / no-effort-default ladder decides.
+	// Wins over effortEscalation; per-model caps (xhigh→max on non-CapXhighEffort) still apply.
 	ForceEffort string
 }
 

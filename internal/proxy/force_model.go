@@ -106,18 +106,11 @@ func resolveForceModel(model string) (canonicalID, provider string, known bool) 
 	return canon, prov, kn
 }
 
-// resolveForceModelWithEffort maps a user-typed model identifier to its
-// canonical catalog ID, primary provider, and any `:level` effort suffix
-// they wrote. A `:low`/`:high`/`:max`/`:xhigh`/`:fast`/`:ultra` suffix is
-// split off before resolution and returned as the fourth value so the
-// caller can persist it (or stash it on the request context for the
-// per-turn emit path). Resolution order mirrors resolveForceModel:
-// alias -> catalog.ByID -> suffix-match fallback -> provider heuristic.
-//
-// `known` is true only for catalog matches; an unrecognized value with a
-// valid `:level` suffix still returns effort != "" and known=false, so the
-// caller can still surface a useful error to the user ("model not found")
-// rather than silently swallowing both halves of the input.
+// resolveForceModelWithEffort is like resolveForceModel but also strips a
+// `:level` suffix and returns it as effort. Resolution order: alias →
+// catalog.ByID → suffix-match → provider heuristic. `known` is true only for
+// catalog matches; known=false + effort!="" lets callers surface "model not
+// found" without swallowing the effort half.
 func resolveForceModelWithEffort(model string) (canonicalID, provider string, known bool, effort string) {
 	effortLevel, stripped := stripEffortSuffix(model)
 	model = stripped
@@ -159,11 +152,8 @@ func resolveForceModelWithEffort(model string) (canonicalID, provider string, kn
 	}
 }
 
-// stripEffortSuffix pulls a `:level` suffix off a force-model input. Maps
-// user-facing alias forms ("fast","minimal","ultra") to canonical levels
-// ("low","low","xhigh") via translate.CanonicalizeEffort, so the header
-// and the pin-and-effort surface disagree with the middleware parser.
-// No suffix → ("", input verbatim).
+// stripEffortSuffix splits a `:level` suffix off model, canonicalizes it via
+// CanonicalizeEffort, and returns ("", model) when no recognized suffix found.
 func stripEffortSuffix(model string) (effort string, modelOut string) {
 	const sep = ":"
 	idx := strings.LastIndex(model, sep)
@@ -177,10 +167,8 @@ func stripEffortSuffix(model string) (effort string, modelOut string) {
 	return translate.CanonicalizeEffort(tail), model[:idx]
 }
 
-// looksLikeEffortAlias is the cheap allow-list pre-check on colon-suffixed
-// force-model inputs. Catalog IDs don't contain `:` today (the catalog
-// is the source of truth and never used them); this guards against
-// future IDs that happen to use a colon.
+// looksLikeEffortAlias guards against future catalog IDs that contain `:`,
+// ensuring the colon is only treated as a suffix separator for known levels.
 func looksLikeEffortAlias(tail string) bool {
 	switch strings.ToLower(strings.TrimSpace(tail)) {
 	case "fast", "low", "medium", "med", "high", "max", "xhigh",
@@ -234,12 +222,8 @@ func (s *Service) setForceModelPin(
 // (re)written on every request carrying the header. Unrecognized models are
 // ignored (routing proceeds automatically) rather than failing the request.
 //
-// A `:level` suffix on the value (`:low`, `:fast`, `:ultra`, etc.) is split
-// off and stashed on the request context as router.Overrides.ForceEffort
-// so the proxy consumes it on the same turn. Eval harnesses that need to
-// pin a model AND force effort can do so in one header, instead of
-// sharing session state between a pin turn and a separate force-effort
-// turn.
+// A `:level` suffix (`:low`, `:fast`, `:ultra`) is stashed on the request
+// context as router.Overrides.ForceEffort so pin + effort land in one header.
 func (s *Service) applyForceModelHeader(
 	ctx context.Context,
 	r *http.Request,
@@ -254,11 +238,22 @@ func (s *Service) applyForceModelHeader(
 	log := observability.FromContext(ctx)
 	canonicalModel, provider, known, effortLevel := resolveForceModelWithEffort(raw)
 	if effortLevel != "" {
-		// Stash on the request context so routingKnobsForRequest + the
-		// proxy's EmitOptions build both pick it up on the same turn.
-		// Same surface the WithForceEffortOverride middleware takes.
-		overrides := router.Overrides{ForceEffort: effortLevel}
-		ctx = router.WithRoutingKnobs(ctx, &overrides)
+		// Stash on the request context so routingKnobsForRequest +
+		// the proxy's EmitOptions build both pick it up on the same
+		// turn. Merge with any existing knobs so ForceEffort doesn't
+		// silently drop a separately-configured Alpha/QualityBias.
+		merged := router.Overrides{ForceEffort: effortLevel}
+		if existing := router.RoutingKnobsFromContext(r.Context()); existing != nil {
+			merged.Alpha = existing.Alpha
+			merged.QualityBias = existing.QualityBias
+			merged.SpeedWeight = existing.SpeedWeight
+			merged.OutputCostRatio = existing.OutputCostRatio
+			merged.ExpectedOutputTokens = existing.ExpectedOutputTokens
+			merged.PerModelVerbosity = existing.PerModelVerbosity
+		}
+		// Mutate *r so the caller's downstream routingKnobsForRequest
+		// (which reads ctx from r.Context()) discovers the knob.
+		*r = *r.WithContext(router.WithRoutingKnobs(r.Context(), &merged))
 	}
 	if !known {
 		log.Info("x-weave-force-model: ignoring unrecognized model; routing automatically",
