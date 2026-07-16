@@ -108,6 +108,8 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "full tool result", got.TrainingConversationDelta[1].ToolResults[0].Text)
 	require.Len(t, got.TrainingConversationDelta[2].ToolCalls, 1)
 	assert.Equal(t, `{"file_path":"README.md"}`, got.TrainingConversationDelta[2].ToolCalls[0].InputJSON)
+	require.NotNil(t, got.TrainingConversationDeltaTruncated)
+	assert.False(t, *got.TrainingConversationDeltaTruncated)
 	assert.Empty(t, got.ConversationMessages[2].ToolResults[0].Text)
 	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	require.Len(t, got.Candidates, 1)
@@ -297,3 +299,80 @@ func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+func TestTrainingRouteMessageDeltaClipsOversizedToolResult(t *testing.T) {
+	oversized := strings.Repeat("x", maxTrainingDeltaChars+10_000)
+	delta, truncated := trainingRouteMessageDelta([]router.ConversationMessage{
+		{Role: "user", Text: "please inspect the repo"},
+		{Role: "assistant", Text: "reading file"},
+		{Role: "user", ToolResults: []router.ConversationToolResult{{ToolUseID: "toolu_1", Text: oversized}}},
+	})
+
+	require.Len(t, delta, 1)
+	require.Len(t, delta[0].ToolResults, 1)
+	assert.Equal(t, maxTrainingDeltaChars, len(delta[0].ToolResults[0].Text))
+	assert.True(t, truncated)
+}
+
+func TestTrainingRouteMessageDeltaSignalsTruncation(t *testing.T) {
+	oversized := strings.Repeat("z", maxTrainingDeltaChars+1)
+	_, truncated := trainingRouteMessageDelta([]router.ConversationMessage{
+		{Role: "user", Text: "request"},
+		{Role: "assistant", Text: "working"},
+		{Role: "user", ToolResults: []router.ConversationToolResult{{ToolUseID: "toolu_1", Text: oversized}}},
+	})
+	assert.True(t, truncated)
+}
+
+func TestClientSignalsHMMTrainingDeltaTruncation(t *testing.T) {
+	var got routeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(routeResponse{SelectedRosterID: "model"})
+	}))
+	defer server.Close()
+
+	oversized := strings.Repeat("y", maxTrainingDeltaChars+5_000)
+	_, err := New(server.URL, server.Client(), 0).Decide(context.Background(), policy.Query{
+		Strategy:        router.StrategyHMM,
+		TrainingAllowed: true,
+		ConversationMessages: []router.ConversationMessage{
+			{Role: "user", Text: "request"},
+			{Role: "assistant", Text: strings.Repeat("a", maxRouteMessageTextChars+1)},
+			{Role: "user", ToolResults: []router.ConversationToolResult{{ToolUseID: "toolu_1", Text: oversized}}},
+		},
+		Candidates: []policy.Candidate{{RosterID: "model"}},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, got.TrainingConversationDelta, 1)
+	require.Len(t, got.TrainingConversationDelta[0].ToolResults, 1)
+	assert.Equal(t, maxTrainingDeltaChars, len(got.TrainingConversationDelta[0].ToolResults[0].Text))
+	require.NotNil(t, got.TrainingConversationDeltaTruncated)
+	assert.True(t, *got.TrainingConversationDeltaTruncated)
+	require.Len(t, got.ConversationMessages, 3)
+	assert.Equal(t, maxRouteMessageTextChars, len(got.ConversationMessages[1].Text))
+	require.Len(t, got.ConversationMessages[2].ToolResults, 1)
+	assert.Empty(t, got.ConversationMessages[2].ToolResults[0].Text)
+}
+
+func TestClientOmitsTrainingDeltaTruncationFlagWithoutDelta(t *testing.T) {
+	var got routeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(routeResponse{SelectedRosterID: "model"})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client(), 0).Decide(context.Background(), policy.Query{
+		Strategy: router.StrategyHMM,
+		ConversationMessages: []router.ConversationMessage{
+			{Role: "user", Text: "request"},
+			{Role: "assistant", Text: "response"},
+			{Role: "user", Text: "next request"},
+		},
+		Candidates: []policy.Candidate{{RosterID: "model"}},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, got.TrainingConversationDeltaTruncated)
+}

@@ -32,6 +32,12 @@ const (
 	maxRouteToolCallInputChars = 80
 )
 
+// maxTrainingDeltaChars mirrors proxy.policyOutcomeResponseMaxBytes (256 KiB).
+// Per-field (maxTextChars) and total (maxTotalTextChars) use the same value
+// intentionally: no single field or combined delta may exceed the outcome-body
+// cap the sidecar already accepts on /outcome.
+const maxTrainingDeltaChars = 256 * 1024
+
 // Client calls a versioned policy sidecar.
 type Client struct {
 	baseURL string
@@ -139,38 +145,39 @@ func (c *Client) post(ctx context.Context, path string, payload map[string]inter
 }
 
 type routeRequest struct {
-	SchemaVersion             string             `json:"schema_version"`
-	Strategy                  string             `json:"strategy"`
-	ExecutionMode             string             `json:"execution_mode"`
-	RouteID                   string             `json:"route_id"`
-	OrganizationID            string             `json:"organization_id,omitempty"`
-	InstallationID            string             `json:"installation_id,omitempty"`
-	ClientApp                 string             `json:"client_app,omitempty"`
-	Harness                   string             `json:"harness,omitempty"`
-	RolloutID                 string             `json:"rollout_id,omitempty"`
-	RequestedModel            string             `json:"requested_model,omitempty"`
-	PromptText                string             `json:"prompt_text"`
-	LatestUserText            string             `json:"latest_user_text,omitempty"`
-	TurnIndex                 int                `json:"turn_index"`
-	ConversationMessages      []routeMessage     `json:"conversation_messages,omitempty"`
-	TrainingConversationDelta []routeMessage     `json:"training_conversation_delta,omitempty"`
-	AvailableTools            []string           `json:"available_tools,omitempty"`
-	FeedbackKey               string             `json:"feedback_key,omitempty"`
-	FeedbackRole              string             `json:"feedback_role,omitempty"`
-	ClientSessionID           string             `json:"client_session_id,omitempty"`
-	EstimatedInputTokens      int                `json:"estimated_input_tokens"`
-	HasTools                  bool               `json:"has_tools"`
-	HasImages                 bool               `json:"has_images"`
-	RoutingIntent             string             `json:"routing_intent,omitempty"`
-	PreferredModels           []string           `json:"preferred_models,omitempty"`
-	RoutingKnobs              *routingKnobs      `json:"routing_knobs,omitempty"`
-	QualityBias               *float64           `json:"quality_bias,omitempty"`
-	TrainingAllowed           bool               `json:"training_allowed"`
-	CaptureMode               string             `json:"capture_mode,omitempty"`
-	DebugEnabled              bool               `json:"debug_enabled"`
-	Candidates                []policy.Candidate `json:"candidates"`
-	CandidateModels           []string           `json:"candidate_models"`
-	CandidateProviders        map[string]string  `json:"candidate_providers"`
+	SchemaVersion                      string             `json:"schema_version"`
+	Strategy                           string             `json:"strategy"`
+	ExecutionMode                      string             `json:"execution_mode"`
+	RouteID                            string             `json:"route_id"`
+	OrganizationID                     string             `json:"organization_id,omitempty"`
+	InstallationID                     string             `json:"installation_id,omitempty"`
+	ClientApp                          string             `json:"client_app,omitempty"`
+	Harness                            string             `json:"harness,omitempty"`
+	RolloutID                          string             `json:"rollout_id,omitempty"`
+	RequestedModel                     string             `json:"requested_model,omitempty"`
+	PromptText                         string             `json:"prompt_text"`
+	LatestUserText                     string             `json:"latest_user_text,omitempty"`
+	TurnIndex                          int                `json:"turn_index"`
+	ConversationMessages               []routeMessage     `json:"conversation_messages,omitempty"`
+	TrainingConversationDelta          []routeMessage     `json:"training_conversation_delta,omitempty"`
+	TrainingConversationDeltaTruncated *bool              `json:"training_conversation_delta_truncated,omitempty"` // set when delta non-empty and any clip occurred
+	AvailableTools                     []string           `json:"available_tools,omitempty"`
+	FeedbackKey                        string             `json:"feedback_key,omitempty"`
+	FeedbackRole                       string             `json:"feedback_role,omitempty"`
+	ClientSessionID                    string             `json:"client_session_id,omitempty"`
+	EstimatedInputTokens               int                `json:"estimated_input_tokens"`
+	HasTools                           bool               `json:"has_tools"`
+	HasImages                          bool               `json:"has_images"`
+	RoutingIntent                      string             `json:"routing_intent,omitempty"`
+	PreferredModels                    []string           `json:"preferred_models,omitempty"`
+	RoutingKnobs                       *routingKnobs      `json:"routing_knobs,omitempty"`
+	QualityBias                        *float64           `json:"quality_bias,omitempty"`
+	TrainingAllowed                    bool               `json:"training_allowed"`
+	CaptureMode                        string             `json:"capture_mode,omitempty"`
+	DebugEnabled                       bool               `json:"debug_enabled"`
+	Candidates                         []policy.Candidate `json:"candidates"`
+	CandidateModels                    []string           `json:"candidate_models"`
+	CandidateProviders                 map[string]string  `json:"candidate_providers"`
 }
 
 type routingKnobs struct {
@@ -245,10 +252,11 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	}
 	messages := routeMessages(query.ConversationMessages)
 	var trainingDelta []routeMessage
+	var trainingDeltaTruncated bool
 	if query.Strategy == router.StrategyHMM && query.TrainingAllowed {
-		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
+		trainingDelta, trainingDeltaTruncated = trainingRouteMessageDelta(query.ConversationMessages)
 	}
-	body, err := json.Marshal(routeRequest{
+	routeBody := routeRequest{
 		SchemaVersion:             policy.SchemaVersionV1,
 		Strategy:                  string(query.Strategy),
 		ExecutionMode:             query.ExecutionMode,
@@ -281,7 +289,12 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		Candidates:                query.Candidates,
 		CandidateModels:           models,
 		CandidateProviders:        providerMap,
-	})
+	}
+	if len(trainingDelta) > 0 {
+		truncated := trainingDeltaTruncated
+		routeBody.TrainingConversationDeltaTruncated = &truncated
+	}
+	body, err := json.Marshal(routeBody)
 	if err != nil {
 		return policy.Result{}, fmt.Errorf("marshal policy route request: %w", err)
 	}
@@ -423,18 +436,19 @@ type routeMessageLimits struct {
 }
 
 func routeMessages(messages []router.ConversationMessage) []routeMessage {
-	return convertRouteMessages(messages, routeMessageLimits{
+	out, _ := convertRouteMessages(messages, routeMessageLimits{
 		maxMessages:           maxRouteMessages,
 		maxTextChars:          maxRouteMessageTextChars,
 		maxTotalTextChars:     maxRouteMessageTotalChars,
 		maxToolCallInputKeys:  maxRouteToolCallInputKeys,
 		maxToolCallInputChars: maxRouteToolCallInputChars,
 	})
+	return out
 }
 
-func trainingRouteMessageDelta(messages []router.ConversationMessage) []routeMessage {
+func trainingRouteMessageDelta(messages []router.ConversationMessage) ([]routeMessage, bool) {
 	if len(messages) == 0 {
-		return nil
+		return nil, false
 	}
 
 	// Each route happens before its next assistant response. Preserve the new
@@ -457,14 +471,18 @@ func trainingRouteMessageDelta(messages []router.ConversationMessage) []routeMes
 	}
 
 	return convertRouteMessages(messages[start:], routeMessageLimits{
+		maxTextChars:          maxTrainingDeltaChars,
+		maxTotalTextChars:     maxTrainingDeltaChars,
+		maxToolCallInputKeys:  maxRouteToolCallInputKeys,
+		maxToolCallInputChars: maxRouteToolCallInputChars,
 		includeToolCallInput:  true,
 		includeToolResultText: true,
 	})
 }
 
-func convertRouteMessages(messages []router.ConversationMessage, limits routeMessageLimits) []routeMessage {
+func convertRouteMessages(messages []router.ConversationMessage, limits routeMessageLimits) ([]routeMessage, bool) {
 	if len(messages) == 0 {
-		return nil
+		return nil, false
 	}
 	start := 0
 	if limits.maxMessages > 0 && len(messages) > limits.maxMessages {
@@ -472,52 +490,84 @@ func convertRouteMessages(messages []router.ConversationMessage, limits routeMes
 	}
 	reversed := make([]routeMessage, 0, len(messages)-start)
 	totalText := 0
+	truncated := start > 0
+	countToolPayloadTowardTotal := limits.includeToolResultText || limits.includeToolCallInput
 	for i := len(messages) - 1; i >= start; i-- {
 		message := messages[i]
 		role := routeRole(message.Role)
 		if role == "" {
 			continue
 		}
-		text := clipRouteText(message.Text, limits.maxTextChars)
-		if limits.maxTotalTextChars > 0 && totalText+len(text) > limits.maxTotalTextChars {
-			remaining := limits.maxTotalTextChars - totalText
-			if remaining <= 0 {
-				text = ""
-			} else {
-				text = clipRouteText(text, remaining)
-			}
+		text, textTruncated := clipRouteTextWithTruncation(message.Text, limits.maxTextChars)
+		if textTruncated {
+			truncated = true
 		}
-		totalText += len(text)
+		text, budgetTruncated := applyRouteTextBudget(text, &totalText, limits.maxTotalTextChars)
+		if budgetTruncated {
+			truncated = true
+		}
 		calls := make([]routeToolCall, 0, len(message.ToolCalls))
 		for _, call := range message.ToolCalls {
-			name := clipRouteText(call.Name, limits.maxToolCallInputChars)
+			name, nameTruncated := clipRouteTextWithTruncation(call.Name, limits.maxToolCallInputChars)
+			if nameTruncated {
+				truncated = true
+			}
 			if name == "" {
 				continue
 			}
 			keys := call.InputKeys
 			if limits.maxToolCallInputKeys > 0 && len(keys) > limits.maxToolCallInputKeys {
 				keys = keys[:limits.maxToolCallInputKeys]
+				truncated = true
 			}
 			inputKeys := make([]string, 0, len(keys))
 			for _, key := range keys {
-				if clipped := clipRouteText(key, limits.maxToolCallInputChars); clipped != "" {
+				clipped, keyTruncated := clipRouteTextWithTruncation(key, limits.maxToolCallInputChars)
+				if keyTruncated {
+					truncated = true
+				}
+				if clipped != "" {
 					inputKeys = append(inputKeys, clipped)
 				}
 			}
 			routeCall := routeToolCall{Name: name, InputKeys: inputKeys}
 			if limits.includeToolCallInput {
-				routeCall.InputJSON = clipRouteText(call.InputJSON, limits.maxTextChars)
+				inputJSON, inputTruncated := clipRouteTextWithTruncation(call.InputJSON, limits.maxTextChars)
+				if inputTruncated {
+					truncated = true
+				}
+				if countToolPayloadTowardTotal {
+					inputJSON, budgetTruncated = applyRouteTextBudget(inputJSON, &totalText, limits.maxTotalTextChars)
+					if budgetTruncated {
+						truncated = true
+					}
+				}
+				routeCall.InputJSON = inputJSON
 			}
 			calls = append(calls, routeCall)
 		}
 		results := make([]routeToolResult, 0, len(message.ToolResults))
 		for _, result := range message.ToolResults {
+			toolUseID, idTruncated := clipRouteTextWithTruncation(result.ToolUseID, limits.maxToolCallInputChars)
+			if idTruncated {
+				truncated = true
+			}
 			routeResult := routeToolResult{
-				ToolUseID: clipRouteText(result.ToolUseID, limits.maxToolCallInputChars),
+				ToolUseID: toolUseID,
 				IsError:   result.IsError,
 			}
 			if limits.includeToolResultText {
-				routeResult.Text = clipRouteText(result.Text, limits.maxTextChars)
+				resultText, resultTruncated := clipRouteTextWithTruncation(result.Text, limits.maxTextChars)
+				if resultTruncated {
+					truncated = true
+				}
+				if countToolPayloadTowardTotal {
+					resultText, budgetTruncated = applyRouteTextBudget(resultText, &totalText, limits.maxTotalTextChars)
+					if budgetTruncated {
+						truncated = true
+					}
+				}
+				routeResult.Text = resultText
 			}
 			results = append(results, routeResult)
 		}
@@ -530,7 +580,7 @@ func convertRouteMessages(messages []router.ConversationMessage, limits routeMes
 	for i := len(reversed) - 1; i >= 0; i-- {
 		out = append(out, reversed[i])
 	}
-	return out
+	return out, truncated
 }
 
 func routeRole(role string) string {
@@ -545,11 +595,36 @@ func routeRole(role string) string {
 }
 
 func clipRouteText(text string, limit int) string {
+	clipped, _ := clipRouteTextWithTruncation(text, limit)
+	return clipped
+}
+
+func clipRouteTextWithTruncation(text string, limit int) (string, bool) {
 	text = strings.TrimSpace(text)
 	if limit <= 0 || len(text) <= limit {
-		return text
+		return text, false
 	}
-	return strings.TrimSpace(text[:limit])
+	return strings.TrimSpace(text[:limit]), true
+}
+
+func applyRouteTextBudget(text string, totalUsed *int, maxTotal int) (string, bool) {
+	if maxTotal <= 0 {
+		*totalUsed += len(text)
+		return text, false
+	}
+	remaining := maxTotal - *totalUsed
+	if remaining <= 0 {
+		if text != "" {
+			return "", true
+		}
+		return "", false
+	}
+	if len(text) > remaining {
+		*totalUsed = maxTotal
+		return strings.TrimSpace(text[:remaining]), true
+	}
+	*totalUsed += len(text)
+	return text, false
 }
 
 func latestUserText(messages []routeMessage) string {
