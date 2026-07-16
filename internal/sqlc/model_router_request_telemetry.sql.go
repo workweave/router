@@ -71,6 +71,430 @@ func (q *Queries) GetRequestForFeedback(ctx context.Context, arg GetRequestForFe
 	return i, err
 }
 
+const getTelemetryModelBreakdownDaily = `-- name: GetTelemetryModelBreakdownDaily :many
+SELECT
+    date_trunc('day', timestamp)::timestamptz                                AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND span_type = 'router.upstream'
+  AND timestamp >= $2::timestamptz
+  AND timestamp < $3::timestamptz
+GROUP BY date_trunc('day', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownDailyParams struct {
+	InstallationID uuid.UUID
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownDailyRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-day request/token/cost buckets grouped by decision model for one
+// installation.
+//
+//	SELECT
+//	    date_trunc('day', timestamp)::timestamptz                                AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND span_type = 'router.upstream'
+//	  AND timestamp >= $2::timestamptz
+//	  AND timestamp < $3::timestamptz
+//	GROUP BY date_trunc('day', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownDaily(ctx context.Context, arg GetTelemetryModelBreakdownDailyParams) ([]GetTelemetryModelBreakdownDailyRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownDaily, arg.InstallationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownDailyRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownDailyRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryModelBreakdownDailyAll = `-- name: GetTelemetryModelBreakdownDailyAll :many
+SELECT
+    date_trunc('day', timestamp)::timestamptz                                AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+GROUP BY date_trunc('day', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownDailyAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownDailyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-day request/token/cost buckets grouped by decision model, across
+// every installation. Admin-only.
+//
+//	SELECT
+//	    date_trunc('day', timestamp)::timestamptz                                AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	GROUP BY date_trunc('day', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownDailyAll(ctx context.Context, arg GetTelemetryModelBreakdownDailyAllParams) ([]GetTelemetryModelBreakdownDailyAllRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownDailyAll, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownDailyAllRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownDailyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryModelBreakdownHourly = `-- name: GetTelemetryModelBreakdownHourly :many
+SELECT
+    date_trunc('hour', timestamp)::timestamptz                               AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND span_type = 'router.upstream'
+  AND timestamp >= $2::timestamptz
+  AND timestamp < $3::timestamptz
+GROUP BY date_trunc('hour', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownHourlyParams struct {
+	InstallationID uuid.UUID
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownHourlyRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-hour request/token/cost buckets grouped by decision model for one
+// installation. Powers the dashboard's per-model usage and spend charts.
+//
+//	SELECT
+//	    date_trunc('hour', timestamp)::timestamptz                               AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND span_type = 'router.upstream'
+//	  AND timestamp >= $2::timestamptz
+//	  AND timestamp < $3::timestamptz
+//	GROUP BY date_trunc('hour', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownHourly(ctx context.Context, arg GetTelemetryModelBreakdownHourlyParams) ([]GetTelemetryModelBreakdownHourlyRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownHourly, arg.InstallationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownHourlyRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownHourlyRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryModelBreakdownHourlyAll = `-- name: GetTelemetryModelBreakdownHourlyAll :many
+SELECT
+    date_trunc('hour', timestamp)::timestamptz                               AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+GROUP BY date_trunc('hour', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownHourlyAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownHourlyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-hour request/token/cost buckets grouped by the model the router
+// selected, across every installation. Powers the dashboard's per-model
+// usage and spend charts. Admin-only.
+//
+//	SELECT
+//	    date_trunc('hour', timestamp)::timestamptz                               AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	GROUP BY date_trunc('hour', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownHourlyAll(ctx context.Context, arg GetTelemetryModelBreakdownHourlyAllParams) ([]GetTelemetryModelBreakdownHourlyAllRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownHourlyAll, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownHourlyAllRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownHourlyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryModelBreakdownWeekly = `-- name: GetTelemetryModelBreakdownWeekly :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz                               AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND span_type = 'router.upstream'
+  AND timestamp >= $2::timestamptz
+  AND timestamp < $3::timestamptz
+GROUP BY date_trunc('week', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownWeeklyParams struct {
+	InstallationID uuid.UUID
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownWeeklyRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-ISO-week request/token/cost buckets grouped by decision model for
+// one installation.
+//
+//	SELECT
+//	    date_trunc('week', timestamp)::timestamptz                               AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND span_type = 'router.upstream'
+//	  AND timestamp >= $2::timestamptz
+//	  AND timestamp < $3::timestamptz
+//	GROUP BY date_trunc('week', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownWeekly(ctx context.Context, arg GetTelemetryModelBreakdownWeeklyParams) ([]GetTelemetryModelBreakdownWeeklyRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownWeekly, arg.InstallationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownWeeklyRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownWeeklyRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTelemetryModelBreakdownWeeklyAll = `-- name: GetTelemetryModelBreakdownWeeklyAll :many
+SELECT
+    date_trunc('week', timestamp)::timestamptz                               AS bucket,
+    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+    COUNT(*)::bigint                                                          AS request_count,
+    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+GROUP BY date_trunc('week', timestamp), COALESCE(decision_model, '')
+ORDER BY bucket ASC, decision_model ASC
+`
+
+type GetTelemetryModelBreakdownWeeklyAllParams struct {
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type GetTelemetryModelBreakdownWeeklyAllRow struct {
+	Bucket        pgtype.Timestamptz
+	DecisionModel string
+	RequestCount  int64
+	TotalTokens   int64
+	ActualCostUsd int64
+}
+
+// Per-ISO-week request/token/cost buckets grouped by decision model,
+// across every installation. Admin-only.
+//
+//	SELECT
+//	    date_trunc('week', timestamp)::timestamptz                               AS bucket,
+//	    COALESCE(decision_model, '')::varchar                                    AS decision_model,
+//	    COUNT(*)::bigint                                                          AS request_count,
+//	    COALESCE(SUM(input_tokens + output_tokens), 0)::bigint                   AS total_tokens,
+//	    COALESCE(SUM(actual_input_cost_usd + actual_output_cost_usd), 0)::bigint AS actual_cost_usd
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	GROUP BY date_trunc('week', timestamp), COALESCE(decision_model, '')
+//	ORDER BY bucket ASC, decision_model ASC
+func (q *Queries) GetTelemetryModelBreakdownWeeklyAll(ctx context.Context, arg GetTelemetryModelBreakdownWeeklyAllParams) ([]GetTelemetryModelBreakdownWeeklyAllRow, error) {
+	rows, err := q.db.Query(ctx, getTelemetryModelBreakdownWeeklyAll, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTelemetryModelBreakdownWeeklyAllRow
+	for rows.Next() {
+		var i GetTelemetryModelBreakdownWeeklyAllRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.DecisionModel,
+			&i.RequestCount,
+			&i.TotalTokens,
+			&i.ActualCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTelemetryRows = `-- name: GetTelemetryRows :many
 SELECT
     t.timestamp,

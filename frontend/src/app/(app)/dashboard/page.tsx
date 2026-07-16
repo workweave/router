@@ -4,6 +4,7 @@ import { Text } from "@/components/atoms/Text";
 import { ChartCard } from "@/components/ChartCard";
 import { CostBreakdownChart } from "@/components/charts/CostBreakdownChart";
 import { CumulativeSavingsChart } from "@/components/charts/CumulativeSavingsChart";
+import { ModelBreakdownChart } from "@/components/charts/ModelBreakdownChart";
 import { RouterCostSavingsChart } from "@/components/charts/RouterCostSavingsChart";
 import { SavingsRateChart } from "@/components/charts/SavingsRateChart";
 import {
@@ -15,7 +16,12 @@ import { Page } from "@/components/Page";
 import { PageHeader } from "@/components/PageHeader";
 import { ResponsiveGrid } from "@/components/ResponsiveGrid";
 import { Statistic } from "@/components/Statistic";
-import { api, type MetricsSummary, type TimeseriesBucket } from "@/lib/api";
+import {
+  api,
+  type MetricsSummary,
+  type ModelBreakdownBucket,
+  type TimeseriesBucket,
+} from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { LoadState } from "@/tools/LoadState";
 import { useEffect, useState } from "react";
@@ -38,6 +44,7 @@ export default function DashboardPage() {
 
   const [summary, setSummary] = useState<MetricsSummary | null>(null);
   const [buckets, setBuckets] = useState<TimeseriesBucket[]>([]);
+  const [modelBuckets, setModelBuckets] = useState<ModelBreakdownBucket[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,11 +53,13 @@ export default function DashboardPage() {
     Promise.all([
       api.metrics.summary(fromISO, toISO),
       api.metrics.timeseries(granularity, fromISO, toISO),
+      api.metrics.modelBreakdown(granularity, fromISO, toISO),
     ])
-      .then(([s, ts]) => {
+      .then(([s, ts, mb]) => {
         if (cancelled) return;
         setSummary(s);
         setBuckets(ts.buckets ?? []);
+        setModelBuckets(mb.buckets ?? []);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -96,6 +105,7 @@ export default function DashboardPage() {
       ? 0
       : summary.total_tokens / summary.request_count;
   const empty = buckets.length === 0;
+  const modelEmpty = modelBuckets.length === 0;
 
   return (
     <Page
@@ -209,6 +219,38 @@ export default function DashboardPage() {
               <EmptyChart height={220} />
             ) : (
               <CostBreakdownChart buckets={buckets} granularity={granularity} />
+            )}
+          </ChartCard>
+
+          <ChartCard
+            className={ResponsiveGrid.Medium}
+            title="Model usage"
+            subtitle="Requests per bucket broken down by the model the router selected."
+          >
+            {modelEmpty ? (
+              <EmptyChart height={220} />
+            ) : (
+              <ModelBreakdownChart
+                buckets={modelBuckets}
+                granularity={granularity}
+                metric="requests"
+              />
+            )}
+          </ChartCard>
+
+          <ChartCard
+            className={ResponsiveGrid.Medium}
+            title="Model spend"
+            subtitle="Actual cost per bucket broken down by the model the router selected."
+          >
+            {modelEmpty ? (
+              <EmptyChart height={220} />
+            ) : (
+              <ModelBreakdownChart
+                buckets={modelBuckets}
+                granularity={granularity}
+                metric="spend"
+              />
             )}
           </ChartCard>
         </ResponsiveGrid>

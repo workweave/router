@@ -52,6 +52,18 @@ export interface MetricsTimeseries {
   buckets: TimeseriesBucket[];
 }
 
+export interface ModelBreakdownBucket {
+  bucket: string;
+  decision_model: string;
+  request_count: number;
+  total_tokens: number;
+  actual_cost_usd: number;
+}
+
+export interface MetricsModelBreakdown {
+  buckets: ModelBreakdownBucket[];
+}
+
 export interface MetricsDetailRow {
   timestamp: string;
   request_id: string;
@@ -167,6 +179,12 @@ export const api = {
     details: (from: string, to: string, limit: number = 100) => {
       const params = new URLSearchParams({ from, to, limit: String(limit) });
       return request<MetricsDetails>(`/metrics/details?${params.toString()}`);
+    },
+    modelBreakdown: (granularity: "hour" | "day" | "week", from?: string, to?: string) => {
+      const params = new URLSearchParams({ granularity });
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      return request<MetricsModelBreakdown>(`/metrics/model-breakdown?${params.toString()}`);
     },
   },
   keys: {

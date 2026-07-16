@@ -45,6 +45,14 @@ func (panicTelemetryRepo) GetTelemetryRowsAll(ctx context.Context, from, to time
 	return nil, nil
 }
 
+func (panicTelemetryRepo) GetTelemetryModelBreakdown(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryModelBucket, error) {
+	return nil, nil
+}
+
+func (panicTelemetryRepo) GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error) {
+	return nil, nil
+}
+
 // TestFireTelemetryRecoversFromPanic proves a panic inside the async
 // telemetry insert is caught and logged instead of crashing the process.
 func TestFireTelemetryRecoversFromPanic(t *testing.T) {
