@@ -191,11 +191,9 @@ func (b *Router) annotate(dec *router.Decision, model, provider string, propensi
 }
 
 // repairBandPair recomputes the band pair's runner-up against the served
-// model, writing it back through the metadata pointers. Picks the
-// highest-scoring servable peer other than served (ties broken by name);
-// clears the pair if none remains. Providers come from the live candidate
-// list (resolved before annotate) so the prior argmax stays eligible even
-// when it was only bound via Decision.Provider.
+// model. Picks the highest-scoring servable peer other than served (ties
+// broken by name); clears the pair if none remains. Providers come from the
+// live candidate list so peers resolved only via Decision.Provider stay eligible.
 func repairBandPair(outModel, outProvider *string, outScore *float32, scores map[string]float32, cands []candidate, served string) {
 	providers := make(map[string]string, len(cands))
 	for _, c := range cands {

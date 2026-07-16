@@ -131,10 +131,9 @@ func TestRoute_PropensityReflectsPosteriorOverlap(t *testing.T) {
 }
 
 func TestRoute_KeepsArgmaxWhenSameModel(t *testing.T) {
+	// Keeping the argmax must leave the scorer's PairedModel untouched.
 	scores := map[string]float32{"claude-haiku-4-5": 0.9, "claude-sonnet-4-6": 0.5}
 	inner := clusterDecision(scores, []int{0}, "claude-haiku-4-5", "anthropic")
-	// Scorer's runner-up; keeping the argmax must leave this pair untouched
-	// rather than recomputing it.
 	inner.Metadata.PairedModel = "claude-sonnet-4-6"
 	inner.Metadata.PairedProvider = "anthropic"
 	inner.Metadata.PairedScore = 0.5
@@ -163,11 +162,7 @@ func TestRoute_KeepsArgmaxWhenSameModel(t *testing.T) {
 }
 
 func TestRoute_RepairsBandPairWhenServingRunnerUp(t *testing.T) {
-	// Scorer picks sonnet (argmax 0.90) with haiku (0.85) as the frozen
-	// runner-up. Zero-noise TS prefers haiku's higher posterior mean, so the
-	// served model becomes the former runner-up. The pin pair must not
-	// collapse to {haiku, haiku}: it recomputes to the best remaining peer,
-	// sonnet (the prior argmax).
+	// Serving the former runner-up must recompute PairedModel to the prior argmax.
 	scores := map[string]float32{
 		"claude-sonnet-4-6": 0.90,
 		"claude-haiku-4-5":  0.85,
