@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 	"log/slog"
 
 	"workweave/router/internal/observability"
@@ -61,6 +62,43 @@ func bindRequestLogger(
 		}
 	}
 	return observability.WithLogger(ctx, log), log, key
+}
+
+// DeriveForceModelSessionKey produces a session-wide key for explicit
+// /force-model state. It intentionally excludes the first user message so one
+// command from the main loop also applies to Task/Explore sub-agents, whose
+// prompts differ but share the same client session metadata.
+func DeriveForceModelSessionKey(env *translate.RequestEnvelope, apiKeyID string) [sessionpin.SessionKeyLen]byte {
+	h := sha256.New()
+	h.Write([]byte(apiKeyID))
+	h.Write([]byte{0x00})
+	h.Write([]byte("force_model_session:"))
+	h.Write([]byte{0x00})
+
+	if env != nil {
+		if sid := env.ClientSessionID(); sid != "" {
+			h.Write([]byte("client_session_id:"))
+			h.Write([]byte(sid))
+			return truncateSessionHash(h)
+		}
+		if uid := env.MetadataUserID(); uid != "" {
+			h.Write([]byte("user_id:"))
+			h.Write([]byte(uid))
+			return truncateSessionHash(h)
+		}
+	}
+
+	threadKey := DeriveSessionKey(env, apiKeyID)
+	h.Write([]byte("thread_key:"))
+	h.Write(threadKey[:])
+	return truncateSessionHash(h)
+}
+
+func truncateSessionHash(h hash.Hash) [sessionpin.SessionKeyLen]byte {
+	sum := h.Sum(nil)
+	var key [sessionpin.SessionKeyLen]byte
+	copy(key[:], sum[:sessionpin.SessionKeyLen])
+	return key
 }
 
 // DeriveSessionKey produces a 16-byte session digest from apiKeyID,

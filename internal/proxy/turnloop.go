@@ -210,12 +210,24 @@ func (s *Service) runTurnLoop(
 	// headroom. nil (feature off / no headroom yet) leaves scoring unchanged.
 	req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, reqHeaders)
 
+	// res.SessionKey must stay zero for ordinary hard-pinned turns, but an
+	// explicit /force-model pin is session-wide and is allowed to override
+	// SubAgentDispatch hard-pinning.
+	threadSessionKey := DeriveSessionKey(env, apiKeyID)
+	forceModelSessionKey := DeriveForceModelSessionKey(env, apiKeyID)
+	var forceModelPin sessionpin.Pin
+	forceModelFound := false
+	if res.TurnType == turntype.SubAgentDispatch {
+		forceModelPin, forceModelFound = s.loadForceModelSessionPin(ctx, forceModelSessionKey)
+	}
+	forceModelOverridesHardPin := forceModelFound
+
 	// Hard pins bypass pin lookup/write, planner, and scorer entirely. Probes
 	// and title-gen must never create a session pin: the Anthropic SDK fires
 	// probes before the first real turn, and Claude Code fires title-gen
 	// ~25ms before the real-conv call — an anchored pin would leak the
 	// cheap-model decision into the conversation that follows.
-	if s.isHardPinnedTurn(ctx, res.TurnType) {
+	if s.isHardPinnedTurn(ctx, res.TurnType) && !forceModelOverridesHardPin {
 		provider, model := s.hardPinProvider, s.hardPinModel
 		// The boot-time hard-pin was computed over every registered provider,
 		// but a BYOK request may only authenticate to a subset. Resolve
@@ -256,15 +268,18 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	// res.SessionKey must stay zero in no-pin-store mode, but trim detection
-	// needs the key either way.
-	sessionKey := DeriveSessionKey(env, apiKeyID)
+	stateSessionKey := threadSessionKey
+	statePinRole := res.PinRole
+	if forceModelFound {
+		stateSessionKey = forceModelSessionKey
+		statePinRole = forceModelSessionRole
+	}
 
 	// Runs before routing so the planner can price the pin's cache as dead on
 	// the turn the client rewrote the prompt prefix; env isn't rewritten yet
 	// so counts match what the client sent.
 	res.PrefixTrimmed = s.compaction.checkAndRecord(
-		sessionKey, installationID, res.PinRole,
+		stateSessionKey, installationID, statePinRole,
 		feats.MessageCount, len(env.AssistantToolCallSignatures()),
 	)
 	// prefixTrimFreeSwitch gates actions only; detection stays unconditional
@@ -294,9 +309,13 @@ func (s *Service) runTurnLoop(
 		return res, nil
 	}
 
-	res.SessionKey = sessionKey
+	res.SessionKey = stateSessionKey
+	res.PinRole = statePinRole
 
-	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
+	pin, pinFound := forceModelPin, forceModelFound
+	if !forceModelFound {
+		pin, pinFound = s.loadPin(ctx, res.SessionKey, res.PinRole)
+	}
 	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
 	res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 	// Computed before any same-turn pin-drop guards below so it reflects the
@@ -349,9 +368,10 @@ func (s *Service) runTurnLoop(
 			// to it below rather than losing the intent entirely.
 			forcedTierFloor = catalog.TierFor(pin.Model)
 		}
-		// Treat as missing so downstream sticky branches don't dispatch to an
-		// unauthorized provider. The row stays in storage — a later request
-		// with the forced provider enabled resumes serving it.
+		if forceModelFound {
+			res.SessionKey = threadSessionKey
+			res.PinRole = roleForTier(res.RequestedTier)
+		}
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}
@@ -465,6 +485,10 @@ func (s *Service) runTurnLoop(
 				"pin_model", pin.Model,
 				"pin_provider", pin.Provider,
 			)
+			if forceModelFound {
+				res.SessionKey = threadSessionKey
+				res.PinRole = roleForTier(res.RequestedTier)
+			}
 			pinFound = false
 			pin = sessionpin.Pin{}
 		}
@@ -481,6 +505,10 @@ func (s *Service) runTurnLoop(
 			"pin_model", pin.Model,
 			"pin_provider", pin.Provider,
 		)
+		if forceModelFound {
+			res.SessionKey = threadSessionKey
+			res.PinRole = roleForTier(res.RequestedTier)
+		}
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}

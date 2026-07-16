@@ -26,6 +26,8 @@ import (
 // are ignored; routing proceeds automatically rather than failing.
 const ForceModelHeader = "x-weave-force-model"
 
+const forceModelSessionRole = sessionpin.DefaultRole + "_force_model"
+
 var forceModelAliases = map[string]string{
 	"anthropic":     "claude-opus-4-8",
 	"claude":        "claude-opus-4-8",
@@ -186,8 +188,68 @@ func (s *Service) setForceModelPin(
 	return s.pinStore.Upsert(context.Background(), forced)
 }
 
+func (s *Service) setForceModelSessionPin(
+	ctx context.Context,
+	forceModelSessionKey [sessionpin.SessionKeyLen]byte,
+	installationID uuid.UUID,
+	canonicalModel, provider string,
+) error {
+	return s.setForceModelPin(ctx, forceModelSessionKey, forceModelSessionRole, installationID, canonicalModel, provider)
+}
+
+func forceModelClearRoles(currentRole string) []string {
+	roles := []string{
+		sessionpin.DefaultRole,
+		roleForTier(catalog.TierLow),
+		roleForTier(catalog.TierMid),
+		roleForTier(catalog.TierHigh),
+		currentRole,
+	}
+	seen := make(map[string]struct{}, len(roles))
+	out := make([]string, 0, len(roles))
+	for _, role := range roles {
+		if role == "" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		out = append(out, role)
+	}
+	return out
+}
+
+func (s *Service) clearForceModelPins(
+	ctx context.Context,
+	installationID uuid.UUID,
+	threadSessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
+	currentRole string,
+) error {
+	if s.pinStore == nil || installationID == uuid.Nil {
+		return nil
+	}
+	for _, role := range forceModelClearRoles(currentRole) {
+		if err := s.expireSessionPin(ctx, installationID, threadSessionKey, role, "user_unforced"); err != nil {
+			return err
+		}
+	}
+	return s.expireSessionPin(ctx, installationID, forceModelSessionKey, forceModelSessionRole, "user_unforced")
+}
+
+func (s *Service) loadForceModelSessionPin(ctx context.Context, forceModelSessionKey [sessionpin.SessionKeyLen]byte) (sessionpin.Pin, bool) {
+	if s.pinStore == nil {
+		return sessionpin.Pin{}, false
+	}
+	pin, found := s.loadPin(ctx, forceModelSessionKey, forceModelSessionRole)
+	if !found || pin.Reason != translate.ReasonUserForceModel || pin.Model == "" || pin.Provider == "" {
+		return sessionpin.Pin{}, false
+	}
+	return pin, true
+}
+
 // applyForceModelHeader honors the x-weave-force-model request header,
-// writing the same session pin the /force-model command writes. It's
+// writing the same session-wide pin the /force-model command writes. It's
 // (re)written on every request carrying the header. Unrecognized models are
 // ignored (routing proceeds automatically) rather than failing the request.
 func (s *Service) applyForceModelHeader(
@@ -195,7 +257,7 @@ func (s *Service) applyForceModelHeader(
 	r *http.Request,
 	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	sessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 ) {
 	if s.pinStore == nil {
 		return
@@ -218,12 +280,16 @@ func (s *Service) applyForceModelHeader(
 		log.Error("x-weave-force-model: pin store upsert failed", "err", err)
 		return
 	}
+	if err := s.setForceModelSessionPin(ctx, forceModelSessionKey, installationID, canonicalModel, provider); err != nil {
+		log.Error("x-weave-force-model: session pin store upsert failed", "err", err)
+		return
+	}
 	log.Info("x-weave-force-model applied",
 		"input_model", raw,
 		"canonical_model", canonicalModel,
 		"provider", provider,
-		"session_key_hex", fmt.Sprintf("%x", sessionKey),
-		"role", role,
+		"session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+		"role", forceModelSessionRole,
 	)
 }
 
@@ -238,7 +304,7 @@ func (s *Service) handleForceModelCommand(
 	env *translate.RequestEnvelope,
 	cmd translate.ForceModelResult,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	sessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 	inputTokens int,
 ) error {
 	log := observability.FromContext(ctx)
@@ -249,11 +315,9 @@ func (s *Service) handleForceModelCommand(
 	// otherwise it'd persist in history and leak router internals upstream.
 	var msg string
 	if cmd.Clear {
-		if s.pinStore != nil && installationID != uuid.Nil {
-			if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "user_unforced"); err != nil {
-				log.Error("/unforce-model: pin store upsert failed", "err", err)
-				return err
-			}
+		if err := s.clearForceModelPins(ctx, installationID, sessionKey, forceModelSessionKey, role); err != nil {
+			log.Error("/unforce-model: pin store upsert failed", "err", err)
+			return err
 		}
 		msg = "✦ **Weave Router** → force-model cleared · resuming automatic model selection\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
@@ -281,6 +345,10 @@ func (s *Service) handleForceModelCommand(
 			log.Error("/force-model: pin store upsert failed", "err", err)
 			return err
 		}
+		if err := s.setForceModelSessionPin(ctx, forceModelSessionKey, installationID, canonicalModel, provider); err != nil {
+			log.Error("/force-model: session pin store upsert failed", "err", err)
+			return err
+		}
 		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · Use /unforce-model to clear\n\n", canonicalModel, provider)
 		if env.SourceFormat() == translate.FormatOpenAI {
 			msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", canonicalModel, provider)
@@ -289,8 +357,8 @@ func (s *Service) handleForceModelCommand(
 			"input_model", cmd.Model,
 			"canonical_model", canonicalModel,
 			"provider", provider,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
+			"session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+			"role", forceModelSessionRole,
 		)
 	}
 
