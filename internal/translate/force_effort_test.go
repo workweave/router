@@ -107,3 +107,80 @@ func itoaLocal(n int) string {
 	}
 	return string(b[i:])
 }
+
+// CanonicalizeEffort maps alias forms to their canonical wire-format
+// counterparts and leaves unrecognized values alone. The latter is load-
+// bearing for IsValidEffort — caller can probe "Is this a known level
+// or did the user fat-finger the keyboard" without losing the original.
+func TestCanonicalizeEffort(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"low", "low"},
+		{"LOW", "low"},
+		{"fast", "low"},
+		{"minimal", "low"},
+		{"min", "low"},
+		{"medium", "medium"},
+		{"med", "medium"},
+		{"high", "high"},
+		{"max", "max"},
+		{"xhigh", "xhigh"},
+		{"ultra", "xhigh"},
+		{"ULTRA", "xhigh"},
+		{"garbage", "garbage"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, translate.CanonicalizeEffort(tc.in))
+		})
+	}
+}
+
+// IsValidEffort accepts canonical wire-format levels AND alias forms (fast,
+// minimal, ultra) — aliases canonicalize to a known level, so we accept them
+// too. Mirrors what the middleware does: a value headers receive could be
+// either form, and we want to flag a typo (`garbage`) without rejecting
+// legitimate aliases.
+func TestIsValidEffort(t *testing.T) {
+	valid := []string{
+		"low", "medium", "high", "max", "xhigh",
+		"fast", "minimal", "ultra", "min", "med",
+	}
+	for _, v := range valid {
+		t.Run(v, func(t *testing.T) {
+			assert.True(t, translate.IsValidEffort(v))
+		})
+	}
+	invalid := []string{"garbage", ""}
+	for _, v := range invalid {
+		t.Run(v+"_invalid", func(t *testing.T) {
+			assert.False(t, translate.IsValidEffort(v))
+		})
+	}
+}
+
+// ResolveForceEffort applies per-model caps. xhigh on opus-4-7+/fable
+// passes through; xhigh on a sonnet-4-6 / opus-4-6 lands as max (the same
+// clamp the inbound effort field already had via ClampEffortXhighTo).
+func TestResolveForceEffort(t *testing.T) {
+	cases := []struct {
+		name    string
+		level   string
+		spec    router.ModelSpec
+		want    string
+	}{
+		{"xhigh_capable_passes", "xhigh", router.NewSpec(router.CapAdaptiveThinking, router.CapXhighEffort), "xhigh"},
+		{"xhigh_incapable_clamps_to_max", "xhigh", router.NewSpec(router.CapAdaptiveThinking), "max"},
+		{"low_no_cap", "low", router.NewSpec(), "low"},
+		{"ultra_alias_resolved", "ultra", router.NewSpec(router.CapAdaptiveThinking, router.CapXhighEffort), "xhigh"},
+		{"fast_alias_resolved", "fast", router.NewSpec(), "low"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, translate.ResolveForceEffort(tc.spec, tc.level))
+		})
+	}
+}
+

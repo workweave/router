@@ -2336,7 +2336,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ModelSwitched:         routeRes.modelSwitched(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
 	}
-	if s.effortEscalation {
+	// User-forced effort (x-weave-effort header / :level suffix on /force-model)
+	// wins over the escalate-on-failure policy: the user explicitly asked for a
+	// level, so don't let Service.effortEscalation's gpt-5.x "low" default
+	// downrank a "high" ask. resolveForceEffort also handles per-model caps
+	// (xhigh → max on non-CapXhighEffort targets). It then forwards the
+	// canonical level into ForceReasoningEffort for gpt-5.x Responses / gemini
+	// 3.x, where the existing seam handles emit; for Anthropic adaptive it's
+	// consumed by resolveAnthropicOverrides directly via opts.ForceEffort.
+	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+		opts.ForceEffort = knobs.ForceEffort
+		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	} else if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
@@ -2664,7 +2675,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// OSS id — otherwise PrepareAnthropic may leave stale signed thinking
 		// blocks the baseline model rejects (400).
 		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
-		if s.effortEscalation {
+		if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+			baselineOpts.ForceEffort = knobs.ForceEffort
+			baselineOpts.ForceReasoningEffort = translate.ResolveForceEffort(baselineOpts.Capabilities, knobs.ForceEffort)
+		} else if s.effortEscalation {
 			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
 		}
 		baselinePrep, baselineEmitErr := env.PrepareAnthropic(r.Header, baselineOpts)
@@ -4235,7 +4249,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		ModelSwitched:         routeRes.modelSwitched(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserveOAI),
 	}
-	if s.effortEscalation {
+	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+		opts.ForceEffort = knobs.ForceEffort
+		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	} else if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 

@@ -19,6 +19,34 @@ import (
 // call_id) — longer ids get a 400 ("string too long").
 const maxToolCallIDLen = 64
 
+// resolveReasoningEffortFor picks the user-forced level for Chat Completions
+// in priority order: ForceEffort (the user override from the new header /
+// pin suffix), ForceReasoningEffort (escalate-on-failure legacy seam), and
+// then "" (no override; let the request's own reasoning_effort stand).
+// Same priority chain the Responses path uses inline.
+func resolveReasoningEffortFor(opts EmitOptions) string {
+	if opts.ForceEffort != "" {
+		return ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	}
+	return opts.ForceReasoningEffort
+}
+
+// reasoningEffortAcceptedOnChatCompletions reports whether the target actually
+// accepts reasoning_effort on /v1/chat/completions. gpt-5.x rejects the field
+// outright (the proxy routes gpt-5.x through the Responses API anyway — see
+// emit_openai_responses.go:18), so we want to skip writing it for those
+// targets to avoid a session-killing 400. Other CapReasoning models
+// (OpenRouter OSS reasoning models today) accept reasoning_effort freely.
+func reasoningEffortAcceptedOnChatCompletions(opts EmitOptions) bool {
+	// gpt-5.x on chat/completions rejects reasoning_effort + tools together;
+	// the Responses API carries the knob for those models, so chat-completions
+	// here means OpenRouter OSS reasoning models.
+	if strings.HasPrefix(opts.TargetModel, "gpt-5") {
+		return false
+	}
+	return true
+}
+
 // clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format:
 // strips any smuggled Gemini thoughtSignature, then hashes ids still over 64
 // chars so a tool_use block and its tool_result stay paired on the same id.
@@ -165,6 +193,17 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	body, err := e.emitSameFormat(ov)
 	if err != nil {
 		return nil, err
+	}
+	// User-forced effort on Chat-Completions: write reasoning_effort on cap-
+	// reasoning targets that accept it. gpt-5.x on /v1/chat/completions rejects
+	// this field (the comment at emit_openai_responses.go:18 documents it), so
+	// the proxy routes gpt-5.x through the Responses API anyway; this branch
+	// mainly covers OpenRouter OSS reasoning models that take both shapes.
+	if forced := resolveReasoningEffortFor(opts); forced != "" && opts.Capabilities.Supports(router.CapReasoning) && reasoningEffortAcceptedOnChatCompletions(opts) {
+		body, err = sjson.SetBytes(body, "reasoning_effort", forced)
+		if err != nil {
+			return nil, fmt.Errorf("set reasoning_effort: %w", err)
+		}
 	}
 	if targetIsOpenRouter(opts) {
 		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
