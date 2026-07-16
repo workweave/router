@@ -39,6 +39,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: "claude-sonnet-4-6"
           allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh api:*)"
+          allowed_bots: "devin-ai-integration"
           direct_prompt: |
             You are a lightweight, advisory-only comment-style linter for a Go
             codebase. You are NOT a general code reviewer — do not comment on
