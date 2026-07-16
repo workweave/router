@@ -1,0 +1,37 @@
+internal/router/banditexplore/explorer_test.go
+  s_79d8cf89bf917c::t_5ec65296d93cc1 150-187
+internal/router/router.go
+  s_79d8cf89bf917c::t_db34082ef14c0b 55-56
+  s_79d8cf89bf917c::t_dbd6ada3ce53fd 52-54
+internal/router/banditexplore/explorer.go
+  s_79d8cf89bf917c::t_071bee8f3b27be 142-143
+  s_79d8cf89bf917c::t_ee931ed55906c0 57-59
+  s_79d8cf89bf917c::t_05ce2bd7468ea0 82-84,95-96
+  s_79d8cf89bf917c::t_72ba9a12a84983 32-34,37
+  s_79d8cf89bf917c::t_103748cc11320c 38-41
+  s_79d8cf89bf917c::t_25354b9fda91ec 85,90-91,98,108-112,115,118-127,129-137,144-166
+  s_79d8cf89bf917c::t_962a958ba46544 105-107
+internal/router/cluster/scorer.go
+  s_79d8cf89bf917c::t_0fb6d932465a47 706-718
+  s_79d8cf89bf917c::t_19e9c88f0bbe07 703-705
+  s_79d8cf89bf917c::t_3ad24952179ca5 742
+internal/proxy/observation.go
+  s_79d8cf89bf917c::t_f0002803e1842a 61-62
+  s_79d8cf89bf917c::t_ab4c26a02d3507 57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9780445d0575c31e834cb3d34fca7204fda2cc40",
+  "prompts": {},
+  "sessions": {
+    "s_79d8cf89bf917c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f3e62dad-ab47-450c-99a2-08fd8ae87120",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

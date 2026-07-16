@@ -1,0 +1,31 @@
+internal/router/cluster/artifacts/latest
+  s_1b79f6db5abaf7::t_e6cb7a63731fcd 1
+internal/router/cluster/artifacts/v0.71/metadata.yaml
+  s_1b79f6db5abaf7::t_f08c0b493ea40f 1-221
+internal/router/cluster/artifacts/v0.71/model_axes.json
+  s_1b79f6db5abaf7::t_bee46ae34dc629 1-222
+internal/router/cluster/artifacts/v0.71/model_features.json
+  s_1b79f6db5abaf7::t_1bd4f19a77335b 1-551
+internal/router/cluster/artifacts/v0.71/model_registry.json
+  s_1b79f6db5abaf7::t_bb4f6361d7bfd1 1-196
+internal/router/cluster/artifacts/v0.71/quality_means.json
+  s_1b79f6db5abaf7::t_f7fdf8ca44a0c8 1-433
+internal/router/cluster/artifacts/v0.71/rankings.json
+  s_1b79f6db5abaf7::t_6511d5c93790f6 1-438
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "ad59ba51ecfd6482ba1ed9bd04d28a1c9c5f942d",
+  "prompts": {},
+  "sessions": {
+    "s_1b79f6db5abaf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2cb83b84-cb58-4027-b5e4-68dbb362bafe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+README.md
+  s_48a44f81b8d7ee::t_df2f17d38d7cc9 1-8,11,15-16,18,20,22,24-34,36,38,41-44,48-50,53,55-57,59-63,65-66,69,71,79-80,82-84,88-95,97,99-104,106,108-110,112,114,116-118,120
+CONTRIBUTING.md
+  s_48a44f81b8d7ee::t_df2f17d38d7cc9 87-115
+docs/CONFIGURATION.md
+  s_48a44f81b8d7ee::t_df2f17d38d7cc9 1-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fd04540c16f8d10d563b506ebd8046d787c85c0e",
+  "prompts": {},
+  "sessions": {
+    "s_48a44f81b8d7ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c839c5e-21bc-4289-8556-b634e2bf3841",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

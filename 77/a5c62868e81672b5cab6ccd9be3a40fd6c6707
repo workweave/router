@@ -1,0 +1,22 @@
+internal/api/admin/routing_distribution.go
+  s_7c7039c29ee5b5::t_dee47fe209044d 4
+  s_7c7039c29ee5b5::t_4ddef982a31dcb 59-65
+internal/api/admin/routing_distribution_test.go
+  s_7c7039c29ee5b5::t_bf9e8226225ac4 118-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "77a5c62868e81672b5cab6ccd9be3a40fd6c6707",
+  "prompts": {},
+  "sessions": {
+    "s_7c7039c29ee5b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f6dc8e0-2bf8-43a4-b08e-4de992aae282",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

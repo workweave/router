@@ -1,0 +1,25 @@
+internal/proxy/service.go
+  41ec16054fa47d2b 76-81
+internal/router/cluster/artifacts.go
+  41ec16054fa47d2b 154-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "edacf8fe7f27725e334afa9b55bc4dfe554e8bef",
+  "prompts": {
+    "41ec16054fa47d2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a765af32-c7f7-440d-843f-d09c6b857a37",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 17,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}

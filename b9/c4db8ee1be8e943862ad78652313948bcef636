@@ -1,0 +1,22 @@
+internal/observability/logger.go
+  s_bc44fbfabf5fd1::t_31c43fb971c20f 127-133
+  s_bc44fbfabf5fd1::t_81cffb400de471 83-85,89-90
+.env.example
+  s_bc44fbfabf5fd1::t_7ecc6298795281 186-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b9c4db8ee1be8e943862ad78652313948bcef636",
+  "prompts": {},
+  "sessions": {
+    "s_bc44fbfabf5fd1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b5d9261-e122-400d-8a5a-ea9b79ae81e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

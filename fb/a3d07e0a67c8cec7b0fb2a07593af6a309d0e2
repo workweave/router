@@ -1,0 +1,61 @@
+internal/proxy/service_session_pin_test.go
+  s_baa9be4173b803::t_475e933e21c3c0 427
+  s_baa9be4173b803::t_3451ff40d9bd07 327
+internal/router/cluster/scorer.go
+  s_baa9be4173b803::t_502df3ae8a0a61 321-322,331-335
+internal/proxy/service_test.go
+  s_baa9be4173b803::t_923dac73eb2c3a 56
+internal/router/router.go
+  s_baa9be4173b803::t_a4890d343d8ce4 48-58
+internal/proxy/service.go
+  s_baa9be4173b803::t_5916b4bb3c0978 191
+  s_baa9be4173b803::t_c30265ec7eb664 571-609,643-649
+  s_baa9be4173b803::t_360219c2e6267e 97
+internal/proxy/service_observation_test.go
+  s_baa9be4173b803::t_a64a777f977037 1-181
+internal/proxy/service_cache_test.go
+  s_baa9be4173b803::t_91f0654628570d 123
+  s_baa9be4173b803::t_3f8c9b923bb460 195
+  s_baa9be4173b803::t_011780c03222e3 170
+  s_baa9be4173b803::t_b2e07307afd008 92
+  s_baa9be4173b803::t_afb15c59efb900 147
+db/queries/model_router_request_telemetry.sql
+  s_baa9be4173b803::t_68942d82e8c89f 1-5,30-40,64-74
+internal/router/cluster/scorer_test.go
+  s_baa9be4173b803::t_5a309cce08c070 157-177
+cmd/router/main.go
+  s_baa9be4173b803::t_5ab1c2e780ef9e 240
+db/migrations/0010_extend_request_telemetry_with_observations.up.sql
+  s_baa9be4173b803::t_cd539b1f0608a4 1-15
+internal/proxy/telemetry.go
+  s_baa9be4173b803::t_5be6fb26619b48 22-26,51-64
+internal/postgres/telemetry.go
+  s_baa9be4173b803::t_e0be6d38b81de0 57-66
+internal/postgres/converters.go
+  s_baa9be4173b803::t_190314caef5612 54-64
+db/migrations/0010_extend_request_telemetry_with_observations.down.sql
+  s_baa9be4173b803::t_fc85f5599f2fa9 1-15
+internal/proxy/gemini_test.go
+  s_baa9be4173b803::t_94105894ba276d 37
+  s_baa9be4173b803::t_76fc5680354059 70
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_baa9be4173b803::t_feaab9d743c47b 715-725,749-759,788-804,829-839,863-873,901-910
+internal/sqlc/models.go
+  s_baa9be4173b803::t_feaab9d743c47b 86-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "fba3d07e0a67c8cec7b0fb2a07593af6a309d0e2",
+  "prompts": {},
+  "sessions": {
+    "s_baa9be4173b803": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9456ca5e-1ec4-4c6c-be05-89ec4c148873",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
