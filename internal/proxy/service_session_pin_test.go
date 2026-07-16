@@ -460,7 +460,7 @@ func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 
 	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, 0, store.getCalls, "compaction must not consult the pin store")
+	assert.Equal(t, 1, store.getCalls, "compaction must check for an explicit user-forced pin before the hard-pin fast path")
 
 	select {
 	case <-store.upsertCh:
