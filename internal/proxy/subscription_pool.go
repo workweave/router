@@ -23,6 +23,10 @@ type SubscriptionPoolSource interface {
 	// PoolExists reports whether the user has at least one active credential for
 	// provider (cache-served; cheap enough for the hot path).
 	PoolExists(ctx context.Context, installationID, userEmail, provider string) bool
+	// HasUsableCredential reports whether the user has an active credential for
+	// provider that skip does not veto. Side-effect free (no token refresh, no
+	// refresh-failed marking), unlike SelectCredential — safe for a probe.
+	HasUsableCredential(ctx context.Context, installationID, userEmail, provider string, skip func(credentialID string) bool) bool
 	// MarkUsed records a pooled credential serving a turn (best-effort).
 	MarkUsed(id string)
 }
@@ -152,6 +156,5 @@ func (s *Service) poolHasUsableCandidate(ctx context.Context, provider string) b
 	if email == "" {
 		return false
 	}
-	cred, err := s.subscriptionPool.SelectCredential(ctx, installationID.String(), email, provider, s.poolExhaustionSkip())
-	return err == nil && cred != nil
+	return s.subscriptionPool.HasUsableCredential(ctx, installationID.String(), email, provider, s.poolExhaustionSkip())
 }

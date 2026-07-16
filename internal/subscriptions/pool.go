@@ -224,6 +224,26 @@ func (s *Service) PoolExists(ctx context.Context, installationID, userEmail, pro
 	return len(pool) > 0
 }
 
+// HasUsableCredential reports whether the user has at least one active pooled
+// credential for provider that skip does not veto. Cache-served and
+// side-effect free: unlike SelectCredential it never refreshes tokens or marks
+// a credential refresh-failed, so it is safe as a fallback probe on the hot
+// path (a probe must not revoke credentials or block on OAuth).
+func (s *Service) HasUsableCredential(ctx context.Context, installationID, userEmail, provider string, skip func(credentialID string) bool) bool {
+	pool, err := s.poolFor(ctx, installationID, userEmail, provider)
+	if err != nil {
+		observability.FromContext(ctx).Warn("Failed to load subscription pool for usable-candidate check", "err", err)
+		return false
+	}
+	for _, cred := range pool {
+		if skip != nil && skip(cred.ID) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // MarkUsed records a pooled credential serving a turn. Best-effort and off the
 // request path.
 func (s *Service) MarkUsed(id string) {

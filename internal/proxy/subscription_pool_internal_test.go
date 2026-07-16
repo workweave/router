@@ -40,6 +40,21 @@ func (f *fakePool) PoolExists(_ context.Context, _, _, provider string) bool {
 	return len(f.byProvider[provider]) > 0
 }
 
+// HasUsableCredential mirrors SelectCredential's skip walk but without the
+// refresh side effects, matching the real service's side-effect-free probe.
+func (f *fakePool) HasUsableCredential(_ context.Context, _, _, provider string, skip func(string) bool) bool {
+	if f.err != nil {
+		return false
+	}
+	for _, cred := range f.byProvider[provider] {
+		if skip != nil && skip(cred.ID) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (f *fakePool) MarkUsed(id string) { f.markedUsed = append(f.markedUsed, id) }
 
 // poolCtx builds a request context carrying an installation id and user email,
