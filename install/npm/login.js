@@ -76,7 +76,7 @@ async function main(argv) {
     account_label: flags.label || bundle.label || undefined,
   };
 
-  const url = config.routerUrl.replace(/\/+$/, "") + "/v1/subscriptions";
+  const url = trimTrailingSlashes(config.routerUrl) + "/v1/subscriptions";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -123,19 +123,18 @@ async function loginChatGPT() {
 }
 
 function buildChatGPTAuthorizeUrl(redirectUri, pkce, state) {
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: CHATGPT_CLIENT_ID,
-    redirect_uri: redirectUri,
-    scope: "openid profile email offline_access",
-    code_challenge: pkce.challenge,
-    code_challenge_method: "S256",
-    id_token_add_organizations: "true",
-    codex_cli_simplified_flow: "true",
-    state,
-    originator: "codex_cli_ts",
-  });
-  return `${CHATGPT_ISSUER}/oauth/authorize?${params.toString()}`;
+  const url = new URL(`${CHATGPT_ISSUER}/oauth/authorize`);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", CHATGPT_CLIENT_ID);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", "openid profile email offline_access");
+  url.searchParams.set("code_challenge", pkce.challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("id_token_add_organizations", "true");
+  url.searchParams.set("codex_cli_simplified_flow", "true");
+  url.searchParams.set("state", state);
+  url.searchParams.set("originator", "codex_cli_ts");
+  return url.toString();
 }
 
 async function exchangeChatGPTCode(code, redirectUri, pkce) {
@@ -169,7 +168,7 @@ function awaitCallback(expectedState) {
       const error = url.searchParams.get("error_description") || url.searchParams.get("error");
       const finish = (status, msg, ok) => {
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(`<html><body style="font-family:system-ui;padding:3rem;text-align:center">${msg}</body></html>`);
+        res.end(`<html><body style="font-family:system-ui;padding:3rem;text-align:center">${escapeHtml(msg)}</body></html>`);
         server.close();
         if (ok) resolve(code);
         else reject(new Error(msg));
@@ -237,6 +236,21 @@ async function exchangeClaudeCode(pasted, verifier) {
 }
 
 // ---- PKCE + JWT helpers -----------------------------------------------------
+
+// trimTrailingSlashes strips trailing "/" without a backtracking regex.
+function trimTrailingSlashes(s) {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
+
+// escapeHtml neutralizes markup so a reflected value can't inject script.
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
+}
 
 function base64Url(buf) {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

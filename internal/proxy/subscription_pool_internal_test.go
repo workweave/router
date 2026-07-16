@@ -164,6 +164,32 @@ func TestResolveAndInjectCredentials_PoolErrorFallsThrough(t *testing.T) {
 	assert.Equal(t, []byte("sk-ant-api-byok"), creds.APIKey)
 }
 
+func TestPoolHasUsableCandidate_HealthyRowIsAFallback(t *testing.T) {
+	// A pool with a non-exhausted account is a usable fallback.
+	s := &Service{subscriptionPool: &fakePool{byProvider: map[string][]*subscriptions.Credential{
+		providers.ProviderAnthropic: {anthropicPoolCred("cred-1")},
+	}}}
+	assert.True(t, s.poolHasUsableCandidate(poolCtx(), providers.ProviderAnthropic))
+	assert.True(t, s.anthropicFallbackKeyAvailable(poolCtx()))
+}
+
+func TestAnthropicFallbackKeyAvailable_AllPoolExhaustedIsNotAFallback(t *testing.T) {
+	// A pool whose only account is observed-exhausted is NOT a usable fallback:
+	// suppressing the inbound subscription would leave the turn with no working
+	// credential and 400. anthropicFallbackKeyAvailable must report false so the
+	// caller keeps the spent inbound subscription and preserves the upstream 429.
+	obs := observerWithSnapshot("unused", usage.Snapshot{})
+	s := &Service{subscriptionPool: &fakePool{byProvider: map[string][]*subscriptions.Credential{
+		providers.ProviderAnthropic: {anthropicPoolCred("cred-1")},
+	}}, usageObserver: obs}
+	obs.Record(s.poolObserverKey("cred-1"), exhaustedSnapshot())
+
+	assert.False(t, s.poolHasUsableCandidate(poolCtx(), providers.ProviderAnthropic),
+		"an all-exhausted pool has no usable candidate")
+	assert.False(t, s.anthropicFallbackKeyAvailable(poolCtx()),
+		"an all-exhausted pool with no BYOK/deployment key is not a fallback")
+}
+
 func TestPooledCredentialFor_CodexSetsAccountID(t *testing.T) {
 	s := &Service{subscriptionPool: &fakePool{byProvider: map[string][]*subscriptions.Credential{
 		providers.ProviderOpenAI: {{

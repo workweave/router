@@ -41,10 +41,8 @@ type Credentials struct {
 	// AccountID is the ChatGPT-Account-ID paired with a Codex subscription
 	// bearer; the Codex backend 401/403s without it. Never logged.
 	AccountID []byte
-	// PoolCredentialID is the router-side subscription_credentials row UUID when
-	// this credential came from the per-user server pool. Empty for inbound and
-	// BYOK credentials. Safe to log; used as the stable usage-observer key (the
-	// token itself rotates on refresh) and for MarkUsed.
+	// PoolCredentialID is the stable row UUID for a pooled credential (the token
+	// rotates on refresh). Safe to log; used as the usage-observer key and for MarkUsed.
 	PoolCredentialID string
 }
 

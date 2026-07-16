@@ -122,12 +122,14 @@ func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.
 
 // anthropicFallbackKeyAvailable reports whether a credential exists to serve a
 // Claude turn when the caller's subscription is spent: another pooled Claude
-// account, a per-request BYOK Anthropic key, or the deployment's own
-// ANTHROPIC_API_KEY (tracked in deploymentKeyedProviders). Without one, dropping
-// the subscription token would leave the turn with no Anthropic credential and
-// 400 — strictly worse than the 429 — so the caller keeps using the subscription.
+// account that isn't itself exhausted, a per-request BYOK Anthropic key, or the
+// deployment's own ANTHROPIC_API_KEY (tracked in deploymentKeyedProviders).
+// Without one, dropping the subscription token would leave the turn with no
+// Anthropic credential and 400 — strictly worse than the 429 — so the caller
+// keeps using the subscription. The pool check requires a *usable* (non-spent)
+// candidate: a pool whose every account is exhausted is not a fallback.
 func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
-	if s.poolHasCandidate(ctx, providers.ProviderAnthropic) {
+	if s.poolHasUsableCandidate(ctx, providers.ProviderAnthropic) {
 		return true
 	}
 	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {

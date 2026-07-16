@@ -27,10 +27,8 @@ type SubscriptionPoolSource interface {
 	MarkUsed(id string)
 }
 
-// WithSubscriptionPool wires the per-user subscription credential pool. The
-// composition root calls it (gated on ROUTER_SUBSCRIPTION_POOL) with a
-// constructed *subscriptions.Service. Left unset, pooled rotation is off: the
-// resolver behaves exactly as before (inbound sub -> BYOK -> deployment key).
+// WithSubscriptionPool wires the per-user subscription credential pool.
+// Left unset, pooled rotation is off (inbound sub -> BYOK -> deployment key).
 func (s *Service) WithSubscriptionPool(pool SubscriptionPoolSource) *Service {
 	s.subscriptionPool = pool
 	return s
@@ -44,12 +42,9 @@ func (s *Service) poolObserverKey(credentialID string) usage.CredentialKey {
 	return s.usageObserver.Key([]byte("pool:" + credentialID))
 }
 
-// pooledCredentialFor selects the next usable pooled subscription credential for
-// this request's user and provider, or nil when pooling is off, the request
-// lacks an installation/email, or no usable credential exists. Exhausted
-// candidates (per the usage observer, keyed by row UUID) are skipped so
-// rotation advances past a spent account. A pool DB error never fails the turn:
-// it logs and returns nil so resolution falls through to BYOK/deployment key.
+// pooledCredentialFor returns the next usable pooled credential for the
+// request's user and provider. DB errors never fail the turn: they log and
+// return nil so resolution falls through to BYOK/deployment key.
 func (s *Service) pooledCredentialFor(ctx context.Context, provider string) *Credentials {
 	if s.subscriptionPool == nil {
 		return nil
@@ -63,15 +58,7 @@ func (s *Service) pooledCredentialFor(ctx context.Context, provider string) *Cre
 		return nil
 	}
 
-	skip := func(credentialID string) bool {
-		if s.usageObserver == nil {
-			return false
-		}
-		snap, ok := s.usageObserver.Snapshot(s.poolObserverKey(credentialID))
-		return ok && snap.Exhausted()
-	}
-
-	cred, err := s.subscriptionPool.SelectCredential(ctx, installationID.String(), email, provider, skip)
+	cred, err := s.subscriptionPool.SelectCredential(ctx, installationID.String(), email, provider, s.poolExhaustionSkip())
 	if err != nil {
 		observability.FromContext(ctx).Warn("Subscription pool selection failed; falling through to BYOK/deployment key",
 			"provider", provider, "err", err)
@@ -99,12 +86,9 @@ func (s *Service) pooledCredentialFor(ctx context.Context, provider string) *Cre
 	}
 }
 
-// recordPoolExhaustionIfPooled marks the currently-resolved credential's pool
-// entry as exhausted in the usage observer, so a same-turn failover retry skips
-// it. No-op when the resolved credential isn't a pooled one (nothing to skip) or
-// the observer isn't wired. The synthetic snapshot pins the primary window at
-// its cap for a nominal 5h window; the next real response from that account
-// overwrites it with the true headroom.
+// recordPoolExhaustionIfPooled marks the resolved credential exhausted in
+// the usage observer so a same-turn failover retry skips it. The synthetic
+// snapshot uses a 5h window; real headroom overwrites it on the next response.
 func (s *Service) recordPoolExhaustionIfPooled(ctx context.Context) {
 	if s.usageObserver == nil {
 		return
@@ -118,9 +102,23 @@ func (s *Service) recordPoolExhaustionIfPooled(ctx context.Context) {
 	})
 }
 
+// poolExhaustionSkip returns the veto predicate SelectCredential uses to pass
+// over pooled credentials the usage observer has recorded as exhausted, so
+// rotation advances past a spent account. Always false when the observer is
+// unwired (no exhaustion signal to act on).
+func (s *Service) poolExhaustionSkip() func(credentialID string) bool {
+	return func(credentialID string) bool {
+		if s.usageObserver == nil {
+			return false
+		}
+		snap, ok := s.usageObserver.Snapshot(s.poolObserverKey(credentialID))
+		return ok && snap.Exhausted()
+	}
+}
+
 // poolHasCandidate reports whether the request's user has any active pooled
 // credential for provider. Cache-served; used to enroll the provider for
-// routing and to gate exhaustion suppression when no BYOK/deployment key exists.
+// routing.
 func (s *Service) poolHasCandidate(ctx context.Context, provider string) bool {
 	if s.subscriptionPool == nil {
 		return false
@@ -134,4 +132,26 @@ func (s *Service) poolHasCandidate(ctx context.Context, provider string) bool {
 		return false
 	}
 	return s.subscriptionPool.PoolExists(ctx, installationID.String(), email, provider)
+}
+
+// poolHasUsableCandidate reports whether the user has a pooled credential for
+// provider that isn't already exhausted this turn. Unlike poolHasCandidate
+// (which counts any active row), it applies the same exhaustion veto as
+// selection, so an all-spent pool can't masquerade as a usable fallback and
+// wrongly suppress the inbound subscription (leaving the turn with no
+// credential instead of preserving the upstream 429).
+func (s *Service) poolHasUsableCandidate(ctx context.Context, provider string) bool {
+	if s.subscriptionPool == nil {
+		return false
+	}
+	installationID := installationIDFromContext(ctx)
+	if installationID == (uuid.UUID{}) {
+		return false
+	}
+	email := ClientIdentityFrom(ctx).Email
+	if email == "" {
+		return false
+	}
+	cred, err := s.subscriptionPool.SelectCredential(ctx, installationID.String(), email, provider, s.poolExhaustionSkip())
+	return err == nil && cred != nil
 }
