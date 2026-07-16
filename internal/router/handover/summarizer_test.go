@@ -327,6 +327,73 @@ func TestRewriteEnvelope_StripsToolResultsFromLatestUser(t *testing.T) {
 	assert.Equal(t, "assistant", msgs[0].Get("role").String())
 }
 
+func TestRewriteEnvelope_GeminiStripsOrphanFunctionResponseFromLatestUser(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "run edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "applied"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.RewriteEnvelope(env, "User asked to run edit.")
+	assert.Equal(t, 3, elided, "functionResponse-only latest user must be dropped")
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 1, "only summary when latest user was purely functionResponse")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	contents[0].Get("parts").ForEach(func(_, part gjson.Result) bool {
+		assert.False(t, part.Get("functionResponse").Exists())
+		return true
+	})
+}
+
+func TestRewriteEnvelope_GeminiMixedTextKeepsTextDropsFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "run edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [
+      {"functionResponse": {"name": "edit", "response": {"result": "applied"}}},
+      {"text": "also continue with step 2"}
+    ]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	handover.RewriteEnvelope(env, "recap")
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+
+	fr, text := 0, ""
+	gjson.GetBytes(prep.Body, "contents").ForEach(func(_, entry gjson.Result) bool {
+		if entry.Get("role").String() != "user" {
+			return true
+		}
+		entry.Get("parts").ForEach(func(_, part gjson.Result) bool {
+			if part.Get("functionResponse").Exists() {
+				fr++
+			}
+			if t := part.Get("text").String(); t != "" {
+				text = t
+			}
+			return true
+		})
+		return true
+	})
+	assert.Equal(t, 0, fr, "orphan functionResponse must be stripped from mixed latest user")
+	assert.Equal(t, "also continue with step 2", text)
+}
+
 func TestRewriteEnvelope_GeminiCollapsesToSummaryPlusLastUser(t *testing.T) {
 	t.Parallel()
 

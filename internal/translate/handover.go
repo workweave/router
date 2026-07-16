@@ -278,8 +278,13 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	rebuilt = append(rebuilt, string(summaryRaw))
 	preserved := 0
 	if latestUser.Exists() {
-		rebuilt = append(rebuilt, latestUser.Raw)
-		preserved = 1
+		// Strip functionResponse parts: the summary has no functionCall parts,
+		// so any functionResponse would be orphaned (Google 400).
+		cleaned := stripGeminiFunctionResponseEntry(latestUser)
+		if cleaned != "" {
+			rebuilt = append(rebuilt, cleaned)
+			preserved = 1
+		}
 	}
 
 	elided := max(len(all)-preserved, 0)
@@ -291,6 +296,44 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	}
 	e.body = out
 	return elided
+}
+
+// stripGeminiFunctionResponseEntry removes functionResponse parts from a
+// Gemini contents entry (nil known set = strip all). Returns "" if nothing
+// remains — matching stripAnthropicToolResultMsg for Anthropic handover.
+func stripGeminiFunctionResponseEntry(entry gjson.Result) string {
+	parts := entry.Get("parts")
+	if !parts.IsArray() {
+		return entry.Raw
+	}
+	hasFR := false
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
+			hasFR = true
+			return false
+		}
+		return true
+	})
+	if !hasFR {
+		return entry.Raw
+	}
+	var kept []string
+	parts.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
+			return true
+		}
+		kept = append(kept, part.Raw)
+		return true
+	})
+	if len(kept) == 0 {
+		return ""
+	}
+	newParts := "[" + strings.Join(kept, ",") + "]"
+	out, err := sjson.SetRawBytes([]byte(entry.Raw), "parts", []byte(newParts))
+	if err != nil {
+		return entry.Raw
+	}
+	return string(out)
 }
 
 func (e *RequestEnvelope) trimGeminiLastN(n int) int {
