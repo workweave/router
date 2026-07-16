@@ -26,8 +26,11 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 //   - Balance ≤ minBalanceMicros (or no balance row) → HTTP 402. A
 //     subscription-exempt request (UsageBypassEnabled + a validated Claude/Codex
 //     cred that covers this route) instead gates at a negative overdraft floor,
-//     so free traffic keeps flowing while any paid failover is bounded. Override
-//     detection above still runs.
+//     so free traffic keeps flowing while any paid failover is bounded. Past the
+//     floor it is not 402'd either: the request passes through flagged
+//     subscription-only (billing.WithSubscriptionOnly) so the proxy serves it on
+//     the caller's own subscription or refuses it, never on a paid model.
+//     Override detection above still runs.
 //   - Otherwise → pass through.
 //
 // The balance read is a single indexed SELECT (~2-5ms in-region). Any
@@ -109,6 +112,21 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 		}
 
 		if result.BalanceMicros <= threshold {
+			// A subscription-covered org past the overdraft floor is not 402'd:
+			// 402ing here would block traffic that serves for free on the
+			// caller's own subscription. Flag it subscription-only so the proxy
+			// serves on the subscription (or refuses a would-be-paid turn) and
+			// never fails over to a paid model, bounding our spend at the floor.
+			if subscriptionExempt {
+				log.Warn("Balance past subscription overdraft floor: serving subscription-only, paid failover disabled",
+					"organization_id", orgID,
+					"balance_usd_micros", result.BalanceMicros,
+					"threshold_usd_micros", threshold,
+				)
+				c.Request = c.Request.WithContext(billing.WithSubscriptionOnly(c.Request.Context()))
+				c.Next()
+				return
+			}
 			log.Info("Balance check rejected: balance at or below threshold",
 				"organization_id", orgID,
 				"balance_usd_micros", result.BalanceMicros,

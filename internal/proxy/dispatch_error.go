@@ -36,6 +36,7 @@ const (
 	DispatchErrorHMMUnavailable
 	DispatchErrorPolicyUnavailable
 	DispatchErrorClusterUnavailable
+	DispatchErrorCreditsExhausted
 )
 
 // DispatchErrorClass is the format-agnostic classification of a dispatch
@@ -99,6 +100,14 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			Message:    "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.",
 			LogLevel:   "warn",
 			LogMessage: "No eligible provider for request",
+		}, true
+	case errors.Is(err, ErrCreditsExhaustedSubscriptionUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorCreditsExhausted,
+			Status:     http.StatusPaymentRequired,
+			Message:    "Your Weave router credits are exhausted and your Anthropic subscription can't serve this turn (rate-limited, or the requested model isn't subscription-covered). Add credits to re-enable paid routing: " + topUpURL,
+			LogLevel:   "warn",
+			LogMessage: "Subscription-only request refused: credits exhausted and subscription unavailable",
 		}, true
 	case errors.Is(err, ErrContextWindowExceeded):
 		return DispatchErrorClass{

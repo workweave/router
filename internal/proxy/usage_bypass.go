@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"workweave/router/internal/auth"
+	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
@@ -92,6 +93,13 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 	if snap.Exhausted() {
 		return false
 	}
+	// Subscription-only mode (balance past the overdraft floor): paid failover
+	// is disabled, so the threshold's purpose — disengage the bypass to conserve
+	// remaining quota by routing to a cheaper paid model — no longer applies.
+	// Serve on the subscription right up to exhaustion instead of gating early.
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		return true
+	}
 	util := max(snap.Primary.UsedPercent, snap.Secondary.UsedPercent)
 	return util < threshold
 }
@@ -163,6 +171,28 @@ func anthropicOAuthCredentialRejected(err error) bool {
 	return env.Error.Type == "authentication_error" || env.Error.Type == "permission_error"
 }
 
+// topUpURL is the customer-facing page where org admins buy router credits.
+// Duplicated from middleware.TopUpURL (proxy can't import the middleware
+// adapter without an import cycle) so subscription-only warnings and the
+// credits-exhausted 402 can surface the CTA.
+const topUpURL = "https://app.workweave.ai/settings/billing/router-credits"
+
+// subscriptionOnlyWarningMarker is prepended to a subscription-only bypass
+// response so the customer sees why they're being served on their own plan and
+// how to restore full routing. Always emitted (not gated by the routing-marker
+// opt-out): a billing state change the caller needs to see.
+const subscriptionOnlyWarningMarker = routingMarkerPrefix +
+	"your Weave router credits are depleted, so this turn is running on your own Anthropic subscription and paid model fallback is disabled. Add credits to restore full routing: " +
+	topUpURL + "\n\n"
+
+// ErrCreditsExhaustedSubscriptionUnavailable is returned by ProxyMessages when
+// the org is in subscription-only mode (balance past the overdraft floor) but
+// the turn cannot be served on the caller's own subscription — it is
+// rate-limit exhausted, or the requested model is not subscription-covered.
+// Paid failover is disabled in this mode, so the turn is refused (HTTP 402)
+// rather than billed against an already-negative balance.
+var ErrCreditsExhaustedSubscriptionUnavailable = errors.New("credits exhausted and subscription unavailable for this turn")
+
 // errBypassRetryable is returned by bypassToAnthropic when the bypass attempt
 // hit a retryable upstream error (e.g., Anthropic 429 weekly-limit) BEFORE
 // writing any response bytes. The caller should fall through to the normal
@@ -228,16 +258,25 @@ func (s *Service) bypassToAnthropic(
 		return fmt.Errorf("emit bypass body: %w", emitErr)
 	}
 
+	// Subscription-only mode (org past the overdraft floor): prepend a warning
+	// text block so the customer sees they're on their own subscription with
+	// paid failover disabled, and how to restore full routing. The marker writer
+	// injects only on a streaming response and is transparent otherwise.
+	respW := w
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		respW = translate.NewAnthropicRoutingMarkerWriter(w, decision.Model, subscriptionOnlyWarningMarker)
+	}
+
 	// Tap the response stream so the bypass span carries token usage for
 	// Weave's router cost-savings metric — subscription turns are otherwise invisible.
 	var extractor *otel.UsageExtractor
 	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(w, decision.Provider)
-		w = extractor
+		extractor = otel.NewUsageExtractor(respW, decision.Provider)
+		respW = extractor
 	}
 
 	proxyStart := time.Now()
-	proxyErr := p.Proxy(ctx, decision, prep, w, r)
+	proxyErr := p.Proxy(ctx, decision, prep, respW, r)
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
 	// When the proxy error is retryable (429 weekly-limit, or a raw transport

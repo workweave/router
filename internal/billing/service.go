@@ -26,6 +26,35 @@ func HasOverrideFromContext(ctx context.Context) bool {
 	return b
 }
 
+// subscriptionOnlyContextKeyT lives in billing (not middleware/proxy) so both
+// sides can reference it without a layering violation, mirroring
+// hasOverrideContextKeyT.
+type subscriptionOnlyContextKeyT struct{}
+
+// SubscriptionOnlyContextKey flags a request whose org balance has fallen past
+// SubscriptionOverdraftFloorMicros. Set by middleware.WithBalanceCheck for a
+// subscription-covered request instead of a 402: the proxy must serve the turn
+// on the caller's own subscription (no paid failover, no debit) or refuse it,
+// bounding our unbilled spend at the floor. Bool value.
+var SubscriptionOnlyContextKey = subscriptionOnlyContextKeyT{}
+
+// WithSubscriptionOnly marks ctx so the proxy serves the turn subscription-only
+// (see SubscriptionOnlyContextKey).
+func WithSubscriptionOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, SubscriptionOnlyContextKey, true)
+}
+
+// SubscriptionOnlyFromContext reports whether WithBalanceCheck flagged the
+// current request as subscription-only (balance past the overdraft floor).
+func SubscriptionOnlyFromContext(ctx context.Context) bool {
+	v := ctx.Value(SubscriptionOnlyContextKey)
+	if v == nil {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
 // EntryTypeInference is the canonical entry_type for per-request debits.
 // Keep in sync with the CHECK constraint on
 // router.organization_credit_ledger.entry_type.
@@ -42,8 +71,11 @@ const MinBalanceMicros int64 = 0
 // serving on the caller's own plan, but can fail over to a paid model (the sub
 // is rate-limit exhausted, or the scorer routes to a non-covered model). Rather
 // than 402 free subscription traffic at zero balance, allow the balance to run
-// negative to this floor, then gate — staying optimistic while bounding the
-// unbilled-failover window. -$5.
+// negative to this floor, then switch to subscription-only serving — the turn
+// still flows on the caller's own plan, but paid failover is disabled (see
+// SubscriptionOnlyContextKey) so a turn that can't stay on the subscription is
+// refused instead of billed. Keeps the org's own-account traffic flowing
+// indefinitely while bounding the unbilled-failover window at this floor. -$5.
 const SubscriptionOverdraftFloorMicros int64 = -5_000_000
 
 // Service orchestrates balance reads and debits. No I/O of its own — all

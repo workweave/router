@@ -2115,6 +2115,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return routeErr
 	}
 
+	// Subscription-only mode (org past the overdraft floor): the turn may serve
+	// free on the caller's own subscription via the usage-bypass path, but paid
+	// failover is disabled. If it didn't resolve to a bypass passthrough it would
+	// route to a paid model, so refuse it (402) rather than bill an
+	// already-negative balance.
+	if billing.SubscriptionOnlyFromContext(ctx) && !routeRes.UsageBypass {
+		log.Info("Subscription-only request cannot be served on the subscription; refusing",
+			"requested_model", feats.Model, "external_id", externalID)
+		return ErrCreditsExhaustedSubscriptionUnavailable
+	}
+
 	// Subscription usage-bypass: engaged inside runTurnLoop after hard-pin,
 	// force-pin, and tool-result sticky branches (those still win). The
 	// caller's own Claude subscription has headroom, so serve straight through
@@ -2125,6 +2136,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err
 		}
+		// Subscription-only mode: the subscription just failed (e.g. 429
+		// weekly-limit). Paid failover is disabled, so refuse rather than
+		// reroute onto a paid model against an already-negative balance.
+		if billing.SubscriptionOnlyFromContext(ctx) {
+			log.Info("Subscription-only bypass hit retryable error; refusing instead of paid reroute",
+				"request_id", requestID, "external_id", externalID)
+			return ErrCreditsExhaustedSubscriptionUnavailable
+		}
+
 		// Bypass hit a pre-commit retryable error (e.g. Anthropic 429 weekly-limit
 		// or transport error). Refresh the subsidy cost factor so the scorer
 		// discounts Anthropic correctly on reroute.
