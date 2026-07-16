@@ -538,6 +538,38 @@ func TestTrimLastN_GeminiStripsOrphanFunctionResponse(t *testing.T) {
 	assert.NotContains(t, string(prep.Body), "functionResponse")
 }
 
+// TrimLastN drops a stale same-name functionResponse that precedes the kept functionCall.
+func TestTrimLastN_GeminiStripsStaleSameNameFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	// TrimLastN(3) keeps [stale FR edit, model FC edit, valid FR edit].
+	// A name-only match would keep the stale FR because a later FC reuses "edit".
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "first edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"n": 1}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "stale"}}}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"n": 2}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 2, "stale FR dropped; keep [model FC, valid FR]")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	assert.Equal(t, "edit", contents[0].Get("parts.0.functionCall.name").String())
+	assert.Equal(t, "user", contents[1].Get("role").String())
+	assert.Equal(t, "ok", contents[1].Get("parts.0.functionResponse.response.result").String())
+	assert.NotContains(t, string(prep.Body), "stale")
+}
+
 // Regression: mid-session model switch + TrimLastN can orphan tool_result
 // blocks, which the Anthropic→Gemini translation turned into an empty
 // functionResponse.name (Gemini 400).
