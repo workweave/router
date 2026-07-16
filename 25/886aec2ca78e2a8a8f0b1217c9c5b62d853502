@@ -1,0 +1,33 @@
+internal/router/rl/client.go
+  s_539e346e9e9b07::t_7cbbcce1da7a8f 97-99
+  s_539e346e9e9b07::t_4d0b7f0e4da73c 17-19,26,32-37,44-50,54
+cmd/router/main.go
+  s_539e346e9e9b07::t_88a34c2b51561e 1195-1210
+  s_539e346e9e9b07::t_a500c5082c94f8 576-588
+docs/CONFIGURATION.md
+  s_539e346e9e9b07::t_1f064c099fdfc9 100-101
+internal/router/rl/AGENTS.md
+  s_539e346e9e9b07::t_831fcb74da327d 21
+internal/router/rl/CLAUDE.md
+  s_539e346e9e9b07::t_ac23ff65620005 21
+.env.example
+  s_539e346e9e9b07::t_bea96351150cbb 84-87
+internal/router/rl/client_test.go
+  s_539e346e9e9b07::t_b1afac206e42f5 63-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "25886aec2ca78e2a8a8f0b1217c9c5b62d853502",
+  "prompts": {},
+  "sessions": {
+    "s_539e346e9e9b07": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "13e880c5-2152-4f64-ad08-30fd4fa15166",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+cmd/router/main.go
+  s_09658d2c710b6a::t_d5d5807a6421a9 232-240,242,252-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "edd3763bcc196c4748427d4310eb52f24ad8ec38",
+  "prompts": {},
+  "sessions": {
+    "s_09658d2c710b6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2077aa2-279e-4953-a77e-20853ff6ce8d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

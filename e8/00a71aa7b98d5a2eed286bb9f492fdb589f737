@@ -1,0 +1,23 @@
+internal/translate/features.go
+  s_862511ba717148::t_4b49ac5d25d801 182-187
+  s_862511ba717148::t_50b6ba5ee3459b 132-137
+  s_862511ba717148::t_b1df889f00c4de 517-538
+internal/translate/features_tool_descriptions_test.go
+  s_862511ba717148::t_83d880fe44f91a 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e800a71aa7b98d5a2eed286bb9f492fdb589f737",
+  "prompts": {},
+  "sessions": {
+    "s_862511ba717148": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3828f08c-7416-4785-87ac-116db5e1d444",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

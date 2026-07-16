@@ -1,0 +1,89 @@
+internal/server/middleware/cluster_version_override_test.go
+  6da22b6a530ba492 45-47,51,56
+CLAUDE.md
+  6da22b6a530ba492 54,76,202-207,212-214,446-448,595-599,601-604
+internal/providers/anthropic/client.go
+  6da22b6a530ba492 15,35,116
+internal/auth/installation.go
+  6da22b6a530ba492 11-17,21-23
+internal/providers/google/client.go
+  6da22b6a530ba492 21,45,80
+internal/postgres/converters.go
+  6da22b6a530ba492 14-20
+Makefile
+  6da22b6a530ba492 12,23,26-28,58,205
+internal/observability/otel/pricing_statusline_test.go
+  6da22b6a530ba492 14-17
+internal/providers/openaicompat/client.go
+  6da22b6a530ba492 21,40-41,70
+internal/providers/httputil/httputil.go
+  6da22b6a530ba492 1-3,5-9,11-13,15-67
+db/migrations/20260506194013_drop_is_eval_allowlisted.up.sql
+  6da22b6a530ba492 1-3
+internal/postgres/repository.go
+  6da22b6a530ba492 38-40
+internal/server/middleware/embed_override.go
+  6da22b6a530ba492 13,17,32-33
+AGENTS.md
+  6da22b6a530ba492 54,76,202-207,212-214,446-448,595-599,601-604
+db/migrations/20260506194013_drop_is_eval_allowlisted.down.sql
+  6da22b6a530ba492 1-3
+install/cc-statusline.sh
+  6da22b6a530ba492 39-41,45,48-56,62-73,76,79-87,91,93-104
+internal/server/middleware/embed_override_test.go
+  6da22b6a530ba492 50-52,56-58,63,69
+internal/observability/otel/pricing.go
+  6da22b6a530ba492 1-2,15-22
+cmd/genprices/main.go
+  6da22b6a530ba492 1-106
+db/queries/model_router_installations.sql
+  6da22b6a530ba492 5,10
+internal/sqlc/model_router_api_keys.sql.go
+  6da22b6a530ba492 46,95,114,219
+internal/server/middleware/cluster_version_override.go
+  6da22b6a530ba492 12,16
+internal/postgres/external_api_key_repo.go
+  6da22b6a530ba492 120
+internal/providers/openai/client.go
+  6da22b6a530ba492 19,46,93-96,98,104,112,121,128
+internal/sqlc/model_router_installations.sql.go
+  6da22b6a530ba492 18,23,25,29-31,34,39,44,46,48,63,77,98,105,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8e7455fe3766fc96a4fcd72a23da5f3bbe87be4e",
+  "prompts": {
+    "4f9ef701ae6bb906": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8710d0d6-65d0-4b5c-9976-14962a8a98ee",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 88,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "6da22b6a530ba492": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ac980d2b-a356-4488-96dc-383a83ffa12a",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 379,
+      "total_deletions": 5414,
+      "accepted_lines": 378,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  }
+}

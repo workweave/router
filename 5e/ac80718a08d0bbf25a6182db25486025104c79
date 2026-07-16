@@ -1,0 +1,61 @@
+internal/proxy/dispatch_error.go
+  s_181299bbd674e9::t_aedc6557f8d0ce 9,37,146-153
+  s_e8b0a767239908::t_1fcae50e92637f 154
+internal/api/gemini/generate_content.go
+  s_181299bbd674e9::t_aedc6557f8d0ce 137
+internal/proxy/strategy_registry_internal_test.go
+  s_181299bbd674e9::t_60bec8c01e6ba3 10,27,41
+  s_181299bbd674e9::t_90ad525cd2c4c6 1-9,11-26,28-40,42-58
+internal/router/policy/contract.go
+  s_181299bbd674e9::t_64444a77526cf7 23-27,29-31
+  s_181299bbd674e9::t_fa7708916eaa32 28
+internal/proxy/observation_internal_test.go
+  s_181299bbd674e9::t_3692dedf2c30a6 113
+internal/proxy/router_feedback.go
+  s_181299bbd674e9::t_366625f1badf67 15,117-119,156-157,169,184-186
+internal/proxy/hmm_outcome_internal_test.go
+  s_181299bbd674e9::t_2d9f0f6f030957 12,28-32,34,42-45,54,66-67
+internal/proxy/service.go
+  s_181299bbd674e9::t_206bb0dfb372dc 3061-3071,3073,3076-3077,3080,3084-3085,3092-3096,3125,3128-3130
+  s_181299bbd674e9::t_d4fb324c0dd735 52-54,235-240
+  s_181299bbd674e9::t_fa7708916eaa32 30
+  s_181299bbd674e9::t_0c43023f8ac5e9 369-371,373,2255,2870-2873,2875,4433
+  s_181299bbd674e9::t_66ff83ad33c41c 1441-1457,1461-1479,1481-1493,1496-1497,1499-1504,1513-1518,1520-1521,1523-1525
+  s_181299bbd674e9::t_24e48d1ad56970 241,1519,1526-1531,1533,1535,1537
+  s_e8b0a767239908::t_acee7e1ef2080c 242
+internal/router/strategy.go
+  s_181299bbd674e9::t_64444a77526cf7 3-10
+internal/proxy/gemini.go
+  s_181299bbd674e9::t_0c43023f8ac5e9 259
+cmd/router/main.go
+  s_181299bbd674e9::t_12a15b168cdf57 604-612
+  s_181299bbd674e9::t_fa7708916eaa32 47
+internal/proxy/observation.go
+  s_181299bbd674e9::t_3692dedf2c30a6 108
+internal/proxy/router_feedback_proxy_test.go
+  s_181299bbd674e9::t_90ad525cd2c4c6 17,151,154,172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5eac80718a08d0bbf25a6182db25486025104c79",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_e8b0a767239908": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4862-1cc1-71e1-a271-6ca3ae6f4432",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+internal/translate/responses_to_anthropic_writer.go
+  s_eaa7fc513f2fff::t_95308dbaea070f 757-759,769,774,777,779
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_eaa7fc513f2fff::t_8a84a928c74a7a 636-658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "d0d73da88714e864e53762f4429e93249adc8083",
+  "prompts": {},
+  "sessions": {
+    "s_eaa7fc513f2fff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23a7366d-2ca0-46f8-93ec-a4be57d8f0a5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

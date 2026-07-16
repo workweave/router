@@ -1,0 +1,19 @@
+install/install.sh
+  s_09ca5e2e44a0ed::t_25fe758d84d602 1591-1601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "39da091d3358baee0dcbf781c1c5eed0b85b3e33",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
