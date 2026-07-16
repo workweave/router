@@ -116,6 +116,26 @@ rm -f docker-compose.override.yml /tmp/local-settings.json
 # `docker compose down` if you want to stop the stack
 ```
 
+## Testing the balance gate / subscription usage-bypass (managed billing)
+
+For fixes to `internal/billing` + `internal/server/middleware/balance_check.go` + the usage-bypass path (`internal/proxy/usage_bypass.go`), the setup differs from the model-behavior workflow above:
+
+- **The balance gate only attaches in managed mode with billing enabled.** Set `ROUTER_DEPLOYMENT_MODE=managed` on the `server` service. Billing auto-enables when the `router` schema's billing tables exist (they do after `migrate`), logged as `Router billing enabled`. In default selfhosted mode `WithBalanceCheck` is never wired and none of this triggers.
+- **The Anthropic provider has no `ANTHROPIC_BASE_URL` override** (unlike Fireworks/Together/etc.) — `cmd/router/main.go` hardcodes `anthropic.DefaultBaseURL`. To point Anthropic at a mock, temporarily edit that line to `config.GetOr("ANTHROPIC_BASE_URL", anthropic.DefaultBaseURL)`, rebuild, and **revert it after testing** (don't ship it in the fix PR). The boot log line still prints `DefaultBaseURL` cosmetically — verify the mock is actually hit via the mock's own logs, not the boot log.
+- **Requests must be MainLoop-shaped to reach the usage-bypass decision.** Short prompts (small `max_tokens`, no tools) classify as `Probe`/`Classifier`/`TitleGen` — all **hard-pinned**, short-circuiting before the usage-bypass and scorer branches. A trivial `"say hi"` will wrongly hit the refusal path. Use a realistic turn: `tools` present + `max_tokens>=4096` + a normal user message. Confirm `turn_type=main_loop` in the `turnloop classified` log before trusting the result.
+- **Drive with raw `curl`** on the production router-key path — no `claude` binary needed, and it lets you pin the requested model (the usage-bypass path serves the *requested* model verbatim, so no `/force-model` needed here):
+  ```bash
+  curl -sS -N -D /tmp/h.txt -X POST http://localhost:8080/v1/messages \
+    -H "Authorization: Bearer $RK" \
+    -H "X-Weave-Anthropic-Subscription: sk-ant-oat01-anything" \
+    -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+    -d '{"model":"claude-sonnet-4-5","max_tokens":4096,"stream":true,"tools":[{"name":"Bash","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"<realistic multi-sentence task>"}]}'
+  ```
+  A fake `sk-ant-oat...` token is enough for router-side classification; the mock doesn't validate it.
+- **Set DB state directly** (host `psql -h localhost -p 5433 -U router -d router`, password `router`, `SET search_path TO router`): `UPDATE model_router_installations SET usage_bypass_enabled=true WHERE external_id='__router_admin__';` and upsert `organization_credit_balance` with `balance_usd_micros` below `SubscriptionOverdraftFloorMicros` (−5_000_000). Assert no debit via `SELECT count(*) FROM organization_credit_ledger WHERE organization_id='__router_admin__';` before/after.
+- **Deterministic mock that branches on the requested model** is the cleanest way to drive both the serve path and the refusal path from one server: return 200 SSE for one model and 429 for another (the usage-bypass path forwards the requested model verbatim, so branching on `model` in the request body is reliable).
+- **What good looks like:** header `X-Router-Decision: usage_bypass`, the depleted-credits warning injected as content-block index 0 (real content re-indexed to 1), log `Balance past subscription overdraft floor: serving subscription-only`. Retryable upstream error → log `Subscription-only bypass hit retryable error; refusing instead of paid reroute` → HTTP 402. No subscription header below floor → `insufficient_credits` 402 that never logs `ProxyMessages start`.
+
 ## Notes
 
 - Local cluster version comes from `ROUTER_CLUSTER_VERSION` in `.env.local`; it may differ from prod, which is why `/force-model` (not the scorer) is the reliable way to hit one model.
