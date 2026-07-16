@@ -83,6 +83,25 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		"prompt_preview", observability.Preview(promptText, 200),
 	)
 
+	// Wide cyclic re-read loop → escalate to geminiEscalateModel (same-format
+	// Google target). Tight identical-args loop → synthetic break. Mirrors
+	// ProxyMessages; see detectCyclicToolCallLoop / handleLoopEscalationTo.
+	escalatedLoop := false
+	if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
+		loopRole := roleForTier(catalog.TierFor(feats.Model))
+		s.handleLoopEscalationTo(ctx, csig, ccount, cratio, cwin, installationID, sessionKey, loopRole, feats.Model,
+			providers.ProviderGoogle, geminiEscalateModel)
+		escalatedLoop = true
+	}
+	if !escalatedLoop {
+		if loop, sig, count := detectToolCallLoop(env); loop {
+			loopRole := roleForTier(catalog.TierFor(feats.Model))
+			log.Info("ProxyGeminiGenerateContent tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole,
+				feats.Model, providers.ProviderGoogle, feats.Tokens)
+		}
+	}
+
 	logInboundRequestDiagnostics(log, env)
 
 	subAgentHint := r.Header.Get("x-weave-subagent-type")

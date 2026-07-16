@@ -386,6 +386,88 @@ func writeSyntheticAnthropicSSE(w http.ResponseWriter, msgID, text string, input
 	return nil
 }
 
+// writeSyntheticGeminiResponse writes a minimal Gemini generateContent
+// response without hitting an upstream, handling both streaming and
+// non-streaming shapes.
+func writeSyntheticGeminiResponse(w http.ResponseWriter, env *translate.RequestEnvelope, text string, inputTokens int) error {
+	if env.Stream() {
+		return writeSyntheticGeminiSSE(w, text, inputTokens)
+	}
+	return writeSyntheticGeminiJSON(w, text, inputTokens)
+}
+
+func writeSyntheticGeminiJSON(w http.ResponseWriter, text string, inputTokens int) error {
+	outTokens := len(text) / 4
+	resp := map[string]any{
+		"candidates": []any{
+			map[string]any{
+				"content": map[string]any{
+					"role":  "model",
+					"parts": []any{map[string]any{"text": text}},
+				},
+				"finishReason": "STOP",
+				"index":        0,
+			},
+		},
+		"usageMetadata": map[string]any{
+			"promptTokenCount":     inputTokens,
+			"candidatesTokenCount": outTokens,
+			"totalTokenCount":      inputTokens + outTokens,
+		},
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal synthetic gemini response: %w", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, writeErr := w.Write(body)
+	return writeErr
+}
+
+func writeSyntheticGeminiSSE(w http.ResponseWriter, text string, inputTokens int) error {
+	w.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := w.(http.Flusher)
+	bw := bufio.NewWriterSize(w, 4096)
+	outTokens := len(text) / 4
+	chunkContent := mustMarshalJSON(map[string]any{
+		"candidates": []any{
+			map[string]any{
+				"content": map[string]any{
+					"role":  "model",
+					"parts": []any{map[string]any{"text": text}},
+				},
+				"index": 0,
+			},
+		},
+	})
+	chunkStop := mustMarshalJSON(map[string]any{
+		"candidates": []any{
+			map[string]any{
+				"content": map[string]any{
+					"parts": []any{},
+				},
+				"finishReason": "STOP",
+				"index":        0,
+			},
+		},
+		"usageMetadata": map[string]any{
+			"promptTokenCount":     inputTokens,
+			"candidatesTokenCount": outTokens,
+			"totalTokenCount":      inputTokens + outTokens,
+		},
+	})
+	for _, ev := range []string{openAISSEData(chunkContent), openAISSEData(chunkStop)} {
+		bw.WriteString(ev)
+	}
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
 // writeSyntheticOpenAIResponse writes a minimal OpenAI Chat Completions
 // response without hitting an upstream, handling both streaming and
 // non-streaming shapes.

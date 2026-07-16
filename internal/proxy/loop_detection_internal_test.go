@@ -5,15 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestDetectToolCallLoop_TripsAtMaxRepeats(t *testing.T) {
@@ -400,4 +404,154 @@ func TestHandleLoopEscalation_NilInstallationSkipsHoldout(t *testing.T) {
 
 	assert.Empty(t, events.events, "nil installation cannot record an event row")
 	assert.Empty(t, pins.upserts, "nil installation cannot pin either — but it must not be counted as holdout")
+}
+
+// The Anthropic escalation entrypoint continues to pin the Anthropic model.
+func TestHandleLoopEscalation_AnthropicUnchanged(t *testing.T) {
+	pins := newStubPinStore()
+	events := &recordingLoopStore{}
+	svc := newLoopEscalationSvc(pins, events)
+
+	svc.handleLoopEscalation(context.Background(), loopTestSig, 12, 0.2, 30, uuid.New(), loopTestKey(12), "default", "claude-haiku-4-5")
+
+	require.Len(t, pins.upserts, 1)
+	assert.Equal(t, providers.ProviderAnthropic, pins.upserts[0].Provider,
+		"handleLoopEscalation must keep pinning Anthropic — Gemini escalation uses handleLoopEscalationTo")
+	assert.Equal(t, escalateModel, pins.upserts[0].Model)
+	assert.Equal(t, translate.ReasonLoopEscalation, pins.upserts[0].Reason)
+
+	require.Len(t, events.events, 1)
+	assert.Equal(t, escalateModel, events.events[0].EscalationTarget)
+	assert.Equal(t, loopActionEscalated, events.events[0].Action)
+}
+
+func TestWriteSyntheticGeminiResponse_NonStreaming(t *testing.T) {
+	const text = "loop break message"
+	const inputTokens = 42
+	env, err := translate.ParseGemini([]byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"stream":false}`))
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, writeSyntheticGeminiResponse(rec, env, text, inputTokens))
+
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	body := rec.Body.Bytes()
+	assert.Equal(t, text, gjson.GetBytes(body, "candidates.0.content.parts.0.text").String())
+	assert.Equal(t, "model", gjson.GetBytes(body, "candidates.0.content.role").String())
+	assert.Equal(t, "STOP", gjson.GetBytes(body, "candidates.0.finishReason").String())
+	outTokens := len(text) / 4
+	assert.Equal(t, int64(inputTokens), gjson.GetBytes(body, "usageMetadata.promptTokenCount").Int())
+	assert.Equal(t, int64(outTokens), gjson.GetBytes(body, "usageMetadata.candidatesTokenCount").Int())
+	assert.Equal(t, int64(inputTokens+outTokens), gjson.GetBytes(body, "usageMetadata.totalTokenCount").Int())
+}
+
+func TestWriteSyntheticGeminiResponse_Streaming(t *testing.T) {
+	const text = "stream loop break"
+	const inputTokens = 17
+	env, err := translate.ParseGemini([]byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"stream":true}`))
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, writeSyntheticGeminiResponse(rec, env, text, inputTokens))
+
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	frames := geminiSSEDataFrames(t, rec.Body.String())
+	require.Len(t, frames, 2, "streaming synthetic Gemini response must be exactly two SSE data frames")
+
+	assert.Equal(t, text, gjson.Get(frames[0], "candidates.0.content.parts.0.text").String())
+	assert.Equal(t, "model", gjson.Get(frames[0], "candidates.0.content.role").String())
+	assert.Equal(t, "", gjson.Get(frames[0], "candidates.0.finishReason").String(),
+		"first frame is content-only; finishReason belongs on the second frame")
+
+	assert.Equal(t, "STOP", gjson.Get(frames[1], "candidates.0.finishReason").String())
+	parts := gjson.Get(frames[1], "candidates.0.content.parts")
+	require.True(t, parts.Exists() && parts.IsArray())
+	assert.Equal(t, 0, len(parts.Array()), "second frame must carry empty parts")
+	outTokens := len(text) / 4
+	assert.Equal(t, int64(inputTokens), gjson.Get(frames[1], "usageMetadata.promptTokenCount").Int())
+	assert.Equal(t, int64(outTokens), gjson.Get(frames[1], "usageMetadata.candidatesTokenCount").Int())
+	assert.Equal(t, int64(inputTokens+outTokens), gjson.Get(frames[1], "usageMetadata.totalTokenCount").Int())
+}
+
+func TestHandleToolCallLoopBreak_Gemini(t *testing.T) {
+	// Gemini loop breaks must use a Gemini-native response body.
+	body, err := json.Marshal(map[string]any{
+		"contents": []any{
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"text": "do stuff"},
+			}},
+		},
+		"stream": false,
+	})
+	require.NoError(t, err)
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	pins := newStubPinStore()
+	svc := newLoopEscalationSvc(pins, nil)
+	rec := httptest.NewRecorder()
+	err = svc.handleToolCallLoopBreak(
+		context.Background(), rec, env, loopTestSig, 5,
+		uuid.New(), loopTestKey(13), "default",
+		"gemini-2.5-flash", providers.ProviderGoogle, 99,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"),
+		"Gemini loop break must not use the Anthropic/OpenAI content type")
+	resp := rec.Body.Bytes()
+	require.True(t, gjson.GetBytes(resp, "candidates").Exists(),
+		"Gemini loop break must write candidates[], not an Anthropic message envelope; got %s", rec.Body.String())
+	assert.Equal(t, "STOP", gjson.GetBytes(resp, "candidates.0.finishReason").String())
+	assert.Equal(t, "model", gjson.GetBytes(resp, "candidates.0.content.role").String())
+	text := gjson.GetBytes(resp, "candidates.0.content.parts.0.text").String()
+	assert.Contains(t, text, "Read", "break message should name the looping tool")
+	assert.Contains(t, text, "5", "break message should include the repeat count")
+	assert.False(t, gjson.GetBytes(resp, "type").Exists(),
+		"must not be an Anthropic synthetic message (type=message)")
+	assert.False(t, gjson.GetBytes(resp, "choices").Exists(),
+		"must not be an OpenAI synthetic chat.completion")
+}
+
+func TestHandleLoopEscalationTo_PinsGoogleModel(t *testing.T) {
+	pins := newStubPinStore()
+	events := &recordingLoopStore{}
+	svc := newLoopEscalationSvc(pins, events)
+
+	svc.handleLoopEscalationTo(
+		context.Background(), loopTestSig, 12, 0.2, 30,
+		uuid.New(), loopTestKey(14), "default", "gemini-2.5-flash",
+		providers.ProviderGoogle, geminiEscalateModel,
+	)
+
+	require.Len(t, pins.upserts, 1, "Gemini escalation must write a pin")
+	assert.Equal(t, providers.ProviderGoogle, pins.upserts[0].Provider)
+	assert.Equal(t, geminiEscalateModel, pins.upserts[0].Model)
+	assert.Equal(t, "gemini-3.1-pro-preview", pins.upserts[0].Model)
+	assert.Equal(t, translate.ReasonLoopEscalation, pins.upserts[0].Reason)
+
+	require.Len(t, events.events, 1)
+	assert.Equal(t, loopActionEscalated, events.events[0].Action)
+	assert.Equal(t, geminiEscalateModel, events.events[0].EscalationTarget)
+	assert.Equal(t, "gemini-2.5-flash", events.events[0].LoopingModel)
+}
+
+// geminiSSEDataFrames splits an SSE body into the JSON payloads of each
+// `data:` frame (blank-line delimited), skipping comment/event-only frames.
+func geminiSSEDataFrames(t *testing.T, body string) []string {
+	t.Helper()
+	var frames []string
+	for _, block := range strings.Split(body, "\n\n") {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		for _, line := range strings.Split(block, "\n") {
+			if strings.HasPrefix(line, "data: ") {
+				frames = append(frames, strings.TrimPrefix(line, "data: "))
+				break
+			}
+		}
+	}
+	return frames
 }
