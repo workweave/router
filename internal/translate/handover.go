@@ -280,7 +280,7 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	if latestUser.Exists() {
 		// Strip functionResponse parts: the summary has no functionCall parts,
 		// so any functionResponse would be orphaned (Google 400).
-		cleaned := stripGeminiFunctionResponseEntry(latestUser)
+		cleaned := stripGeminiFunctionResponseEntry(latestUser, nil)
 		if cleaned != "" {
 			rebuilt = append(rebuilt, cleaned)
 			preserved = 1
@@ -298,29 +298,44 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	return elided
 }
 
-// stripGeminiFunctionResponseEntry removes functionResponse parts from a
-// Gemini contents entry (nil known set = strip all). Returns "" if nothing
+// stripGeminiFunctionResponseEntry removes functionResponse parts whose name
+// is not in knownNames (nil knownNames = strip all). Returns "" if nothing
 // remains — matching stripAnthropicToolResultMsg for Anthropic handover.
-func stripGeminiFunctionResponseEntry(entry gjson.Result) string {
+func stripGeminiFunctionResponseEntry(entry gjson.Result, knownNames map[string]struct{}) string {
 	parts := entry.Get("parts")
 	if !parts.IsArray() {
 		return entry.Raw
 	}
-	hasFR := false
+	hasOrphans := false
 	parts.ForEach(func(_, part gjson.Result) bool {
-		if part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
-			hasFR = true
+		resp := part.Get("functionResponse")
+		if !resp.Exists() {
+			resp = part.Get("function_response")
+		}
+		if !resp.Exists() {
+			return true
+		}
+		name := resp.Get("name").String()
+		if _, ok := knownNames[name]; !ok {
+			hasOrphans = true
 			return false
 		}
 		return true
 	})
-	if !hasFR {
+	if !hasOrphans {
 		return entry.Raw
 	}
 	var kept []string
 	parts.ForEach(func(_, part gjson.Result) bool {
-		if part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
-			return true
+		resp := part.Get("functionResponse")
+		if !resp.Exists() {
+			resp = part.Get("function_response")
+		}
+		if resp.Exists() {
+			name := resp.Get("name").String()
+			if _, ok := knownNames[name]; !ok {
+				return true
+			}
 		}
 		kept = append(kept, part.Raw)
 		return true
@@ -346,17 +361,56 @@ func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 		return 0
 	}
 	keep := all[len(all)-n:]
-	rebuilt := make([]string, 0, len(keep))
-	for _, m := range keep {
-		rebuilt = append(rebuilt, m.Raw)
-	}
+	rebuilt := stripOrphanedGeminiFunctionResponses(keep)
 	newContents := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "contents", []byte(newContents))
 	if err != nil {
 		return 0
 	}
 	e.body = out
-	return len(all) - len(keep)
+	return len(all) - n
+}
+
+// stripOrphanedGeminiFunctionResponses drops functionResponse parts whose
+// tool name has no matching functionCall among the set's model turns; user
+// entries left empty afterward are omitted entirely.
+func stripOrphanedGeminiFunctionResponses(entries []gjson.Result) []string {
+	known := collectGeminiFunctionCallNames(entries)
+	result := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		role := entry.Get("role").String()
+		if role == "model" {
+			result = append(result, entry.Raw)
+			continue
+		}
+		cleaned := stripGeminiFunctionResponseEntry(entry, known)
+		if cleaned != "" {
+			result = append(result, cleaned)
+		}
+	}
+	return result
+}
+
+// collectGeminiFunctionCallNames returns the set of functionCall names present
+// in model turns.
+func collectGeminiFunctionCallNames(entries []gjson.Result) map[string]struct{} {
+	names := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.Get("role").String() != "model" {
+			continue
+		}
+		entry.Get("parts").ForEach(func(_, part gjson.Result) bool {
+			call := part.Get("functionCall")
+			if !call.Exists() {
+				call = part.Get("function_call")
+			}
+			if name := call.Get("name").String(); name != "" {
+				names[name] = struct{}{}
+			}
+			return true
+		})
+	}
+	return names
 }
 
 // stripOrphanedAnthropicToolResults drops tool_result blocks whose tool_use_id

@@ -510,6 +510,35 @@ func TestTrimLastN_GeminiNoOpWhenUnderLimit(t *testing.T) {
 	require.Len(t, contents, 2)
 }
 
+func TestTrimLastN_GeminiStripsOrphanFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	// TrimLastN(2) keeps only the trailing functionResponse user turn —
+	// without orphan strip that would 400 at Google (no matching functionCall).
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "edit a.go"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]},
+    {"role": "model", "parts": [{"text": "done"}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "stale"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 2)
+	assert.Equal(t, 3, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 1, "orphan functionResponse-only user must be dropped")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	assert.Equal(t, "done", contents[0].Get("parts.0.text").String())
+	assert.NotContains(t, string(prep.Body), "functionResponse")
+}
+
 // Regression: mid-session model switch + TrimLastN can orphan tool_result
 // blocks, which the Anthropic→Gemini translation turned into an empty
 // functionResponse.name (Gemini 400).

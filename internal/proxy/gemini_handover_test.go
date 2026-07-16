@@ -280,3 +280,105 @@ func TestGeminiSwitch_SummarizerFailureKeepsFullHistory(t *testing.T) {
 	assert.NotContains(t, raw, translate.HandoverSummaryTag, "RewriteEnvelope must not run on summarizer failure")
 	assert.Equal(t, int32(1), sz.calls.Load())
 }
+
+func TestGeminiSwitch_EmptySummaryKeepsFullHistory(t *testing.T) {
+	t.Parallel()
+	chunk := strings.Repeat("dddd ", 8000)
+	body := []byte(`{
+  "model":"gemini-3.1-pro-preview",
+  "contents":[
+    {"role":"user","parts":[{"text":"` + chunk + `"}]},
+    {"role":"model","parts":[{"text":"ack"}]},
+    {"role":"user","parts":[{"text":"continue"}]}
+  ]
+}`)
+	sz := &fakeSummarizer{summary: ""} // success with empty text → same fallback as error
+	googleUp := &fakeProvider{}
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderGoogle,
+		Model:           "gemini-3.1-pro-preview",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 10000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderGoogle,
+		Model:    "gemini-3.1-flash-lite-preview",
+		Reason:   "cluster:v0.2",
+	}}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderGoogle: googleUp},
+		nil, false, nil, store, false,
+		providers.ProviderGoogle, "gemini-3.1-flash-lite-preview", nil,
+	).WithSummarizer(sz)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1beta/models/x:generateContent", strings.NewReader(""))
+	require.NoError(t, svc.ProxyGeminiGenerateContent(ctx, body, rec, httpReq))
+
+	require.NotEmpty(t, googleUp.proxyBodies)
+	raw := string(googleUp.proxyBodies[0])
+	assert.Contains(t, raw, chunk[:40], "empty summary must preserve full history")
+	assert.NotContains(t, raw, translate.HandoverSummaryTag)
+	assert.Equal(t, int32(1), sz.calls.Load())
+	assert.Equal(t, "gemini-3.1-flash-lite-preview", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
+func TestGeminiSwitch_ConcurrentRequestsRaceSafe(t *testing.T) {
+	t.Parallel()
+	chunk := strings.Repeat("eeee ", 4000)
+	body := []byte(`{
+  "model":"gemini-3.1-pro-preview",
+  "contents":[
+    {"role":"user","parts":[{"text":"` + chunk + `"}]},
+    {"role":"model","parts":[{"text":"ack"}]},
+    {"role":"user","parts":[{"text":"go"}]}
+  ]
+}`)
+	const n = 16
+	done := make(chan struct{}, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			store := newFakePinStore()
+			store.hasPin = true
+			store.pin = sessionpin.Pin{
+				Provider:        providers.ProviderGoogle,
+				Model:           "gemini-3.1-pro-preview",
+				Reason:          "cluster:v0.2",
+				PinnedUntil:     time.Now().Add(time.Hour),
+				LastInputTokens: 10000,
+				LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+			}
+			fr := &fakeRouter{decision: router.Decision{
+				Provider: providers.ProviderGoogle,
+				Model:    "gemini-3.1-flash-lite-preview",
+				Reason:   "cluster:v0.2",
+			}}
+			sz := &fakeSummarizer{summary: "race-safe summary"}
+			googleUp := &fakeProvider{}
+			svc := proxy.NewService(
+				fr,
+				map[string]providers.Client{providers.ProviderGoogle: googleUp},
+				nil, false, nil, store, false,
+				providers.ProviderGoogle, "gemini-3.1-flash-lite-preview", nil,
+			).WithSummarizer(sz)
+			ctx := authedCtx(uuid.New().String())
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/v1beta/models/x:generateContent", strings.NewReader(""))
+			require.NoError(t, svc.ProxyGeminiGenerateContent(ctx, body, rec, httpReq))
+			require.NotEmpty(t, googleUp.proxyBodies)
+			contents := gjson.GetBytes(googleUp.proxyBodies[0], "contents").Array()
+			require.Len(t, contents, 2)
+			assert.True(t, strings.HasPrefix(contents[0].Get("parts.0.text").String(), translate.HandoverSummaryTag))
+		}()
+	}
+	for i := 0; i < n; i++ {
+		<-done
+	}
+}
