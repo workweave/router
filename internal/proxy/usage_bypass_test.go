@@ -438,7 +438,12 @@ func TestSubscriptionOnly_ExhaustedSubscription_Refuses402(t *testing.T) {
 // gating refusal on the bypass flag would 402 turns that run fine on the sub;
 // the guard gates on the resolved subscription credential instead.
 func TestSubscriptionOnly_NonBypassServedOnSub_Serves(t *testing.T) {
-	svc, fr, p := bypassFixture(t, 0.20)
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	// Streaming upstream so the routing-marker writer (streaming-only) has a
+	// stream to prepend the depleted-credits warning to.
+	p := &fakeProvider{proxyResponse: bypassStreamResponse}
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil)
+
 	rec, req, body := bypassRequest(t)
 	// Gate disabled (no InstallationUsageBypassContextKey) => usage-bypass never
 	// engages; the caller still presents a Claude OAuth subscription and the
@@ -452,6 +457,9 @@ func TestSubscriptionOnly_NonBypassServedOnSub_Serves(t *testing.T) {
 	require.NotNil(t, p.proxyCreds[0], "the dispatch must carry the caller's subscription credential")
 	assert.True(t, p.proxyCreds[0].OAuth,
 		"a non-bypass turn must serve on the caller's own Claude subscription so billing debits $0")
+	assert.Contains(t, rec.Body.String(), "credits are depleted",
+		"a served-on-sub non-bypass turn must surface the depleted-credits warning + top-up CTA")
+	assert.Contains(t, rec.Body.String(), "router-credits", "the warning must surface the top-up CTA")
 }
 
 // TestSubscriptionOnly_NonBypassPaidRoute_Refuses402: a non-bypass turn that

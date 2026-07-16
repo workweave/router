@@ -2253,7 +2253,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// handover rewrote env (embedding predates the rewrite) or when subsidy
 	// factors are non-empty (the cache key doesn't capture quota-headroom-
 	// dependent model choice; subsidyFactors returns nil when the feature is off).
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && len(s.subsidyFactors(ctx, r.Header)) == 0
+	// Subscription-only turns are excluded (like the OpenAI path): the mode is an
+	// unfoldable routing signal absent from the cache key, so a stored body would
+	// bypass the exhausted-sub 402 guard and the depleted-credits warning below.
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -2413,6 +2416,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var reqStats providers.RequestMutationStats
 
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	// Subscription-only served-on-sub turn: replace the routing marker with the
+	// depleted-credits warning (like the OpenAI path and the usage-bypass path),
+	// not gated by the routing-marker opt-out. The pre-dispatch guard above has
+	// already refused any turn that wouldn't run on the caller's own sub, so a
+	// turn reaching here is served free and should carry the top-up CTA.
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		marker = subscriptionOnlyWarningMarker
+	}
 	// toolValidator compiles the request's tool schemas once (LRU-cached);
 	// translators validate/repair model tool calls against it. Nil if no tools.
 	toolValidator := env.ToolValidator()
@@ -2466,13 +2477,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			var translator translate.ResponseTranslator
 			if useResponses {
 				translator = translate.NewResponsesToAnthropicWriter(sink, d.Model, usage).
-					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
+					WithRoutingMarker(marker).
 					WithEstimatedInputTokens(feats.Tokens).
 					WithRequestHadTools(feats.HasTools).
 					WithToolValidator(toolValidator)
 			} else {
 				translator = translate.NewAnthropicSSETranslator(sink, d.Model, usage).
-					WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
+					WithRoutingMarker(marker).
 					WithEstimatedInputTokens(feats.Tokens).
 					WithRequestHadTools(feats.HasTools).
 					WithThinkTagReasoning(catalog.ThinkTagReasoningFor(d.Model)).
@@ -2525,7 +2536,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			}
 			// SSE chain: Gemini → OpenAI → Anthropic.
 			anthropicTr := translate.NewAnthropicSSETranslator(sink, d.Model, usage).
-				WithRoutingMarker(suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))).
+				WithRoutingMarker(marker).
 				WithEstimatedInputTokens(feats.Tokens).
 				WithRequestHadTools(feats.HasTools).
 				WithEscapeNormalize(s.escapeNormalize).
