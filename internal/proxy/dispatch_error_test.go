@@ -74,6 +74,18 @@ func TestClassifyDispatchError_BanditRLandHMMUnavailableRetry(t *testing.T) {
 	}
 }
 
+func TestClassifyDispatchError_CreditsExhaustedIs402(t *testing.T) {
+	cls, ok := proxy.ClassifyDispatchError(proxy.ErrCreditsExhaustedSubscriptionUnavailable)
+
+	require.True(t, ok, "the credits-exhausted sentinel must be classified")
+	assert.Equal(t, proxy.DispatchErrorCreditsExhausted, cls.Kind)
+	assert.Equal(t, http.StatusPaymentRequired, cls.Status)
+	assert.Contains(t, cls.Message, "credits are exhausted", "the client message must explain the depleted balance")
+	assert.Contains(t, cls.Message, "router-credits", "the client message must surface the top-up CTA")
+	assert.Equal(t, "warn", cls.LogLevel)
+	assert.False(t, cls.RetryAfter, "a retry won't help until credits are added")
+}
+
 func TestClassifyDispatchError_NotImplementedDoesNotLog(t *testing.T) {
 	cls, ok := proxy.ClassifyDispatchError(providers.ErrNotImplemented)
 
