@@ -277,8 +277,15 @@ func (s *Service) poolFor(ctx context.Context, installationID, userEmail, provid
 // freshCredential returns cred with a valid access token, refreshing (and
 // persisting the rotated tokens) when within refreshSkew of expiry.
 // Concurrent selections of the same credential coalesce onto one refresh.
+//
+// A zero ExpiresAt (enrollment omitted expires_at, or sent an unparsable value)
+// is treated as needing refresh, NOT as "valid forever": the enrolled access
+// token expires upstream (~1h) regardless of whether we recorded an expiry, so
+// assuming validity would strand the credential once the token lapsed. This
+// matches parseExpiry, which returns zero specifically so the pool refreshes
+// proactively.
 func (s *Service) freshCredential(ctx context.Context, cred *Credential) (*Credential, error) {
-	if cred.ExpiresAt.IsZero() || s.now().Add(refreshSkew).Before(cred.ExpiresAt) {
+	if !cred.ExpiresAt.IsZero() && s.now().Add(refreshSkew).Before(cred.ExpiresAt) {
 		return cred, nil
 	}
 

@@ -3508,11 +3508,15 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 	// inbound subscription token is present — otherwise a pool-only user (no BYOK,
 	// managed byok-only deploy) would never have Anthropic/OpenAI in the eligible
 	// set and the scorer would fail before any pooled turn could run. Cache-served.
+	// Uses the exhaustion-aware check (not a bare PoolExists): enrolling a
+	// provider whose pool is fully spent lets the scorer pick a provider that
+	// resolveAndInjectCredentials then can't serve (no usable pooled row, no
+	// matching BYOK), stranding the turn.
 	if !subscriptionRoutingDisabledForRequest(ctx) {
-		if s.poolHasCandidate(ctx, providers.ProviderAnthropic) {
+		if s.poolHasUsableCandidate(ctx, providers.ProviderAnthropic) {
 			out[providers.ProviderAnthropic] = struct{}{}
 		}
-		if s.poolHasCandidate(ctx, providers.ProviderOpenAI) {
+		if s.poolHasUsableCandidate(ctx, providers.ProviderOpenAI) {
 			out[providers.ProviderOpenAI] = struct{}{}
 		}
 	}

@@ -73,11 +73,12 @@ func TestEnroll_Success(t *testing.T) {
 	fake := &fakeEnroller{}
 	w := httptest.NewRecorder()
 	c := newAuthedContext(w, postJSONAs("Dev@Example.com", map[string]any{
-		"provider":      "claude",
-		"user_email":    "Dev@Example.com",
-		"access_token":  "sk-ant-oat01-token",
-		"refresh_token": "refresh-1",
-		"account_label": "Max plan",
+		"provider":          "claude",
+		"user_email":        "Dev@Example.com",
+		"access_token":      "sk-ant-oat01-token",
+		"refresh_token":     "refresh-1",
+		"claude_account_id": "claude-acct-1",
+		"account_label":     "Max plan",
 	}))
 	EnrollHandler(fake)(c)
 
@@ -110,6 +111,20 @@ func TestEnroll_RejectsBodyEmailImpersonation(t *testing.T) {
 	assert.Nil(t, fake.enrolled, "a body user_email other than the caller must be rejected")
 }
 
+func TestEnroll_RequiresClaudeAccountID(t *testing.T) {
+	// Claude enrollment must carry the stable account id (like OpenAI's
+	// chatgpt_account_id); without it the fingerprint would fall back to the
+	// rotating refresh token and duplicate the pool on every fresh login.
+	fake := &fakeEnroller{}
+	w := httptest.NewRecorder()
+	c := newAuthedContext(w, postJSONAs("a@b.com", map[string]any{
+		"provider": "claude", "access_token": "sk-ant-oat01-x", "refresh_token": "r",
+	}))
+	EnrollHandler(fake)(c)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Nil(t, fake.enrolled, "a Claude enrollment without claude_account_id must be rejected")
+}
+
 func TestEnroll_RejectsBadTokenShapes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -119,7 +134,7 @@ func TestEnroll_RejectsBadTokenShapes(t *testing.T) {
 			"provider": "claude", "user_email": "a@b.com", "access_token": "rk_abc", "refresh_token": "r",
 		}},
 		{"claude non-oat token", map[string]any{
-			"provider": "claude", "user_email": "a@b.com", "access_token": "sk-ant-api-key", "refresh_token": "r",
+			"provider": "claude", "user_email": "a@b.com", "access_token": "sk-ant-api-key", "refresh_token": "r", "claude_account_id": "claude-acct-1",
 		}},
 		{"openai missing account id", map[string]any{
 			"provider": "chatgpt", "user_email": "a@b.com", "access_token": "jwt", "refresh_token": "r",

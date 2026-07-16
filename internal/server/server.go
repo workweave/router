@@ -66,6 +66,14 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
 
+	// The balance gate treats a usable pooled subscription as covering (so a
+	// pool-only user isn't 402'd for a $0 turn). *proxy.Service implements the
+	// check; keep the interface nil when there's no proxy so it stays a true nil.
+	var poolCheck middleware.PoolSubscriptionChecker
+	if proxySvc != nil {
+		poolCheck = proxySvc
+	}
+
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 	engine.GET("/readyz", middleware.WithTimeout(readinessTimeout), admin.ReadinessHandler(readinessChecker))
 
@@ -161,7 +169,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
-		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
+		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros, poolCheck), middleware.WithAPIKeySpendCap(billingSvc))
 	}
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
@@ -179,7 +187,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
-		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
+		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros, poolCheck), middleware.WithAPIKeySpendCap(billingSvc))
 	}
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
@@ -212,7 +220,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
-		routeMiddleware = append(routeMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc))
+		routeMiddleware = append(routeMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros, poolCheck), middleware.WithAPIKeySpendCap(billingSvc))
 	}
 	routeMiddleware = append(routeMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),

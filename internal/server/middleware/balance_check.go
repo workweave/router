@@ -16,6 +16,16 @@ import (
 // Returned in the 402 body so the client can surface a CTA.
 const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 
+// PoolSubscriptionChecker reports whether the request's user has a usable
+// server-side pooled subscription covering routePath. Implemented by
+// *proxy.Service; nil disables the pool-aware exemption (inbound-header
+// subscriptions still exempt). It exists so a pool-only enrollment — which
+// carries no inbound subscription token — is not gated on prepaid balance for a
+// turn that will debit $0.
+type PoolSubscriptionChecker interface {
+	RequestPresentsPooledCoveringSubscription(ctx context.Context, headers http.Header, routePath string) bool
+}
+
 // WithBalanceCheck enforces prepaid credit gating on inference routes.
 // Attached only in managed mode and only after WithAuth, so the
 // installation lookup below is guaranteed to be populated.
@@ -36,7 +46,7 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 // creates an unbilled-usage window where platform spend is incurred
 // against an unknown balance. A short retry window for clients is the
 // correct tradeoff vs. silently letting tenants spend without billing.
-func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerFunc {
+func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64, poolCheck PoolSubscriptionChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
 
@@ -57,7 +67,8 @@ func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerF
 		// /v1/messages) and is applied only to 402 paths below — CheckBalance still
 		// runs so an active override is detected and its context flag set.
 		subscriptionExempt := installation.UsageBypassEnabled &&
-			proxy.RequestPresentsCoveringSubscription(c.Request.Context(), c.Request.Header, c.FullPath())
+			(proxy.RequestPresentsCoveringSubscription(c.Request.Context(), c.Request.Header, c.FullPath()) ||
+				(poolCheck != nil && poolCheck.RequestPresentsPooledCoveringSubscription(c.Request.Context(), c.Request.Header, c.FullPath())))
 
 		result, err := svc.CheckBalance(c.Request.Context(), orgID)
 		if err != nil {

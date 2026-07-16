@@ -76,7 +76,7 @@ func runMiddleware(t *testing.T, repo billing.Repo, threshold int64, externalID 
 	engine.GET("/probe", func(c *gin.Context) {
 		// Synthetic auth: pre-stash the installation the way WithAuth would.
 		withInstallation(c, externalID)
-		middleware.WithBalanceCheck(svc, threshold)(c)
+		middleware.WithBalanceCheck(svc, threshold, nil)(c)
 		if c.IsAborted() {
 			return
 		}
@@ -100,7 +100,7 @@ func runMiddlewareWith(t *testing.T, repo billing.Repo, threshold int64, routePa
 	reached := false
 	engine.GET(routePath, func(c *gin.Context) {
 		setInstall(c)
-		middleware.WithBalanceCheck(svc, threshold)(c)
+		middleware.WithBalanceCheck(svc, threshold, nil)(c)
 		if c.IsAborted() {
 			return
 		}
@@ -114,6 +114,68 @@ func runMiddlewareWith(t *testing.T, repo billing.Repo, threshold int64, routePa
 	}
 	engine.ServeHTTP(w, req)
 	return w, reached
+}
+
+// fakePoolChecker stands in for *proxy.Service's pool-coverage check so the
+// gate's pool-aware branch can be driven without a real subscription pool.
+type fakePoolChecker struct{ covers bool }
+
+func (f fakePoolChecker) RequestPresentsPooledCoveringSubscription(_ context.Context, _ http.Header, _ string) bool {
+	return f.covers
+}
+
+// runMiddlewarePool drives WithBalanceCheck with a pool-coverage checker and no
+// inbound subscription header, so only the pool branch can grant the exemption.
+func runMiddlewarePool(t *testing.T, repo billing.Repo, threshold int64, setInstall func(*gin.Context), pool middleware.PoolSubscriptionChecker) (*httptest.ResponseRecorder, bool) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc := billing.NewService(repo)
+	engine := gin.New()
+	reached := false
+	engine.GET("/v1/messages", func(c *gin.Context) {
+		setInstall(c)
+		middleware.WithBalanceCheck(svc, threshold, pool)(c)
+		if c.IsAborted() {
+			return
+		}
+		reached = true
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+	engine.ServeHTTP(w, req)
+	return w, reached
+}
+
+func TestWithBalanceCheck_ExemptsPoolOnlyCoveringSubscription(t *testing.T) {
+	// A pool-only user carries no inbound subscription token, but a usable pooled
+	// sub serves the turn at $0. With usage-bypass on, a depleted balance must
+	// not 402 that turn.
+	repo := &stubBillingRepo{balance: 0}
+	setInstall := func(c *gin.Context) { withUsageBypassInstallation(c, "org_pool") }
+	w, reached := runMiddlewarePool(t, repo, 0, setInstall, fakePoolChecker{covers: true})
+	assert.True(t, reached, "a usable pooled subscription must exempt the gate")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestWithBalanceCheck_402sPoolCoverageWithoutUsageBypass(t *testing.T) {
+	// Pool coverage is still scoped to usage-bypass orgs; a prepaid org must 402
+	// even when a pooled sub could serve the turn.
+	repo := &stubBillingRepo{balance: 0}
+	setInstall := func(c *gin.Context) { withInstallation(c, "org_prepaid") }
+	w, reached := runMiddlewarePool(t, repo, 0, setInstall, fakePoolChecker{covers: true})
+	assert.False(t, reached, "pool exemption must not apply without the usage-bypass gate")
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
+}
+
+func TestWithBalanceCheck_402sWhenNoPoolCoverage(t *testing.T) {
+	// Usage-bypass on but the pool has no usable candidate and no inbound sub:
+	// the turn routes to a paid model, so a depleted balance still 402s.
+	repo := &stubBillingRepo{balance: 0}
+	setInstall := func(c *gin.Context) { withUsageBypassInstallation(c, "org_pool") }
+	w, reached := runMiddlewarePool(t, repo, 0, setInstall, fakePoolChecker{covers: false})
+	assert.False(t, reached, "no pooled coverage means the paid path is gated")
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
 }
 
 func TestWithBalanceCheck_402WhenBelowThreshold(t *testing.T) {
@@ -159,7 +221,7 @@ func TestWithBalanceCheck_OverrideShortCircuitsAndFlagsContext(t *testing.T) {
 	var hasOverride bool
 	engine.GET("/probe", func(c *gin.Context) {
 		withInstallation(c, "org_internal")
-		middleware.WithBalanceCheck(svc, 1_000_000)(c)
+		middleware.WithBalanceCheck(svc, 1_000_000, nil)(c)
 		if c.IsAborted() {
 			return
 		}
@@ -219,7 +281,7 @@ func TestWithBalanceCheck_SkipsWhenInstallationMissing(t *testing.T) {
 	reached := false
 	engine.GET("/probe", func(c *gin.Context) {
 		// Note: no withInstallation() call.
-		middleware.WithBalanceCheck(svc, 1_000_000)(c)
+		middleware.WithBalanceCheck(svc, 1_000_000, nil)(c)
 		if c.IsAborted() {
 			return
 		}
@@ -288,7 +350,7 @@ func runMiddlewarePrep(t *testing.T, repo billing.Repo, threshold int64, routePa
 	hasOverride := false
 	engine.GET(routePath, func(c *gin.Context) {
 		prep(c)
-		middleware.WithBalanceCheck(svc, threshold)(c)
+		middleware.WithBalanceCheck(svc, threshold, nil)(c)
 		if c.IsAborted() {
 			return
 		}

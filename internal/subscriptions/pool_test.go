@@ -188,6 +188,22 @@ func TestService_SelectRefreshesExpiring(t *testing.T) {
 	assert.Equal(t, 1, repo.updateCalls, "rotated tokens must be persisted")
 }
 
+func TestService_SelectRefreshesZeroExpiry(t *testing.T) {
+	// A credential enrolled without a parsable expiry has a zero ExpiresAt. The
+	// upstream token still lapses (~1h), so a zero expiry must refresh proactively
+	// rather than be treated as valid forever.
+	repo := newFakeRepo()
+	cred := seedExpiredCredential(repo)
+	cred.ExpiresAt = time.Time{}
+	svc := NewService(repo, &fakeRefresher{}, testLogger())
+
+	got, err := svc.SelectCredential(context.Background(), testInstallation, testEmail, providers.ProviderAnthropic, nil)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, []byte("fresh"), got.AccessToken, "a zero-expiry credential must be refreshed before use")
+	assert.Equal(t, 1, repo.updateCalls, "rotated tokens must be persisted")
+}
+
 func enrollClaude(t *testing.T, svc *Service, claudeAccountID, refreshToken string) *Credential {
 	t.Helper()
 	cred, err := svc.Enroll(context.Background(), EnrollParams{

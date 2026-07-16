@@ -107,13 +107,27 @@ func presentSubscriptionTokens(ctx context.Context, headers http.Header) (codex,
 // turn that would debit the prepaid balance.
 func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Header, routePath string) bool {
 	codex, anthropic := presentSubscriptionTokens(ctx, headers)
-	switch routePath {
-	case routePathMessages:
+	switch coveringProviderForRoute(routePath) {
+	case providers.ProviderAnthropic:
 		return anthropic != ""
-	case routePathChatCompletions, routePathResponses:
+	case providers.ProviderOpenAI:
 		return codex != ""
 	default:
 		return false
+	}
+}
+
+// coveringProviderForRoute maps an inference route to the single provider whose
+// subscription can serve it: Anthropic for /v1/messages, OpenAI (Codex) for the
+// chat/responses APIs. "" for any other (non-covered) route.
+func coveringProviderForRoute(routePath string) string {
+	switch routePath {
+	case routePathMessages:
+		return providers.ProviderAnthropic
+	case routePathChatCompletions, routePathResponses:
+		return providers.ProviderOpenAI
+	default:
+		return ""
 	}
 }
 

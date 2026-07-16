@@ -36,10 +36,6 @@ func (f *fakePool) SelectCredential(_ context.Context, _, _, provider string, sk
 	return nil, nil
 }
 
-func (f *fakePool) PoolExists(_ context.Context, _, _, provider string) bool {
-	return len(f.byProvider[provider]) > 0
-}
-
 // HasUsableCredential mirrors SelectCredential's skip walk but without the
 // refresh side effects, matching the real service's side-effect-free probe.
 func (f *fakePool) HasUsableCredential(_ context.Context, _, _, provider string, skip func(string) bool) bool {
@@ -203,6 +199,27 @@ func TestAnthropicFallbackKeyAvailable_AllPoolExhaustedIsNotAFallback(t *testing
 		"an all-exhausted pool has no usable candidate")
 	assert.False(t, s.anthropicFallbackKeyAvailable(poolCtx()),
 		"an all-exhausted pool with no BYOK/deployment key is not a fallback")
+}
+
+func TestRequestPresentsPooledCoveringSubscription(t *testing.T) {
+	s := &Service{subscriptionPool: &fakePool{byProvider: map[string][]*subscriptions.Credential{
+		providers.ProviderAnthropic: {anthropicPoolCred("cred-1")},
+	}}}
+	h := http.Header{"X-Weave-User-Email": []string{"dev@example.com"}}
+
+	assert.True(t, s.RequestPresentsPooledCoveringSubscription(poolCtx(), h, "/v1/messages"),
+		"a usable pooled Claude account covers the Anthropic route")
+	assert.False(t, s.RequestPresentsPooledCoveringSubscription(poolCtx(), h, "/v1/responses"),
+		"no pooled OpenAI account: the Codex route is not covered")
+	assert.False(t, s.RequestPresentsPooledCoveringSubscription(poolCtx(), http.Header{}, "/v1/messages"),
+		"without an identifying header the gate can't attribute a pooled sub")
+}
+
+func TestRequestPresentsPooledCoveringSubscription_NoPool(t *testing.T) {
+	s := &Service{}
+	h := http.Header{"X-Weave-User-Email": []string{"dev@example.com"}}
+	assert.False(t, s.RequestPresentsPooledCoveringSubscription(poolCtx(), h, "/v1/messages"),
+		"pooling off must never exempt the balance gate")
 }
 
 func TestPooledCredentialFor_CodexSetsAccountID(t *testing.T) {

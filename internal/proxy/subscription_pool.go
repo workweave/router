@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net/http"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
@@ -20,9 +21,6 @@ type SubscriptionPoolSource interface {
 	// and provider, skipping any the caller vetoes via skip. Nil when the pool
 	// is empty or every candidate is skipped/unrefreshable this turn.
 	SelectCredential(ctx context.Context, installationID, userEmail, provider string, skip func(credentialID string) bool) (*subscriptions.Credential, error)
-	// PoolExists reports whether the user has at least one active credential for
-	// provider (cache-served; cheap enough for the hot path).
-	PoolExists(ctx context.Context, installationID, userEmail, provider string) bool
 	// HasUsableCredential reports whether the user has an active credential for
 	// provider that skip does not veto. Side-effect free (no token refresh, no
 	// refresh-failed marking), unlike SelectCredential — safe for a probe.
@@ -120,10 +118,13 @@ func (s *Service) poolExhaustionSkip() func(credentialID string) bool {
 	}
 }
 
-// poolHasCandidate reports whether the request's user has any active pooled
-// credential for provider. Cache-served; used to enroll the provider for
-// routing.
-func (s *Service) poolHasCandidate(ctx context.Context, provider string) bool {
+// poolHasUsableCandidate reports whether the user has a pooled credential for
+// provider that isn't already exhausted this turn. It applies the same
+// exhaustion veto as selection, so an all-spent pool can't masquerade as a
+// usable fallback and wrongly suppress the inbound subscription (leaving the
+// turn with no credential instead of preserving the upstream 429), nor enroll a
+// provider for routing that credential resolution then can't actually serve.
+func (s *Service) poolHasUsableCandidate(ctx context.Context, provider string) bool {
 	if s.subscriptionPool == nil {
 		return false
 	}
@@ -135,24 +136,31 @@ func (s *Service) poolHasCandidate(ctx context.Context, provider string) bool {
 	if email == "" {
 		return false
 	}
-	return s.subscriptionPool.PoolExists(ctx, installationID.String(), email, provider)
+	return s.subscriptionPool.HasUsableCredential(ctx, installationID.String(), email, provider, s.poolExhaustionSkip())
 }
 
-// poolHasUsableCandidate reports whether the user has a pooled credential for
-// provider that isn't already exhausted this turn. Unlike poolHasCandidate
-// (which counts any active row), it applies the same exhaustion veto as
-// selection, so an all-spent pool can't masquerade as a usable fallback and
-// wrongly suppress the inbound subscription (leaving the turn with no
-// credential instead of preserving the upstream 429).
-func (s *Service) poolHasUsableCandidate(ctx context.Context, provider string) bool {
-	if s.subscriptionPool == nil {
+// RequestPresentsPooledCoveringSubscription reports whether the request's user
+// has a usable (active, non-exhausted) pooled subscription that can serve
+// routePath. It is the server-side-pool analogue of
+// RequestPresentsCoveringSubscription: a pool-only enrollment carries no
+// inbound subscription token, so the header check alone would wrongly gate that
+// turn on prepaid balance even though it debits $0. Identity comes from headers
+// (installation from ctx via WithAuth, user from X-Weave-User-Email) because
+// ClientIdentity is not stashed on ctx until the handler runs, after the
+// balance-gate middleware.
+func (s *Service) RequestPresentsPooledCoveringSubscription(ctx context.Context, headers http.Header, routePath string) bool {
+	if s.subscriptionPool == nil || subscriptionRoutingDisabledForRequest(ctx) {
+		return false
+	}
+	provider := coveringProviderForRoute(routePath)
+	if provider == "" {
 		return false
 	}
 	installationID := installationIDFromContext(ctx)
 	if installationID == (uuid.UUID{}) {
 		return false
 	}
-	email := ClientIdentityFrom(ctx).Email
+	email := ClientIdentityFromHeaders(headers).Email
 	if email == "" {
 		return false
 	}

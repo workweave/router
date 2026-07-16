@@ -116,7 +116,7 @@ func EnrollHandler(svc Enroller) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Both access_token and refresh_token are required."})
 			return
 		}
-		if err := validateTokenShape(provider, accessToken, req.ChatGPTAccountID); err != nil {
+		if err := validateTokenShape(provider, accessToken, req.ChatGPTAccountID, req.ClaudeAccountID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -209,8 +209,12 @@ func RemoveHandler(svc Enroller) gin.HandlerFunc {
 }
 
 // validateTokenShape rejects tokens that don't match the enrolled provider so a
-// router key or cross-provider key can't be smuggled into an OAuth slot.
-func validateTokenShape(provider, accessToken, chatGPTAccountID string) error {
+// router key or cross-provider key can't be smuggled into an OAuth slot. Both
+// providers must also supply their stable account id: fingerprinting keys on it
+// so re-enrolling the same account replaces its row, and without it the
+// fingerprint would fall back to the rotating refresh token and duplicate the
+// pool on every fresh login.
+func validateTokenShape(provider, accessToken, chatGPTAccountID, claudeAccountID string) error {
 	if auth.HasAPIKeyPrefix(accessToken) {
 		return errors.New("access_token must be a subscription OAuth token, not a router key")
 	}
@@ -218,6 +222,9 @@ func validateTokenShape(provider, accessToken, chatGPTAccountID string) error {
 	case providers.ProviderAnthropic:
 		if !strings.HasPrefix(accessToken, subscriptionTokenPrefix) {
 			return errors.New("Claude access_token must be a subscription OAuth token (sk-ant-oat…)")
+		}
+		if strings.TrimSpace(claudeAccountID) == "" {
+			return errors.New("claude_account_id is required for an anthropic subscription")
 		}
 	case providers.ProviderOpenAI:
 		if strings.HasPrefix(accessToken, "sk-") {
