@@ -92,11 +92,13 @@ func TestSubscriptionOnly_OpenAI_PaidRoute_Refuses402(t *testing.T) {
 	assert.Empty(t, p.proxyBodies, "no paid dispatch may occur below the floor in subscription-only mode")
 }
 
-// TestSubscriptionOnly_OpenAI_SubFailurePreCommit_Refuses402: when the
-// subscription attempt fails before any bytes reach the client (e.g. a 429),
-// paid failover is disabled — the turn must dispatch exactly once and be
-// refused with the controlled 402 rather than rerouted onto a paid model.
-func TestSubscriptionOnly_OpenAI_SubFailurePreCommit_Refuses402(t *testing.T) {
+// TestSubscriptionOnly_OpenAI_SubFailure_NoPaidFailover: when the caller's own
+// subscription attempt fails (e.g. a 429 weekly-limit), paid failover is
+// disabled — the turn must dispatch exactly once (its own sub) and surface the
+// raw upstream error rather than reroute onto a paid model. The controlled 402
+// is reserved for turns that can't run on the sub at all (see PaidRoute test);
+// mislabeling a served-sub 429 as "credits exhausted" would be inaccurate.
+func TestSubscriptionOnly_OpenAI_SubFailure_NoPaidFailover(t *testing.T) {
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-4o", Reason: "test"}}
 	p := &fakeProvider{proxyErr: &providers.UpstreamStatusError{Status: http.StatusTooManyRequests}}
 	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderOpenAI: p}, nil, false, nil, nil, false, providers.ProviderOpenAI, "gpt-4o", nil)
@@ -107,7 +109,12 @@ func TestSubscriptionOnly_OpenAI_SubFailurePreCommit_Refuses402(t *testing.T) {
 	ctx := billing.WithSubscriptionOnly(context.Background())
 	err := svc.ProxyOpenAIChatCompletion(ctx, []byte(body), rec, req)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, proxy.ErrCreditsExhaustedSubscriptionUnavailable),
-		"a pre-commit subscription failure must be refused with the controlled 402, not rerouted to a paid model")
+	var statusErr *providers.UpstreamStatusError
+	require.True(t, errors.As(err, &statusErr), "the caller's own subscription error must surface raw, not be rewritten")
+	assert.Equal(t, http.StatusTooManyRequests, statusErr.Status)
+	assert.False(t, errors.Is(err, proxy.ErrCreditsExhaustedSubscriptionUnavailable),
+		"a served-sub runtime failure is not a credits-exhausted refusal")
+	require.NotNil(t, p.proxyCreds[0], "the dispatch must carry the caller's subscription credential")
+	assert.True(t, p.proxyCreds[0].OAuth, "only the caller's own subscription may be attempted")
 	assert.Len(t, p.proxyBodies, 1, "only the subscription attempt may dispatch; no paid failover")
 }

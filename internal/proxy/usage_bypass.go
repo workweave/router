@@ -114,14 +114,22 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 // true the caller suppresses the subscription credential (withSuppressedSubscription)
 // so the turn serves on the Weave / BYOK key rather than the spent subscription.
 func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.Header) bool {
+	return s.anthropicFallbackKeyAvailable(ctx) && s.anthropicSubscriptionObservedExhausted(ctx, headers)
+}
+
+// anthropicSubscriptionObservedExhausted reports whether the caller's present
+// Claude subscription has bound its plan window per the usage observer,
+// independent of whether a fallback key exists. claudeSubscriptionExhausted
+// layers the fallback-key requirement on top for its suppress-and-serve-on-Weave
+// -key path; subscription-only refusal uses this bare signal because paid
+// fallback is disabled there — an exhausted sub can only 429, so the turn is
+// refused with the controlled 402 rather than sent on a doomed round-trip.
+func (s *Service) anthropicSubscriptionObservedExhausted(ctx context.Context, headers http.Header) bool {
 	if s.usageObserver == nil {
 		return false
 	}
 	_, anthroTok := presentSubscriptionTokens(ctx, headers)
 	if anthroTok == "" {
-		return false
-	}
-	if !s.anthropicFallbackKeyAvailable(ctx) {
 		return false
 	}
 	snap, ok := s.usageObserver.Snapshot(s.usageObserver.Key([]byte(anthroTok)))
@@ -195,10 +203,12 @@ const subscriptionOnlyWarningMarkerCodex = routingMarkerPrefix +
 // ErrCreditsExhaustedSubscriptionUnavailable is returned by ProxyMessages and
 // ProxyOpenAIChatCompletion when the org is in subscription-only mode (balance
 // past the overdraft floor) but the turn cannot be served on the caller's own
-// subscription (Claude or Codex) — it is
-// rate-limit exhausted, or the requested model is not subscription-covered.
-// Paid failover is disabled in this mode, so the turn is refused (HTTP 402)
-// rather than billed against an already-negative balance.
+// subscription (Claude or Codex) at all — routing resolved to a paid model, or
+// (Anthropic bypass) the subscription is already rate-limit exhausted. Paid
+// failover is disabled in this mode, so the turn is refused (HTTP 402) rather
+// than billed against an already-negative balance. A runtime failure on a turn
+// that DID resolve onto the subscription surfaces the raw upstream error
+// instead — it's the caller's own plan failing, with nowhere to fail over to.
 var ErrCreditsExhaustedSubscriptionUnavailable = errors.New("credits exhausted and subscription unavailable for this turn")
 
 // errBypassRetryable is returned by bypassToAnthropic when the bypass attempt

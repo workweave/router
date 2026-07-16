@@ -2026,6 +2026,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// x-weave-subagent-type header is for non-Anthropic ingress only.
 	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
 
+	// Subscription-only mode (balance past the overdraft floor): restrict
+	// routing to the providers the caller's own subscription can serve, so the
+	// scorer can't pick a paid model. The post-routing guard below refuses if a
+	// turn (e.g. a hard-pin or force-model) still didn't resolve onto the sub.
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
+	}
+
 	// Pre-filter models whose context window cannot fit this request.
 	// FullTokenEstimate uses raw body bytes (÷5) to capture tool definitions,
 	// tool calls, and tool results that feats.Tokens (text-only) misses.
@@ -2113,17 +2121,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
-	}
-
-	// Subscription-only mode (org past the overdraft floor): the turn may serve
-	// free on the caller's own subscription via the usage-bypass path, but paid
-	// failover is disabled. If it didn't resolve to a bypass passthrough it would
-	// route to a paid model, so refuse it (402) rather than bill an
-	// already-negative balance.
-	if billing.SubscriptionOnlyFromContext(ctx) && !routeRes.UsageBypass {
-		log.Info("Subscription-only request cannot be served on the subscription; refusing",
-			"requested_model", feats.Model, "external_id", externalID)
-		return ErrCreditsExhaustedSubscriptionUnavailable
 	}
 
 	// Subscription usage-bypass: engaged inside runTurnLoop after hard-pin,
@@ -2358,6 +2355,25 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// exactly that: an api_error left Claude Code with only marker text and no
 	// tool_use. Cost: one round-trip's buffered SSE bytes (~200B).
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
+
+	// Subscription-only mode: a non-bypass turn (hard-pin, force-model, sticky)
+	// wins before usage-bypass in runTurnLoop but can still serve free on the
+	// caller's own Claude OAuth credential. Gate on whether the resolved
+	// credential is that subscription (like the OpenAI path) rather than on the
+	// bypass flag: refuse (402) only when the turn wouldn't run on the sub — it
+	// routed to a paid model, or the subscription is observed-exhausted (a
+	// doomed 429). Refusing beats billing a paid model against an already-
+	// negative balance. Served-on-sub turns pin to the single Anthropic binding
+	// (shouldFailover is already false with an OAuth credential in context; this
+	// is belt-and-suspenders) so failover can't reroute onto a paid provider.
+	if billing.SubscriptionOnlyFromContext(ctx) && !routeRes.UsageBypass {
+		if !servedOnSubscription(ctx) || s.anthropicSubscriptionObservedExhausted(ctx, r.Header) {
+			log.Info("Subscription-only request cannot be served on the subscription; refusing",
+				"requested_model", feats.Model, "external_id", externalID, "decision_provider", decision.Provider)
+			return ErrCreditsExhaustedSubscriptionUnavailable
+		}
+		bindings = []catalog.ProviderBinding{{Provider: decision.Provider}}
+	}
 	// Append the one-click feedback thumbs as a trailing content block,
 	// wrapped below the capture layer so the footer never lands in
 	// cached/logged bodies. Transparent when streaming/feedback is off.
@@ -2597,8 +2613,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// the live error instead of a stale snapshot. Eligible only pre-commit, on
 	// a subscription-served Anthropic turn, with a fallback key available.
 	// Mutually exclusive with baselineEligible (non-Anthropic routed provider).
+	// Suppressed in subscription-only mode: this retry serves on the Weave/BYOK
+	// key at full cost, which is exactly the paid spend the overdraft floor
+	// forbids — a subscription throttle there surfaces raw instead.
 	subscriptionRetryEligible := decision.Provider == providers.ProviderAnthropic &&
 		servedOnSubscription(ctx) &&
+		!billing.SubscriptionOnlyFromContext(ctx) &&
 		s.anthropicFallbackKeyAvailable(ctx)
 
 	primaryProvider := decision.Provider
@@ -4639,16 +4659,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 
-	// Subscription-only mode: a pre-commit dispatch failure (the sub attempt
-	// failed before any bytes reached the client, e.g. a 429 weekly-limit) must
-	// not surface as a raw upstream error — paid failover is disabled, so refuse
-	// with the controlled credits-exhausted 402 instead. Post-commit errors
-	// already streamed an in-band frame and are left untouched.
-	if proxyErr != nil && billing.SubscriptionOnlyFromContext(ctx) && !committed(preludeBuf) {
-		log.Info("Subscription-only dispatch failed pre-commit; refusing instead of paid reroute",
-			"request_id", requestID, "external_id", externalID)
-		proxyErr = ErrCreditsExhaustedSubscriptionUnavailable
-	}
+	// Subscription-only mode disables paid failover by pinning dispatch to the
+	// single subscription binding above, so a dispatch failure here is the
+	// caller's own subscription failing (e.g. a 429 weekly-limit) with nowhere
+	// to reroute — its raw upstream envelope is the honest, accurate response.
+	// The controlled 402 is reserved for the pre-dispatch case (turn can't run
+	// on the sub at all); rewriting a served-sub runtime error to it would both
+	// mislabel non-billing failures and be moot once the envelope is flushed.
 	return proxyErr
 }
 

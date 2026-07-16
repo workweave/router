@@ -431,6 +431,52 @@ func TestSubscriptionOnly_ExhaustedSubscription_Refuses402(t *testing.T) {
 	assert.Empty(t, p.proxyBodies, "no paid dispatch may occur when the subscription can't serve the turn")
 }
 
+// TestSubscriptionOnly_NonBypassServedOnSub_Serves: a non-bypass turn (here the
+// usage-bypass gate is off) below the overdraft floor must still serve free on
+// the caller's own Claude OAuth subscription rather than be refused. Hard-pins,
+// force-model, and sticky turns win before usage-bypass in runTurnLoop, so
+// gating refusal on the bypass flag would 402 turns that run fine on the sub;
+// the guard gates on the resolved subscription credential instead.
+func TestSubscriptionOnly_NonBypassServedOnSub_Serves(t *testing.T) {
+	svc, fr, p := bypassFixture(t, 0.20)
+	rec, req, body := bypassRequest(t)
+	// Gate disabled (no InstallationUsageBypassContextKey) => usage-bypass never
+	// engages; the caller still presents a Claude OAuth subscription and the
+	// scorer routes to Anthropic, so the turn serves on that subscription.
+	ctx := billing.WithSubscriptionOnly(
+		context.WithValue(context.Background(), proxy.AnthropicSubscriptionContextKey{}, bypassSubToken))
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+
+	assert.Positive(t, fr.routeCalls, "a non-bypass turn runs the scorer")
+	require.Len(t, p.proxyBodies, 1, "the turn must serve on the subscription exactly once (no paid failover)")
+	require.NotNil(t, p.proxyCreds[0], "the dispatch must carry the caller's subscription credential")
+	assert.True(t, p.proxyCreds[0].OAuth,
+		"a non-bypass turn must serve on the caller's own Claude subscription so billing debits $0")
+}
+
+// TestSubscriptionOnly_NonBypassPaidRoute_Refuses402: a non-bypass turn that
+// routing resolves to a paid provider (no covering subscription credential)
+// must be refused with the credits-exhausted sentinel and never dispatched —
+// paid failover is disabled below the floor.
+func TestSubscriptionOnly_NonBypassPaidRoute_Refuses402(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenRouter, Model: "deepseek/deepseek-chat", Reason: "cluster:v0.2"}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"x","type":"message"}`))
+	}}
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderOpenRouter: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil)
+
+	rec, req, body := bypassRequest(t)
+	// Sub present but the scorer routes to a paid provider it can't cover.
+	ctx := billing.WithSubscriptionOnly(
+		context.WithValue(context.Background(), proxy.AnthropicSubscriptionContextKey{}, bypassSubToken))
+	err := svc.ProxyMessages(ctx, body, rec, req)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, proxy.ErrCreditsExhaustedSubscriptionUnavailable),
+		"a non-bypass turn that routes to a paid model must be refused, not dispatched")
+	assert.Empty(t, p.proxyBodies, "no paid dispatch may occur below the floor in subscription-only mode")
+}
+
 // TestSubscriptionOnly_BypassRetryable_Refuses402: when the bypass attempt hits
 // a retryable upstream error (e.g. a 429 the moment the weekly limit binds), the
 // normal path reroutes to a paid model. In subscription-only mode that reroute
