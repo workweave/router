@@ -116,13 +116,36 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
 
+	if resp.StatusCode >= 400 {
+		// Buffer the error — do NOT touch w; the failover loop decides whether
+		// to retry or flush this buffer to the client. Writing the status here
+		// would commit the preludeBuffer and make retries impossible.
+		bufBody, totalRead, drainErr := httputil.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(bufBody) > 0 {
+			t.StampUpstreamFirstByte()
+		}
+		if drainErr == nil {
+			t.StampUpstreamEOF()
+		}
+		httputil.LogUpstreamStatus(
+			"Upstream Google returned error status",
+			resp.StatusCode,
+			"routed_model", decision.Model,
+			"streaming", stream,
+			"body_preview", httputil.PreviewBytes(bufBody),
+			"body_total_bytes", totalRead,
+		)
+		errHeaders := http.Header{}
+		providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: errHeaders}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: errHeaders,
+			Body:    bufBody,
+		}
+	}
+
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-
-	if resp.StatusCode >= 400 {
-		return httputil.WritePassthroughError(w, resp, t.StampUpstreamFirstByte, t.StampUpstreamEOF,
-			"Upstream Google returned error status", "routed_model", decision.Model, "streaming", stream)
-	}
 
 	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
 	// upstream byte, so a stream that stays byte-alive (SSE keepalive comments or
