@@ -941,6 +941,7 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 // Anthropic adaptive effort levels referenced by emit logic. Every adaptive
 // model accepts low/medium/high/max; xhigh requires router.CapXhighEffort.
 const (
+	effortLow   = "low"
 	effortMax   = "max"
 	effortXhigh = "xhigh"
 )
@@ -953,7 +954,7 @@ func effortForBudget(budgetTokens int64) string {
 	case budgetTokens <= 0:
 		return "medium"
 	case budgetTokens <= 4096:
-		return "low"
+		return effortLow
 	case budgetTokens <= 16384:
 		return "medium"
 	default:
@@ -982,6 +983,18 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 			} else if opts.Capabilities.Supports(router.CapAdaptiveThinking) {
 				ov.RewriteThinkingAdaptive = true
 				ov.OutputConfigEffort = effortForBudget(thinkingResult.Get("budget_tokens").Int())
+			} else {
+				shouldDelete = true
+			}
+		case "disabled":
+			if opts.Capabilities.Supports(router.CapExtendedThinking) {
+				// Legacy extended-thinking models accept thinking.type=disabled.
+			} else if opts.Capabilities.Supports(router.CapAdaptiveThinking) {
+				// Adaptive models are always-on and 400 on thinking.type=disabled
+				// (e.g. claude-fable-5); map the "no thinking" intent to the
+				// lowest adaptive effort instead of forwarding the rejected shape.
+				ov.RewriteThinkingAdaptive = true
+				ov.OutputConfigEffort = effortLow
 			} else {
 				shouldDelete = true
 			}
