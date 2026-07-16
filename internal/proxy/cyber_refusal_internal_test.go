@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -41,6 +42,15 @@ func (f *repinFakeStore) ResetUpstreamErrors(context.Context, [sessionpin.Sessio
 	return nil
 }
 func (f *repinFakeStore) SweepExpired(context.Context) error { return nil }
+
+func activeCyberRefusalUpsert(upserts []sessionpin.Pin) (sessionpin.Pin, bool) {
+	for _, u := range upserts {
+		if u.Reason == "cyber-refusal-repin" && u.PinnedUntil.After(time.Now()) {
+			return u, true
+		}
+	}
+	return sessionpin.Pin{}, false
+}
 
 // A realistic Anthropic-native refusal SSE (the router-visible wire shape:
 // stop_reason "refusal" on HTTP 200; see catalog.go). The real opus cyber
@@ -128,10 +138,10 @@ func TestMaybeRepinOnRefusal_RepinsToFallbackModel(t *testing.T) {
 
 	s.maybeRepinOnRefusal(repinCtx(), obs, [sessionpin.SessionKeyLen]byte{1, 2, 3}, "main_loop", served)
 
-	if len(store.upserts) != 1 {
-		t.Fatalf("expected exactly 1 re-pin upsert, got %d", len(store.upserts))
+	got, ok := activeCyberRefusalUpsert(store.upserts)
+	if !ok {
+		t.Fatalf("expected cyber-refusal-repin upsert, got %d upserts", len(store.upserts))
 	}
-	got := store.upserts[0]
 	if got.Model != "claude-sonnet-5" {
 		t.Fatalf("re-pinned to %q, want claude-sonnet-5", got.Model)
 	}
@@ -154,14 +164,37 @@ func TestMaybeRepinOnRefusal_PrefersPairedModel(t *testing.T) {
 
 	s.maybeRepinOnRefusal(repinCtx(), obs, [sessionpin.SessionKeyLen]byte{4, 5, 6}, "main_loop", served)
 
-	if len(store.upserts) != 1 {
-		t.Fatalf("expected 1 upsert, got %d", len(store.upserts))
+	got, ok := activeCyberRefusalUpsert(store.upserts)
+	if !ok {
+		t.Fatalf("expected cyber-refusal-repin upsert, got %d upserts", len(store.upserts))
 	}
-	if got := store.upserts[0].Model; got != "claude-haiku-4-5" {
-		t.Fatalf("re-pinned to %q, want the pin's PairedModel claude-haiku-4-5", got)
+	if got.Model != "claude-haiku-4-5" {
+		t.Fatalf("re-pinned to %q, want the pin's PairedModel claude-haiku-4-5", got.Model)
 	}
-	if got := store.upserts[0].Provider; got != "anthropic" {
-		t.Fatalf("re-pin provider = %q, want anthropic (from PairedProvider)", got)
+	if got.Provider != "anthropic" {
+		t.Fatalf("re-pin provider = %q, want anthropic (from PairedProvider)", got.Provider)
+	}
+}
+
+func TestMaybeRepinOnRefusal_ExpiresHMMHistory(t *testing.T) {
+	store := &repinFakeStore{}
+	s := &Service{pinStore: store, cyberRefusalFallbackModel: "claude-sonnet-5"}
+	obs := &refusalObserver{refused: true}
+	served := router.Decision{Provider: "anthropic", Model: "claude-opus-4-8"}
+
+	s.maybeRepinOnRefusal(repinCtx(), obs, [sessionpin.SessionKeyLen]byte{8, 9}, "main_loop", served)
+
+	var historyExpired bool
+	for _, u := range store.upserts {
+		if u.Role == hmmHistoryRole("main_loop") && u.PinnedUntil.Before(time.Now()) {
+			historyExpired = true
+		}
+	}
+	if !historyExpired {
+		t.Fatalf("expected expired hmm_history upsert, got upserts: %+v", store.upserts)
+	}
+	if _, ok := activeCyberRefusalUpsert(store.upserts); !ok {
+		t.Fatal("expected active cyber-refusal-repin upsert alongside hmm_history expiry")
 	}
 }
 
