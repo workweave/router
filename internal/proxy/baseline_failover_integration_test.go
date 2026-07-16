@@ -122,9 +122,8 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	// the cost-routed OSS id — otherwise next-turn switch detection is wrong.
 	require.NotEmpty(t, store.usages, "baseline failover must write pin usage")
 	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
-}
-
 // TestProxyMessages_ForcedModelUnavailableDoesNotSubstituteAnthropic ensures
+// a forced-model request hard-fails when its provider is unconfigured, not silently falls back to the Anthropic baseline.
 // /force-model reports an unconfigured forced provider instead of silently
 // serving the request's Anthropic baseline.
 func TestProxyMessages_ForcedModelUnavailableDoesNotSubstituteAnthropic(t *testing.T) {
