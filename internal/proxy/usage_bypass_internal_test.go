@@ -197,7 +197,7 @@ func subscriptionCtx() context.Context {
 // subscription flips credential resolution onto the deployment key.
 func TestSubscriptionFailover_EligibilityAndSuppression(t *testing.T) {
 	// A request whose Anthropic credential resolves to the caller's subscription.
-	ctx := resolveAndInjectCredentials(subscriptionCtx(), providers.ProviderAnthropic, http.Header{})
+	ctx := (&Service{}).resolveAndInjectCredentials(subscriptionCtx(), providers.ProviderAnthropic, http.Header{})
 	require.True(t, servedOnSubscription(ctx), "a resolved subscription token must report servedOnSubscription")
 
 	t.Run("no fallback key: not eligible", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestSubscriptionFailover_EligibilityAndSuppression(t *testing.T) {
 		// subscription token — so the retry dispatches on the deployment key and
 		// servedOnSubscription reports false (billed at full cost, not sub rate).
 		suppressed := withSuppressedClaudeSubscription(subscriptionCtx())
-		suppressed = resolveAndInjectCredentials(suppressed, providers.ProviderAnthropic, http.Header{})
+		suppressed = (&Service{}).resolveAndInjectCredentials(suppressed, providers.ProviderAnthropic, http.Header{})
 		assert.False(t, servedOnSubscription(suppressed),
 			"a suppressed subscription must not resolve back as the served credential")
 	})

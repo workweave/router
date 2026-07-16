@@ -397,3 +397,25 @@ type RouterSpiralShadowEvent struct {
 	ToolCallCount    int32
 	MessageCount     int32
 }
+
+// Per-user pool of enrolled Claude/ChatGPT subscription OAuth credentials; tokens encrypted (Tink AEAD), rotated through as each account exhausts its plan window
+type RouterSubscriptionCredential struct {
+	ID                     uuid.UUID
+	InstallationID         uuid.UUID
+	ExternalID             string
+	UserEmail              string
+	Provider               string
+	AccountLabel           *string
+	AccountFingerprint     string
+	ChatgptAccountID       *string
+	AccessTokenCiphertext  []byte
+	RefreshTokenCiphertext []byte
+	AccessTokenExpiresAt   pgtype.Timestamptz
+	LastRefreshedAt        pgtype.Timestamptz
+	LastUsedAt             pgtype.Timestamptz
+	RefreshFailedAt        pgtype.Timestamptz
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	DeletedAt              pgtype.Timestamptz
+	CreatedBy              *string
+}

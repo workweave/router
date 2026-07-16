@@ -22,16 +22,18 @@ const chatGPTAccountIDHeader = "ChatGPT-Account-ID"
 // Credential sources, for logging and precedence reasoning. Never log the key
 // itself — only the source.
 const (
-	credSourceBYOK              = "byok"
-	credSourceClient            = "client"
-	credSourceSubscription      = "subscription"
-	credSourceCodexSubscription = "codex_subscription"
+	credSourceBYOK                    = "byok"
+	credSourceClient                  = "client"
+	credSourceSubscription            = "subscription"
+	credSourceCodexSubscription       = "codex_subscription"
+	credSourcePooledSubscription      = "pooled_subscription"
+	credSourcePooledCodexSubscription = "pooled_codex_subscription"
 )
 
 // Credentials holds the API key to use for an upstream request.
 type Credentials struct {
 	APIKey []byte // never logged
-	Source string // credSourceBYOK | credSourceClient | credSourceSubscription | credSourceCodexSubscription
+	Source string // credSource* constant
 	// OAuth marks a subscription bearer (Claude sk-ant-oat- token, Anthropic
 	// only; or Codex ChatGPT JWT, OpenAI only). Authenticates via
 	// Authorization: Bearer, never x-api-key.
@@ -39,6 +41,11 @@ type Credentials struct {
 	// AccountID is the ChatGPT-Account-ID paired with a Codex subscription
 	// bearer; the Codex backend 401/403s without it. Never logged.
 	AccountID []byte
+	// PoolCredentialID is the router-side subscription_credentials row UUID when
+	// this credential came from the per-user server pool. Empty for inbound and
+	// BYOK credentials. Safe to log; used as the stable usage-observer key (the
+	// token itself rotates on refresh) and for MarkUsed.
+	PoolCredentialID string
 }
 
 // ExternalAPIKeysContextKey is the request-context key for external API keys

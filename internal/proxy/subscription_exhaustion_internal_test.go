@@ -40,7 +40,7 @@ func TestResolveAndInjectCredentials_SuppressedSubscriptionFallsThroughToBYOK(t 
 	ctx = withSuppressedClaudeSubscription(ctx)
 	headers := http.Header{"Authorization": []string{"Bearer " + exhaustedSubToken}}
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
 	creds := CredentialsFromContext(out)
 	require.NotNil(t, creds)
 	assert.False(t, creds.OAuth, "the spent subscription token must be skipped")
@@ -57,7 +57,7 @@ func TestResolveAndInjectCredentials_SuppressedSubscriptionFallsThroughToDeploym
 	ctx := context.WithValue(context.Background(), AnthropicSubscriptionContextKey{}, exhaustedSubToken)
 	ctx = withSuppressedClaudeSubscription(ctx)
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, http.Header{})
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, http.Header{})
 	assert.Nil(t, CredentialsFromContext(out),
 		"with the subscription suppressed and no BYOK, no credential is set so the deployment key serves the turn")
 }
@@ -71,7 +71,7 @@ func TestResolveAndInjectCredentials_SuppressedInboundBearerNotReResolved(t *tes
 	ctx := withSuppressedClaudeSubscription(context.Background())
 	headers := http.Header{"Authorization": []string{"Bearer " + exhaustedSubToken}}
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
 	assert.Nil(t, CredentialsFromContext(out),
 		"a suppressed inbound subscription bearer must not be re-resolved via client extraction")
 }
@@ -83,7 +83,7 @@ func TestResolveAndInjectCredentials_SuppressedKeepsRealClientApiKey(t *testing.
 	ctx := withSuppressedClaudeSubscription(context.Background())
 	headers := http.Header{"X-Api-Key": []string{"sk-ant-api-real-client-key"}}
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, headers)
 	creds := CredentialsFromContext(out)
 	require.NotNil(t, creds, "a real client API key is not the suppressed subscription and must be kept")
 	assert.False(t, creds.OAuth)
@@ -99,7 +99,7 @@ func TestResolveAndInjectCredentials_ClaudeSuppressionLeavesCodexIntact(t *testi
 	ctx = context.WithValue(ctx, OpenAIAccountIDContextKey{}, "acct-1")
 	ctx = withSuppressedClaudeSubscription(ctx)
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, http.Header{})
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderOpenAI, http.Header{})
 	creds := CredentialsFromContext(out)
 	require.NotNil(t, creds)
 	assert.True(t, creds.OAuth, "the Codex subscription must survive Claude-only suppression")
@@ -112,7 +112,7 @@ func TestResolveAndInjectCredentials_UnsuppressedSubscriptionStillWins(t *testin
 	// into the normal path.
 	ctx := context.WithValue(context.Background(), AnthropicSubscriptionContextKey{}, exhaustedSubToken)
 
-	out := resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, http.Header{})
+	out := (&Service{}).resolveAndInjectCredentials(ctx, providers.ProviderAnthropic, http.Header{})
 	creds := CredentialsFromContext(out)
 	require.NotNil(t, creds)
 	assert.True(t, creds.OAuth, "a non-suppressed subscription must still be resolved")

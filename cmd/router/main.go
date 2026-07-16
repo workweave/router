@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"workweave/router/internal/api/admin"
+	subscriptionsapi "workweave/router/internal/api/subscriptions"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/config"
@@ -49,6 +50,7 @@ import (
 	"workweave/router/internal/router/rl"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/server"
+	"workweave/router/internal/subscriptions"
 
 	_ "time/tzdata"
 
@@ -800,6 +802,19 @@ func main() {
 		logger.Info("Usage observer wired; subscription-aware cost discount disabled", "observation_ttl", subscriptionTTL)
 	}
 
+	// Per-user subscription credential pool: rotate through enrolled Claude/
+	// ChatGPT accounts as each exhausts its plan window. Off by default — it
+	// stores customers' OAuth refresh tokens server-side, so it stays behind an
+	// explicit opt-in (and doubles as the ToS-risk kill switch). nil pool + nil
+	// enroller = feature fully off (no rotation, endpoints unmounted).
+	var subsEnroller subscriptionsapi.Enroller
+	if config.GetOr("ROUTER_SUBSCRIPTION_POOL", "false") == "true" {
+		subsSvc := subscriptions.NewService(repo.SubscriptionCredentials, subscriptions.NewOAuthRefresher(nil), logger)
+		proxySvc = proxySvc.WithSubscriptionPool(subsSvc)
+		subsEnroller = subsSvc
+		logger.Info("Subscription credential pool enabled")
+	}
+
 	// No-op when WV_APM_OTLP_ENDPOINT is unset. Flushed explicitly in the
 	// shutdown path below since a defer would run after SIGKILL.
 	apm.Init()
@@ -817,7 +832,7 @@ func main() {
 	// Lets the admin model-selection handler surface deployed models; nil
 	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, hmmReadinessChecker)
+	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, hmmReadinessChecker, subsEnroller)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

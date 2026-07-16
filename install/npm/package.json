@@ -12,6 +12,7 @@
   },
   "files": [
     "bin.js",
+    "login.js",
     "install.sh",
     "uninstall.sh",
     "cc-statusline.sh",

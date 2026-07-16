@@ -230,6 +230,10 @@ type Service struct {
 	// factor near epsilon until the window nears its cap.
 	subsidyEpsilon float64
 	subsidyGamma   float64
+	// subscriptionPool is the per-user server-side pool of enrolled Claude/ChatGPT
+	// subscription credentials, rotated through when a caller's own subscription is
+	// exhausted. Nil disables pooling (ROUTER_SUBSCRIPTION_POOL off).
+	subscriptionPool SubscriptionPoolSource
 }
 
 type registeredStrategy struct {
@@ -2327,7 +2331,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if s.claudeSubscriptionExhausted(ctx, r.Header) {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}
-	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// Wrap every request (not just multi-binding) in a preludeBuffer so a
 	// pre-first-byte upstream error can discard the buffered prelude (marker +
@@ -2628,7 +2632,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			if s.claudeSubscriptionExhausted(ctx, r.Header) {
 				baselineCtx = withSuppressedClaudeSubscription(baselineCtx)
 			}
-			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
+			baselineCtx = s.resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
 			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
 			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
 			baselineAttempt := s.anthropicNativeAttempt(env, r, baselinePrep, sink, preludeBuf, baselineMarker, setExtractor)
@@ -2667,8 +2671,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		!preludeBuf.Committed() &&
 		(providers.IsRetryable(proxyErr) || anthropicOAuthCredentialRejected(proxyErr)) {
 		subscriptionRetryRan = true
+		// If the spent credential was a pooled account, mark it exhausted so the
+		// retry's pool rung advances to the NEXT account instead of re-selecting
+		// the one that just 429'd. withSuppressedClaudeSubscription only gates the
+		// inbound sub, not the pool.
+		s.recordPoolExhaustionIfPooled(ctx)
 		subCtx := withSuppressedClaudeSubscription(ctx)
-		subCtx = resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)
+		subCtx = s.resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)
 		// Model is unchanged, but rebuild prep so the retry gets a pristine
 		// PreparedRequest under the suppressed-subscription context.
 		subPrep, subEmitErr := env.PrepareAnthropic(r.Header, opts)
@@ -2732,7 +2741,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if subscriptionFailoverUsed {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}
-	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve pricing for the binding that actually served: the
 	// pre-dispatch lookup always returns the catalog's PRIMARY binding price,
@@ -3495,6 +3504,18 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 	if c := ExtractClientCredentials(providers.ProviderOpenAI, headers); c != nil && c.OAuth {
 		out[providers.ProviderOpenAI] = struct{}{}
 	}
+	// A pooled subscription account enrolls its provider for routing even when no
+	// inbound subscription token is present — otherwise a pool-only user (no BYOK,
+	// managed byok-only deploy) would never have Anthropic/OpenAI in the eligible
+	// set and the scorer would fail before any pooled turn could run. Cache-served.
+	if !subscriptionRoutingDisabledForRequest(ctx) {
+		if s.poolHasCandidate(ctx, providers.ProviderAnthropic) {
+			out[providers.ProviderAnthropic] = struct{}{}
+		}
+		if s.poolHasCandidate(ctx, providers.ProviderOpenAI) {
+			out[providers.ProviderOpenAI] = struct{}{}
+		}
+	}
 	// Passthrough-eligible providers are surface-scoped: a provider without a
 	// deployment key joins the eligible set only when the inbound surface
 	// matches, else an Anthropic-surface `x-api-key` could leak to
@@ -3547,46 +3568,59 @@ func (s *Service) enabledProvidersForRequest(ctx context.Context, surfaceProvide
 // API key is NOT extracted on the router-key path, since that would forward
 // the client's inbound key to a different upstream provider. The deployment
 // env key is the correct fallback there.
-func resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
+func (s *Service) resolveAndInjectCredentials(ctx context.Context, provider string, headers http.Header) context.Context {
 	routerKeyed := installationIDFromContext(ctx) != (uuid.UUID{})
 	// Skip subscription OAuth (fall through to BYOK / deployment key): exhausted (Anthropic-only, avoid re-429) or toggle off (provider-wide).
 	subDisabled := subscriptionRoutingDisabledForRequest(ctx)
 	suppressClaudeSub := claudeSubscriptionSuppressed(ctx) || subDisabled
 	suppressCodexSub := subDisabled
-	if provider == providers.ProviderAnthropic && !suppressClaudeSub {
-		// Subscription-first (subscription -> BYOK -> deployment), resolved here
-		// explicitly rather than relying on BYOK being absent off the router-key
-		// path — a future BYOK-loading path must not silently outrank it.
-		if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
-			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
-				"credential_source", sub.Source)
-			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+	if provider == providers.ProviderAnthropic && !subDisabled {
+		if !suppressClaudeSub {
+			// Subscription-first (subscription -> BYOK -> deployment), resolved here
+			// explicitly rather than relying on BYOK being absent off the router-key
+			// path — a future BYOK-loading path must not silently outrank it.
+			if sub := subscriptionCredsFromHeaderValue(anthropicSubscriptionFromContext(ctx)); sub != nil {
+				observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+					"credential_source", sub.Source)
+				return context.WithValue(ctx, CredentialsContextKey{}, sub)
+			}
+			// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
+			// is honored even on router-keyed requests: Claude Code keeps its own
+			// OAuth token there while the router key rides in X-Weave-Router-Key.
+			// Restricted to the OAuth subset — a general API key is still not
+			// forwarded on the router-key path (cross-provider-leak guard below).
+			if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+				observability.FromContext(ctx).Info("Resolved Claude subscription credential",
+					"credential_source", inbound.Source)
+				return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+			}
 		}
-		// A Claude subscription bearer (sk-ant-oat-) in the inbound Authorization
-		// is honored even on router-keyed requests: Claude Code keeps its own
-		// OAuth token there while the router key rides in X-Weave-Router-Key.
-		// Restricted to the OAuth subset — a general API key is still not
-		// forwarded on the router-key path (cross-provider-leak guard below).
-		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-			observability.FromContext(ctx).Info("Resolved Claude subscription credential",
-				"credential_source", inbound.Source)
-			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+		// Pooled accounts are the next rung — reached even when the inbound sub is
+		// suppressed-as-exhausted (that is exactly when the pool should take over),
+		// but not when the org toggled subscription routing off (subDisabled above).
+		if pooled := s.pooledCredentialFor(ctx, provider); pooled != nil {
+			return context.WithValue(ctx, CredentialsContextKey{}, pooled)
 		}
 	}
-	if provider == providers.ProviderOpenAI && !suppressCodexSub {
-		// Codex (ChatGPT) subscription-first, mirroring the Anthropic block above.
-		if sub := codexSubscriptionFromContext(ctx); sub != nil {
-			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
-			return context.WithValue(ctx, CredentialsContextKey{}, sub)
+	if provider == providers.ProviderOpenAI && !subDisabled {
+		if !suppressCodexSub {
+			// Codex (ChatGPT) subscription-first, mirroring the Anthropic block above.
+			if sub := codexSubscriptionFromContext(ctx); sub != nil {
+				observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", sub.Source)
+				return context.WithValue(ctx, CredentialsContextKey{}, sub)
+			}
+			// A Codex subscription bearer (ChatGPT OAuth JWT + ChatGPT-Account-ID) in
+			// the inbound Authorization is honored even on router-keyed requests:
+			// Codex CLI keeps its ChatGPT auth there while the router key rides in
+			// X-Weave-Router-Key. OAuth subset only — a general API key is still not
+			// forwarded on the router-key path (cross-provider-leak guard below).
+			if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
+				observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
+				return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+			}
 		}
-		// A Codex subscription bearer (ChatGPT OAuth JWT + ChatGPT-Account-ID) in
-		// the inbound Authorization is honored even on router-keyed requests:
-		// Codex CLI keeps its ChatGPT auth there while the router key rides in
-		// X-Weave-Router-Key. OAuth subset only — a general API key is still not
-		// forwarded on the router-key path (cross-provider-leak guard below).
-		if inbound := ExtractClientCredentials(provider, headers); inbound != nil && inbound.OAuth {
-			observability.FromContext(ctx).Debug("Resolved Codex subscription credential for OpenAI turn", "credential_source", inbound.Source)
-			return context.WithValue(ctx, CredentialsContextKey{}, inbound)
+		if pooled := s.pooledCredentialFor(ctx, provider); pooled != nil {
+			return context.WithValue(ctx, CredentialsContextKey{}, pooled)
 		}
 	}
 	byok := BuildCredentialsMap(externalKeysFromContext(ctx))
@@ -4176,7 +4210,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
-	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// See ProxyMessages for the preludeBuffer rationale — wrap unconditionally
 	// so single-binding upstream errors don't strand the routing-marker chunk
@@ -4416,7 +4450,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// Re-resolve credentials for the binding that actually served — each
 	// failover attempt gets its own context with potentially different creds.
-	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve pricing for the binding that actually served (see ProxyMessages).
 	if actBindingPricing, ok := catalog.PriceFor(finalProvider, decision.Model); ok {

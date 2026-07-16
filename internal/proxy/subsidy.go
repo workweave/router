@@ -125,7 +125,9 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 		return ctx
 	}
 	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
-	if codexTok == "" && anthroTok == "" {
+	// A pooled credential may serve the turn even with no inbound subscription
+	// token present, so install the observer whenever pooling is wired too.
+	if codexTok == "" && anthroTok == "" && s.subscriptionPool == nil {
 		return ctx
 	}
 	obs := func(callCtx context.Context, h http.Header) {
@@ -138,6 +140,23 @@ func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) co
 		// works whether the sub arrived via a dedicated header or the inbound bearer.
 		creds := CredentialsFromContext(callCtx)
 		if creds == nil || !creds.OAuth {
+			return
+		}
+		// A pooled credential keys by its stable row UUID (not the token, which
+		// rotates on refresh); the source constant tells us which header family
+		// carries its rate-limit headroom.
+		if creds.PoolCredentialID != "" {
+			key := s.poolObserverKey(creds.PoolCredentialID)
+			switch creds.Source {
+			case credSourcePooledCodexSubscription:
+				if snap, ok := usage.ParseCodexHeaders(h); ok {
+					s.usageObserver.Record(key, snap)
+				}
+			case credSourcePooledSubscription:
+				if snap, ok := usage.ParseAnthropicUnifiedHeaders(h); ok {
+					s.usageObserver.Record(key, snap)
+				}
+			}
 			return
 		}
 		switch string(creds.APIKey) {

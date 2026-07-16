@@ -185,7 +185,7 @@ func (s *Service) dispatchWithFallback(ctx context.Context, in failoverInputs) (
 		// the only source left is the deployment env key on the next client.
 		attemptCtx := ctx
 		if i > 0 {
-			attemptCtx = resolveAndInjectCredentials(ctx, b.Provider, http.Header{})
+			attemptCtx = s.resolveAndInjectCredentials(ctx, b.Provider, http.Header{})
 			// Drop the previous attempt's buffered Prelude bytes + any
 			// header mutations it made. Safe pre-commit only.
 			if in.buf != nil {

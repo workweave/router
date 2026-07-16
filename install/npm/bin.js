@@ -8,6 +8,20 @@ const { existsSync } = require("node:fs");
 const path = require("node:path");
 
 const args = process.argv.slice(2);
+
+// `login` enrolls a subscription account into the router pool. It's a
+// Node-native flow (browser OAuth + push to the router), not a bash install
+// step, so it's handled here before the install.sh dispatch below.
+if (args[0] === "login") {
+  require("./login.js")
+    .main(args.slice(1))
+    .catch((err) => {
+      console.error("Weave Router:", err.message);
+      process.exit(1);
+    });
+  return;
+}
+
 const uninstallIdx = args.indexOf("--uninstall");
 const isUninstall = uninstallIdx !== -1;
 if (isUninstall) args.splice(uninstallIdx, 1);

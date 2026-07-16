@@ -120,13 +120,16 @@ func (s *Service) claudeSubscriptionExhausted(ctx context.Context, headers http.
 	return ok && snap.Exhausted()
 }
 
-// anthropicFallbackKeyAvailable reports whether a non-subscription Anthropic
-// credential is configured to serve a Claude turn when the caller's subscription
-// is spent: a per-request BYOK Anthropic key, or the deployment's own
+// anthropicFallbackKeyAvailable reports whether a credential exists to serve a
+// Claude turn when the caller's subscription is spent: another pooled Claude
+// account, a per-request BYOK Anthropic key, or the deployment's own
 // ANTHROPIC_API_KEY (tracked in deploymentKeyedProviders). Without one, dropping
 // the subscription token would leave the turn with no Anthropic credential and
 // 400 — strictly worse than the 429 — so the caller keeps using the subscription.
 func (s *Service) anthropicFallbackKeyAvailable(ctx context.Context) bool {
+	if s.poolHasCandidate(ctx, providers.ProviderAnthropic) {
+		return true
+	}
 	if byok := BuildCredentialsMap(externalKeysFromContext(ctx)); byok != nil {
 		if _, ok := byok[providers.ProviderAnthropic]; ok {
 			return true
@@ -205,7 +208,7 @@ func (s *Service) bypassToAnthropic(
 	// the subscription (or BYOK / client) credential exactly as a routed turn
 	// would, and so servedOnSubscription / the usage observer key off the same
 	// token the upstream call sends.
-	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	outputReserve := contextWindowOutputReserve
 	if feats.MaxTokens > outputReserve {

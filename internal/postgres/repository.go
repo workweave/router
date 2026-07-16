@@ -12,23 +12,25 @@ import (
 
 // Repository aggregates all repositories backed by the same DBTX.
 type Repository struct {
-	Installations   auth.InstallationRepository
-	APIKeys         auth.APIKeyRepository
-	ExternalAPIKeys auth.ExternalAPIKeyRepository
-	Users           auth.UserRepository
-	Telemetry       *TelemetryRepo
-	Feedback        *FeedbackRepo
+	Installations           auth.InstallationRepository
+	APIKeys                 auth.APIKeyRepository
+	ExternalAPIKeys         auth.ExternalAPIKeyRepository
+	SubscriptionCredentials *SubscriptionCredentialRepo
+	Users                   auth.UserRepository
+	Telemetry               *TelemetryRepo
+	Feedback                *FeedbackRepo
 }
 
 // NewRepository constructs a Repository. Pass auth.NoOpEncryptor{} for local dev without a keyset.
 func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 	return &Repository{
-		Installations:   &installationRepo{tx: tx},
-		APIKeys:         &apiKeyRepo{tx: tx},
-		ExternalAPIKeys: NewExternalAPIKeyRepo(tx, encryptor),
-		Users:           NewUserRepository(tx),
-		Telemetry:       NewTelemetryRepo(tx),
-		Feedback:        NewFeedbackRepo(tx),
+		Installations:           &installationRepo{tx: tx},
+		APIKeys:                 &apiKeyRepo{tx: tx},
+		ExternalAPIKeys:         NewExternalAPIKeyRepo(tx, encryptor),
+		SubscriptionCredentials: NewSubscriptionCredentialRepo(tx, encryptor),
+		Users:                   NewUserRepository(tx),
+		Telemetry:               NewTelemetryRepo(tx),
+		Feedback:                NewFeedbackRepo(tx),
 	}
 }
 

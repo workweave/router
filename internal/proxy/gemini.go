@@ -176,7 +176,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
-	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+	ctx = s.resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	prep, emitErr := env.PrepareGemini(r.Header, opts)
 	if emitErr != nil {

@@ -13,6 +13,7 @@ import (
 	feedbackapi "workweave/router/internal/api/feedback"
 	geminiapi "workweave/router/internal/api/gemini"
 	openaiapi "workweave/router/internal/api/openai"
+	subscriptionsapi "workweave/router/internal/api/subscriptions"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/proxy"
@@ -60,7 +61,7 @@ const (
 // leaves inference routes open (BYOK/platform key still controls upstream auth).
 //
 // readinessChecker gates /readyz only; /health remains process liveness.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker, subsSvc subscriptionsapi.Enroller) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
@@ -104,6 +105,18 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.
 	adminAuthed := engine.Group("", middleware.WithTimeout(validateTimeout), middleware.WithAuth(authSvc, byokDisabled))
 	adminAuthed.GET("/validate", admin.ValidateHandler)
+
+	// Subscription-pool enrollment: data-plane (rk_) authed so the npx login
+	// command can push OAuth token bundles with the installed router key. Mounted
+	// in both modes, only when the pool feature is on (ROUTER_SUBSCRIPTION_POOL).
+	if subsSvc != nil {
+		subs := engine.Group("/v1/subscriptions",
+			middleware.WithTimeout(adminTimeout),
+			middleware.WithAuth(authSvc, byokDisabled))
+		subs.POST("", subscriptionsapi.EnrollHandler(subsSvc))
+		subs.GET("", subscriptionsapi.ListHandler(subsSvc))
+		subs.DELETE("/:id", subscriptionsapi.RemoveHandler(subsSvc))
+	}
 
 	if mode == DeploymentModeSelfHosted {
 		engine.GET("/", func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui") })
