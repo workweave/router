@@ -1,0 +1,37 @@
+cmd/seed/main.go
+  s_0ea24cc7526e39::t_3001972591eed1 28
+install/README.md
+  s_0ea24cc7526e39::t_3001972591eed1 38,42,47-49,109
+Makefile
+  s_0ea24cc7526e39::t_3001972591eed1 96,121,124,130,139,143,148
+internal/server/server.go
+  s_0ea24cc7526e39::t_3001972591eed1 43-45,81-84,90-93,101-104,109-111
+internal/server/server_test.go
+  s_0ea24cc7526e39::t_3001972591eed1 58,70
+README.md
+  s_0ea24cc7526e39::t_3001972591eed1 16-19,21-22,24,26-33,35-37,39,45,55,64,77-80,89-90,101,109,166-170,223-227
+cmd/router/main.go
+  s_0ea24cc7526e39::t_3001972591eed1 206-209,214,275
+install/install.sh
+  s_0ea24cc7526e39::t_3001972591eed1 21-22,93,212,530,579,587,604
+.env.example
+  s_0ea24cc7526e39::t_3001972591eed1 53-54
+docker-compose.yml
+  s_0ea24cc7526e39::t_3001972591eed1 9-10,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e7269032e7402236c1267c32780879557c03bac0",
+  "prompts": {},
+  "sessions": {
+    "s_0ea24cc7526e39": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb4ebf38-c225-461f-9100-c68deb2104c5",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

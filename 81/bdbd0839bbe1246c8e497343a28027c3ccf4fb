@@ -1,0 +1,60 @@
+internal/router/cluster/scorer_test.go
+  s_7ac34f6a1d3d7e::t_3d1f01d3f065b8 664-667
+  s_7ac34f6a1d3d7e::t_a7fc46fafb2057 17-18,22-23,34-45
+  s_7ac34f6a1d3d7e::t_83eacbe8c51a6a 377-435
+internal/router/cluster/scorer.go
+  s_7ac34f6a1d3d7e::t_577020efb35ff8 106-115
+internal/router/cluster/embedder_onnx.go
+  s_7ac34f6a1d3d7e::t_4834e02f2fb5a6 17-19,23,26-28,30-31,42-67,73,76,79,84,90,93,108-109,114-184,186-188,210-218,220
+  s_7ac34f6a1d3d7e::t_3b0d3110fc08aa 196-209,219
+internal/router/cluster/embedder_stub.go
+  s_7ac34f6a1d3d7e::t_986a1e2069b510 11,19-22,26-49
+scripts/export_qwen3_onnx.py
+  s_7ac34f6a1d3d7e::t_2cb3b0e7a43f0c 1-249
+internal/router/cluster/artifacts/README.md
+  s_7ac34f6a1d3d7e::t_7e2b8c5ac21a90 44-64
+  s_7ac34f6a1d3d7e::t_3c10a36377d17e 65-90
+internal/router/cluster/CLAUDE.md
+  s_7ac34f6a1d3d7e::t_86cb8308574e20 76-77
+  s_7ac34f6a1d3d7e::t_dca86863259270 44,46-60,64-66
+internal/router/cluster/artifacts.go
+  s_7ac34f6a1d3d7e::t_ae28df608dcb30 192-210
+  s_7ac34f6a1d3d7e::t_1efbac14d639e2 507-508
+  s_7ac34f6a1d3d7e::t_b932113c02076a 459-461,472-485
+  s_7ac34f6a1d3d7e::t_51847dad8a6a71 326-329
+internal/router/cluster/artifacts_test.go
+  s_7ac34f6a1d3d7e::t_784f99e5eff5cf 60-63,65-104
+Dockerfile
+  s_7ac34f6a1d3d7e::t_ff6e7e84199118 205-208
+  s_7ac34f6a1d3d7e::t_2d246c99eab3b9 83-89,94,96,100-103,111-112,116,119,124,129,133,135,138-167
+  s_7ac34f6a1d3d7e::t_2d062af57a9ff1 26-33
+  s_7ac34f6a1d3d7e::t_26d2c33822ab95 52-53
+  s_7ac34f6a1d3d7e::t_eac9a9d4485de3 4-8
+docs/CONFIGURATION.md
+  s_7ac34f6a1d3d7e::t_8a220e767ccddd 124-126,128-136,138-145,148,150-151,155-161
+cmd/router/main.go
+  s_7ac34f6a1d3d7e::t_e3f7dc2f1446f5 782,798,802,822-836,843,847,853,860,865-889
+internal/router/cluster/embedder.go
+  s_7ac34f6a1d3d7e::t_5a6fe985eda3b4 10-12,15-47,50-54
+internal/router/cluster/AGENTS.md
+  s_7ac34f6a1d3d7e::t_4bb723383f6dc2 44,46-60,64-66
+  s_7ac34f6a1d3d7e::t_033dc23756dcfa 76-77
+internal/router/cluster/embedder_test.go
+  s_7ac34f6a1d3d7e::t_1420d707f88b27 74-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "81bdbd0839bbe1246c8e497343a28027c3ccf4fb",
+  "prompts": {},
+  "sessions": {
+    "s_7ac34f6a1d3d7e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8ceefb5b-60a3-4752-9391-55a83dfbd039",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

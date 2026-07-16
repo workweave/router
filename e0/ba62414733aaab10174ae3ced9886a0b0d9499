@@ -1,0 +1,60 @@
+internal/proxy/service.go
+  s_6497efcbf5fbe7::t_99ac1d5fa0b861 3193
+  s_6497efcbf5fbe7::t_fc064f09337e00 1717
+  s_6497efcbf5fbe7::t_443037a115463c 1344-1350
+internal/proxy/feedback_footer_internal_test.go
+  s_6497efcbf5fbe7::t_7fd30201dcca95 17,19-21,27,31-32
+internal/proxy/feedback.go
+  s_6497efcbf5fbe7::t_837563c4298eb9 189-196,199-200,202-206,209
+  s_97644c7dcc2f43::t_159250ec95a1db 197
+internal/proxy/gemini.go
+  s_6497efcbf5fbe7::t_2c1b7c778ca868 185
+  s_6497efcbf5fbe7::t_0d0be9949fe728 48-51,53-54
+internal/proxy/client_identity.go
+  s_6497efcbf5fbe7::t_065dc24bb0ac40 194-195
+internal/proxy/router_feedback.go
+  s_6497efcbf5fbe7::t_0504e52f762c8c 180
+internal/translate/openai_footer.go
+  s_6497efcbf5fbe7::t_8492f569892f69 147-149,154,160
+internal/translate/gemini_footer.go
+  s_6497efcbf5fbe7::t_e287b5d0df4e78 154-156,161,167
+  s_6497efcbf5fbe7::t_6afdad6ba4f1b8 184-187,191
+internal/translate/gemini_footer_test.go
+  s_6497efcbf5fbe7::t_9853dd9c975ae1 65-67,69
+  s_97644c7dcc2f43::t_65348e0176c8da 42,62,81,107
+internal/translate/anthropic_footer_test.go
+  s_97644c7dcc2f43::t_0fb7405bf24064 46,68,107,124,126
+  s_97644c7dcc2f43::t_ffa266b764ce5c 16
+internal/translate/strip_footer_test.go
+  s_97644c7dcc2f43::t_a31de34a58f993 14,16-18
+  s_97644c7dcc2f43::t_6f4a1d060b1af2 20
+internal/translate/openai_footer_test.go
+  s_97644c7dcc2f43::t_80b9877465376e 39,59,79,107,138
+internal/translate/envelope.go
+  s_97644c7dcc2f43::t_182234e84e22b1 791
+  s_97644c7dcc2f43::t_e0a7b00ab90905 775-782
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "e0ba62414733aaab10174ae3ced9886a0b0d9499",
+  "prompts": {},
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_97644c7dcc2f43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d365b224-f1b6-4569-906c-ed98c73ef1a9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

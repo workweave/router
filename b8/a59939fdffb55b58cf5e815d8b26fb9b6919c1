@@ -1,0 +1,22 @@
+internal/router/planner/policy.go
+  s_87d67628e1063e::t_935a042028ff99 9,13-18
+  s_87d67628e1063e::t_187327fb071744 121-127
+internal/router/planner/policy_test.go
+  s_87d67628e1063e::t_b9fc80ec599894 128-134,145,150-153,164,168-178,181-183,189-190,193-198,201-203,209-210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "b8a59939fdffb55b58cf5e815d8b26fb9b6919c1",
+  "prompts": {},
+  "sessions": {
+    "s_87d67628e1063e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b76cc82-198d-44c7-b4db-7689a1007adc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

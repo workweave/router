@@ -1,0 +1,106 @@
+internal/router/rl/rl_test.go
+  s_269cfafe2eeb63::t_438a7943593a9b 63,78,92,102
+  s_269cfafe2eeb63::t_107123acf20c46 50
+internal/router/catalog/catalog_test.go
+  s_269cfafe2eeb63::t_63be4d4fd02c3f 217-218
+internal/providers/AGENTS.md
+  s_269cfafe2eeb63::t_e086512cd2a9f0 19,22
+internal/router/cluster/artifacts_test.go
+  s_269cfafe2eeb63::t_0fdd7bf63f66a6 453,459,463,479
+  s_269cfafe2eeb63::t_ed55eaeb05c5a7 452
+internal/router/catalog/catalog.go
+  s_269cfafe2eeb63::t_64e7f6ff7a9963 314
+  s_269cfafe2eeb63::t_fd55e52dd03eb5 72
+  s_269cfafe2eeb63::t_3848364a36ea9e 108-109
+cmd/AGENTS.md
+  s_269cfafe2eeb63::t_c92fd885caaa99 17
+internal/proxy/service_test.go
+  s_269cfafe2eeb63::t_171e46b7a949ca 434,440
+  s_269cfafe2eeb63::t_a57c673673c490 474
+internal/proxy/CLAUDE.md
+  s_269cfafe2eeb63::t_8796bc1d450909 50
+internal/router/cluster/artifacts/v0.74/quality_means.json
+  s_269cfafe2eeb63::t_59a309425e3d60 1-398
+internal/providers/openaicompat/client.go
+  s_269cfafe2eeb63::t_40fa36c296c8d2 57
+internal/translate/emit_openai.go
+  s_269cfafe2eeb63::t_c5e78339519674 201
+  s_269cfafe2eeb63::t_5f3b56ef845cdd 73
+  s_269cfafe2eeb63::t_f63bd20d2492e7 310-313
+internal/router/cluster/artifacts/candidate-k12/metadata.yaml
+  s_269cfafe2eeb63::t_5f9f54104aa373 50,52
+cmd/router/main.go
+  s_269cfafe2eeb63::t_45e317ba17012f 1305-1306
+internal/api/admin/config_test.go
+  s_269cfafe2eeb63::t_63d33d6249021c 19-23,25,44
+internal/router/cluster/diff_v2_integration_test.go
+  s_269cfafe2eeb63::t_1a817ca7790d1d 80-81
+internal/translate/translate.go
+  s_269cfafe2eeb63::t_e3bef5eed5698e 320-322
+  s_269cfafe2eeb63::t_1e654ddfbceafc 197-198
+internal/router/cluster/artifacts/v0.74/rankings.json
+  s_269cfafe2eeb63::t_59a309425e3d60 1-404
+internal/proxy/force_model.go
+  s_269cfafe2eeb63::t_3b4fe37a94abf6 74-75
+internal/proxy/fallback_test.go
+  s_269cfafe2eeb63::t_991c84fed5aab6 200,209,222,236
+.claude/skills/test-claude-locally/SKILL.md
+  s_269cfafe2eeb63::t_356395ec3e0596 56,64-65
+  s_269cfafe2eeb63::t_871791c052515e 122
+cmd/CLAUDE.md
+  s_269cfafe2eeb63::t_c92fd885caaa99 17
+internal/translate/glm51_flags_test.go
+  s_269cfafe2eeb63::t_bbfc9182ea7df4 18-19,22,28,34,36-37,40,50,56,64-65,96,111
+internal/translate/provider_hint_test.go
+  s_269cfafe2eeb63::t_1d887b42bb9bd8 178,189
+internal/router/cluster/artifacts/v0.74/model_axes.json
+  s_269cfafe2eeb63::t_59a309425e3d60 1-206
+internal/router/cluster/candidate_k12_test.go
+  s_269cfafe2eeb63::t_ed1b9a450d9bf5 51-54,57
+internal/providers/CLAUDE.md
+  s_269cfafe2eeb63::t_e086512cd2a9f0 19,22
+internal/router/cluster/artifacts/v0.74/metadata.yaml
+  s_269cfafe2eeb63::t_f0950aff1c2465 156,158
+  s_269cfafe2eeb63::t_59a309425e3d60 9-12,15-155,157,159-230
+  s_269cfafe2eeb63::t_626b91b6ac527a 1-8,13-14
+internal/proxy/service.go
+  s_269cfafe2eeb63::t_2681494c3c0d77 3963-3964
+internal/router/cluster/scorer_test.go
+  s_269cfafe2eeb63::t_e2e6d62ebc330b 376,386
+  s_269cfafe2eeb63::t_9c422dbd91bbb6 409,411
+internal/translate/provider_hint.go
+  s_269cfafe2eeb63::t_55b6f89b0ecb84 54-56
+internal/router/cluster/artifacts/v0.74/model_registry.json
+  s_269cfafe2eeb63::t_70a6d4cc87e278 95
+  s_269cfafe2eeb63::t_59a309425e3d60 1-79,81-94,96-180
+  s_269cfafe2eeb63::t_8ea58ceda809fb 80
+internal/translate/envelope.go
+  s_269cfafe2eeb63::t_26102af3aa04d8 290-291
+internal/router/cluster/artifacts/candidate-k12/model_registry.json
+  s_269cfafe2eeb63::t_50a61cca430812 95
+  s_269cfafe2eeb63::t_c423ad45b19cbe 119
+internal/router/cluster/artifacts/v0.74/model_features.json
+  s_269cfafe2eeb63::t_59a309425e3d60 1-497
+internal/router/rl/client_test.go
+  s_269cfafe2eeb63::t_cc19faecf06493 42
+internal/proxy/AGENTS.md
+  s_269cfafe2eeb63::t_8796bc1d450909 50
+internal/providers/provider.go
+  s_269cfafe2eeb63::t_17432ed9ef00c4 73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e461448efe480b68bd5a1c7ce3a8459656b3ef22",
+  "prompts": {},
+  "sessions": {
+    "s_269cfafe2eeb63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a2ceef3e-aebf-4cc7-9414-87d3eeec5a26",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

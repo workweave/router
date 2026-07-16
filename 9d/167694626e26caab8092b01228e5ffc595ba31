@@ -1,0 +1,24 @@
+internal/observability/otel/pricing.go
+  s_acfac85264d323::t_e7006b845c2370 69-82
+internal/proxy/service.go
+  s_acfac85264d323::t_027c85b4120e52 985,988
+  s_acfac85264d323::t_d4a063021ab611 422,425
+  s_acfac85264d323::t_1b18237f998a28 553,556
+  s_acfac85264d323::t_0440c91f7bd9be 867,870
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "9d167694626e26caab8092b01228e5ffc595ba31",
+  "prompts": {},
+  "sessions": {
+    "s_acfac85264d323": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5728d40f-8e32-4d24-89b1-0f68e7995e69",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+internal/billing/service_test.go
+  s_0942fdf83049a3::t_2662c914f72890 146-149,165,167-168
+internal/billing/service.go
+  s_0942fdf83049a3::t_fce441b658ded3 106-107
+  s_0942fdf83049a3::t_251635307d95f7 125-128
+  s_0942fdf83049a3::t_92cbd4d1dcc06b 113-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "c4254325f40d6c9d37b389182105f3644748b559",
+  "prompts": {},
+  "sessions": {
+    "s_0942fdf83049a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e369d490-c97e-4af0-a155-504a1557b080",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+internal/proxy/service.go
+  s_c4ecee41717be0::t_91ffe6f47e313d 2074
+  s_c4ecee41717be0::t_03d449bddb4057 82-85
+  s_c4ecee41717be0::t_aef4c9f607fe0d 2022
+  s_c4ecee41717be0::t_5bd07a31aa1ad3 891-898
+internal/translate/translate.go
+  s_c4ecee41717be0::t_37641eb16da673 216
+  s_c4ecee41717be0::t_911afed272b698 282,285
+  s_c4ecee41717be0::t_09dc6abd214774 236
+  s_c4ecee41717be0::t_2c0fefb5606a81 168,175
+internal/translate/stream.go
+  s_c4ecee41717be0::t_913b1ce955ebcc 739
+  s_c4ecee41717be0::t_bc1553d7377c1f 522-528
+  s_c4ecee41717be0::t_4c8f734f05ee99 423-429
+internal/translate/escape_normalize.go
+  s_c4ecee41717be0::t_1ac23f74f9759f 25-29
+internal/api/anthropic/messages.go
+  s_c4ecee41717be0::t_ad0f319b7e0bf4 49
+cmd/router/main.go
+  s_c4ecee41717be0::t_f9ae46f1156ab0 660
+  s_c4ecee41717be0::t_da6912dd25de20 444-445
+internal/translate/escape_normalize_test.go
+  s_c4ecee41717be0::t_06c2a74414a5eb 5-6,15-19,21-29,88,97,108,119,129,149,170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e104b2a9e35b6028cc0e0a9120df8335796d333b",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

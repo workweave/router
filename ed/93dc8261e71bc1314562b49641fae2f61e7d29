@@ -1,0 +1,21 @@
+internal/router/cluster/artifacts/v0.38/rankings.json
+  s_44df7c39f4b08f::t_3973fcf71c75b5 24
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_44df7c39f4b08f::t_dbc299e9f6834f 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "ed93dc8261e71bc1314562b49641fae2f61e7d29",
+  "prompts": {},
+  "sessions": {
+    "s_44df7c39f4b08f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5578b38b-b628-4223-9564-ab8fab5616a3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+internal/api/admin/metrics.go
+  s_d3fc1c517ba243::t_6de177978b3487 88
+  s_d3fc1c517ba243::t_5975eb805d7c99 160
+  s_d3fc1c517ba243::t_272a5980fc8b22 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3b4805f3c0ade3440e32b3bd62c9b53fd73e5538",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

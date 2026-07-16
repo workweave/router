@@ -1,0 +1,21 @@
+internal/translate/loop_detection.go
+  s_b509ea5ac29483::t_1c036638e786b1 156-164
+internal/translate/loop_detection_test.go
+  s_b509ea5ac29483::t_b6d9fe5fdea2da 200-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "90f6d8d72abf611693d78220c3ad4a8542b2fdd7",
+  "prompts": {},
+  "sessions": {
+    "s_b509ea5ac29483": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a05e3853-fda9-4a2e-812d-a5884d536fb0",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

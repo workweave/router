@@ -1,0 +1,21 @@
+install/install.sh
+  s_f390d664e577e2::t_a7a1f221e0a1ea 455-456
+install/cc-statusline.sh
+  s_f390d664e577e2::t_466ef701a7f958 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "95f061fd7fa72f2e103c18aad2148f17c00f942f",
+  "prompts": {},
+  "sessions": {
+    "s_f390d664e577e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "910bccc7-e07f-4705-ba8e-bb431e50d0d1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
