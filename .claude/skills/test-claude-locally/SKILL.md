@@ -11,9 +11,11 @@ Stand up the router in docker compose, point a one-off `claude -p` session at it
 
 - **`~/.claude/settings.json` `env` overrides inherited env vars.** Setting `ANTHROPIC_BASE_URL` in the shell does NOT redirect `claude` — settings.json wins and the request silently goes to prod. Always redirect with `claude --settings <file>` (see `scripts/local-settings.json`). Never edit the user's global `~/.claude.json` or `~/.claude/settings.json` — that breaks their live session.
 - **`claude -p` is stateless across invocations.** A standalone `/force-model` call does not persist to the next `claude -p`. Put `/force-model <model>` as the first line of the SAME prompt that contains the task.
-- **The router ignores the request's `model` field** and routes via the cluster scorer. The ONLY way to pin a specific model is `/force-model` through a Claude Code session (raw curl cannot).
+- **The router ignores the request's `model` field** and routes via the cluster scorer. Two ways to pin a model: (a) `/force-model <model>` as the leading line of the last user message — but that turn returns a synthetic ack and does NOT forward upstream, so the pin only affects a *later* turn on the same session key; (b) the **`x-weave-force-model: <model>` request header**, which pins AND forwards on the SAME turn (built for headless/CI). For raw-curl testing prefer the header — it works without a Claude Code session and needs only one request. Aliases like `fable-5`, `haiku`, `sonnet-5` resolve to canonical IDs (see `forceModelAliases` in `internal/proxy/force_model.go`).
 - **Port 8085 conflict.** The monorepo's pubsub emulator may already own host port 8085. Drop the router's host binding with a `docker-compose.override.yml` (see workflow). The server still reaches the emulator over the compose network.
 - **No credits / no key = no reproduction.** If the real upstream returns an error (e.g. OpenRouter "Insufficient credits"), use the mock-upstream path instead.
+- **To assert on the exact bytes the router FORWARDS upstream** (not just its response), point the provider base URL at a capture mock that logs the request body. This is the cleanest way to verify a `internal/translate` emit change end-to-end.
+- **Anthropic upstream base URL is NOT env-configurable by default.** `cmd/router/main.go` passes `anthropic.DefaultBaseURL` literally (unlike OpenAI/Fireworks/etc. which read `<PROVIDER>_BASE_URL`). To redirect Anthropic to a mock, apply a temporary 1-line edit: `anthropic.NewClient(anthropicKey, config.GetOr("ANTHROPIC_BASE_URL", anthropic.DefaultBaseURL))`, then set `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY=sk-mock` (main.go panics if the Anthropic key is unset). Revert the edit in cleanup. The boot log line still prints the hardcoded `api.anthropic.com` (cosmetic) — confirm the redirect via the capture file, not the log.
 
 ## Workflow
 
@@ -115,6 +117,27 @@ pkill -f mock_openai_upstream.py 2>/dev/null
 rm -f docker-compose.override.yml /tmp/local-settings.json
 # `docker compose down` if you want to stop the stack
 ```
+
+## Recipe: capture the forwarded wire body (raw curl, no Claude Code)
+
+Best for verifying an `internal/translate` emit change (e.g. thinking/effort rewrites). Deterministic, credit-free, single request.
+
+```bash
+# 1. Capture mock: logs the exact forwarded request body, returns a minimal 200.
+#    (For Anthropic, return an Anthropic Messages JSON; for OpenAI-compat, a chat.completion.)
+# 2. Redirect the provider base URL to it. Anthropic needs the temp main.go edit
+#    (see gotchas); OpenAI-compat providers read <PROVIDER>_BASE_URL natively.
+# 3. Bring up + seed a key (steps 1-2 of the workflow), then:
+curl -s -XPOST http://localhost:8080/v1/messages \
+  -H 'content-type: application/json' \
+  -H 'x-weave-router-key: rk_...' \
+  -H 'x-weave-force-model: claude-fable-5' \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":64,"stream":false,
+       "thinking":{"type":"disabled"},"messages":[{"role":"user","content":"say hi"}]}'
+# 4. Assert on the captured body (what the router sent upstream), not the mock's reply.
+```
+
+For a **before/after contrast**, run once on your branch, then `git show origin/main:<file> > /tmp/x && cp /tmp/x <file>`, rebuild, rerun, and restore. Diff the captured bodies.
 
 ## Notes
 
