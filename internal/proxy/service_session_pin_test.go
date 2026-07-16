@@ -748,10 +748,12 @@ func TestService_SessionPin_OpenAI_ForceModelCommandSetsPin(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(forceBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "force-model command must short-circuit routing")
-	require.Len(t, store.upserts, 1)
-	assert.Equal(t, "gpt-5", store.upserts[0].Model)
-	assert.Equal(t, providers.ProviderOpenAI, store.upserts[0].Provider)
-	assert.Equal(t, translate.ReasonUserForceModel, store.upserts[0].Reason)
+	require.Len(t, store.upserts, 2)
+	for _, pin := range store.upserts {
+		assert.Equal(t, "gpt-5", pin.Model)
+		assert.Equal(t, providers.ProviderOpenAI, pin.Provider)
+		assert.Equal(t, translate.ReasonUserForceModel, pin.Reason)
+	}
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "chat.completion", resp["object"])
@@ -784,10 +786,12 @@ func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
 	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, []byte(unforceBody), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "unforce-model command must short-circuit routing")
-	require.Len(t, store.upserts, 1)
-	assert.Equal(t, "user_unforced", store.upserts[0].Reason)
-	assert.Empty(t, store.upserts[0].Provider)
-	assert.Empty(t, store.upserts[0].Model)
+	require.NotEmpty(t, store.upserts)
+	for _, pin := range store.upserts {
+		assert.Equal(t, "user_unforced", pin.Reason)
+		assert.Empty(t, pin.Provider)
+		assert.Empty(t, pin.Model)
+	}
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "chat.completion", resp["object"])

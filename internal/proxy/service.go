@@ -1952,6 +1952,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// avoid a second hash + divergent key if env.body mutates mid-flow.
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "anthropic_messages")
+	forceModelSessionKey := DeriveForceModelSessionKey(env, apiKeyID)
 	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
 		log.Info("Stripped router-feedback artifacts from Anthropic history", "removed_messages", removed)
 	}
@@ -1984,7 +1985,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, forceModelSessionKey, feats.Tokens)
 		}
 	}
 	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
@@ -1995,7 +1996,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey, forceModelSessionKey)
 
 	// Tool-call loop break: catches runaway OSS-model tool-call cycles (qwen3
 	// in particular) that the previous-turn-maxed-out guard misses because
@@ -3921,6 +3922,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// matching Anthropic block for why the raw client session shape owns pins.
 	var sessionKey [sessionpin.SessionKeyLen]byte
 	ctx, log, sessionKey = bindRequestLogger(ctx, env, apiKeyID, requestID, "openai_chat_completions")
+	forceModelSessionKey := DeriveForceModelSessionKey(env, apiKeyID)
 	if removed := env.StripRouterFeedbackArtifacts(); removed > 0 {
 		log.Info("Stripped router-feedback artifacts from OpenAI history", "removed_messages", removed)
 	}
@@ -3954,7 +3956,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, forceModelSessionKey, feats.Tokens)
 		}
 	}
 	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
@@ -3965,7 +3967,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey, forceModelSessionKey)
 
 	// Wide cyclic re-read loop → escalate to opus (same path as the Anthropic
 	// ingress). See detectCyclicToolCallLoop / handleLoopEscalation.
