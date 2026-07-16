@@ -118,10 +118,11 @@ func (s *Service) handleRouterFeedbackCommand(
 	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
 		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 		var trainingDelta []router.ConversationMessage
+		var trainingDeltaTruncated bool
 		if strategy == router.StrategyHMM && trainingAllowed {
-			trainingDelta = routerFeedbackTrainingDelta(env)
+			trainingDelta, trainingDeltaTruncated = clipFeedbackTrainingDelta(routerFeedbackTrainingDelta(env))
 		}
-		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, trainingDelta)
+		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, trainingDelta, trainingDeltaTruncated)
 	}
 
 	now := time.Now()
@@ -171,6 +172,7 @@ func (s *Service) reportRouterFeedback(
 	rating string,
 	feedback string,
 	trainingDelta []router.ConversationMessage,
+	trainingDeltaTruncated bool,
 ) {
 	payload := map[string]interface{}{
 		"strategy":          string(strategy),
@@ -199,6 +201,7 @@ func (s *Service) reportRouterFeedback(
 	}
 	if strategy == router.StrategyHMM && trainingAllowed && len(trainingDelta) > 0 {
 		payload["training_conversation_delta"] = trainingDelta
+		payload["training_conversation_delta_truncated"] = trainingDeltaTruncated
 	}
 	log := observability.FromContext(ctx)
 	observability.SafeGo(log, policyFeedbackReportTimeout, "reportPolicyFeedback", func(reportCtx context.Context) {
@@ -236,6 +239,101 @@ func routerFeedbackTrainingDelta(env *translate.RequestEnvelope) []router.Conver
 		}
 	}
 	return append([]router.ConversationMessage(nil), messages[start:ratedAssistant+1]...)
+}
+
+// maxFeedbackDeltaChars mirrors policyOutcomeResponseMaxBytes (256 KiB): the
+// established ceiling for training content sent to the same sidecar under the
+// same training_allowed gate. Defined locally because #716's
+// policyclient.maxTrainingDeltaChars is not on main yet; reconcile into a
+// shared helper once that lands and the clip is promoted out of the adapter.
+const maxFeedbackDeltaChars = 256 * 1024
+
+// clipFeedbackTrainingDelta applies the #716-style per-field + total budget
+// cap to an already-selected feedback exchange. Newest message first; within a
+// message, Text then input_json then tool_result.Text share the total budget.
+func clipFeedbackTrainingDelta(messages []router.ConversationMessage) ([]router.ConversationMessage, bool) {
+	if len(messages) == 0 {
+		return nil, false
+	}
+	out := make([]router.ConversationMessage, len(messages))
+	copy(out, messages)
+	totalUsed := 0
+	truncated := false
+	for i := len(out) - 1; i >= 0; i-- {
+		msg := &out[i]
+		text, textTruncated := clipFeedbackText(msg.Text, maxFeedbackDeltaChars)
+		if textTruncated {
+			truncated = true
+		}
+		text, budgetTruncated := applyFeedbackTextBudget(text, &totalUsed, maxFeedbackDeltaChars)
+		if budgetTruncated {
+			truncated = true
+		}
+		msg.Text = text
+
+		if len(msg.ToolCalls) > 0 {
+			calls := make([]router.ConversationToolCall, len(msg.ToolCalls))
+			copy(calls, msg.ToolCalls)
+			for j := range calls {
+				inputJSON, inputTruncated := clipFeedbackText(calls[j].InputJSON, maxFeedbackDeltaChars)
+				if inputTruncated {
+					truncated = true
+				}
+				inputJSON, budgetTruncated = applyFeedbackTextBudget(inputJSON, &totalUsed, maxFeedbackDeltaChars)
+				if budgetTruncated {
+					truncated = true
+				}
+				calls[j].InputJSON = inputJSON
+			}
+			msg.ToolCalls = calls
+		}
+
+		if len(msg.ToolResults) > 0 {
+			results := make([]router.ConversationToolResult, len(msg.ToolResults))
+			copy(results, msg.ToolResults)
+			for j := range results {
+				resultText, resultTruncated := clipFeedbackText(results[j].Text, maxFeedbackDeltaChars)
+				if resultTruncated {
+					truncated = true
+				}
+				resultText, budgetTruncated = applyFeedbackTextBudget(resultText, &totalUsed, maxFeedbackDeltaChars)
+				if budgetTruncated {
+					truncated = true
+				}
+				results[j].Text = resultText
+			}
+			msg.ToolResults = results
+		}
+	}
+	return out, truncated
+}
+
+func clipFeedbackText(text string, limit int) (string, bool) {
+	text = strings.TrimSpace(text)
+	if limit <= 0 || len(text) <= limit {
+		return text, false
+	}
+	return strings.TrimSpace(text[:limit]), true
+}
+
+func applyFeedbackTextBudget(text string, totalUsed *int, maxTotal int) (string, bool) {
+	if maxTotal <= 0 {
+		*totalUsed += len(text)
+		return text, false
+	}
+	remaining := maxTotal - *totalUsed
+	if remaining <= 0 {
+		if text != "" {
+			return "", true
+		}
+		return "", false
+	}
+	if len(text) > remaining {
+		*totalUsed = maxTotal
+		return strings.TrimSpace(text[:remaining]), true
+	}
+	*totalUsed += len(text)
+	return text, false
 }
 
 // routerFeedbackAck renders the acknowledgment, echoing the verdict. The
