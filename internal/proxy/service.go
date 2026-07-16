@@ -2120,7 +2120,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// caller's own Claude subscription has headroom, so serve straight through
 	// to Anthropic with no substitution and no billing debit.
 	if routeRes.UsageBypass {
-		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), string(routeRes.TurnType), time.Since(routeStart).Milliseconds(), requestStart, requestID, externalID, r, w)
 		if !errors.Is(err, errBypassRetryable) {
 			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err
