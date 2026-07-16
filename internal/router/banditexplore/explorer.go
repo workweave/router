@@ -63,6 +63,9 @@ func (e *Explorer) Route(ctx context.Context, req router.Request) (router.Decisi
 	if err != nil {
 		return dec, err
 	}
+	if req.ForceModel != "" {
+		return dec, nil
+	}
 	if !e.shouldExplore(dec) {
 		return dec, nil
 	}

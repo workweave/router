@@ -1995,7 +1995,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	forceModel := s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
 
 	// Tool-call loop break: catches runaway OSS-model tool-call cycles (qwen3
 	// in particular) that the previous-turn-maxed-out guard misses because
@@ -2088,6 +2088,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	routeStart := time.Now()
 	req := router.Request{
 		RequestedModel:       feats.Model,
+		ForceModel:           forceModel,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,
@@ -3965,7 +3966,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	forceModel := s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
 
 	// Wide cyclic re-read loop → escalate to opus (same path as the Anthropic
 	// ingress). See detectCyclicToolCallLoop / handleLoopEscalation.
@@ -4059,6 +4060,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	routeRequest := router.Request{
 		RequestedModel:       feats.Model,
+		ForceModel:           forceModel,
 		EstimatedInputTokens: feats.Tokens,
 		HasTools:             feats.HasTools,
 		HasImages:            feats.HasImages,

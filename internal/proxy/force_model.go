@@ -196,13 +196,10 @@ func (s *Service) applyForceModelHeader(
 	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
-) {
-	if s.pinStore == nil {
-		return
-	}
+) string {
 	raw := strings.TrimSpace(r.Header.Get(ForceModelHeader))
 	if raw == "" {
-		return
+		return ""
 	}
 	log := observability.FromContext(ctx)
 	canonicalModel, provider, known := resolveForceModel(raw)
@@ -211,12 +208,15 @@ func (s *Service) applyForceModelHeader(
 			"input_model", raw,
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		)
-		return
+		return ""
+	}
+	if s.pinStore == nil {
+		return canonicalModel
 	}
 	role := roleForTier(catalog.TierFor(env.Model()))
 	if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
 		log.Error("x-weave-force-model: pin store upsert failed", "err", err)
-		return
+		return canonicalModel
 	}
 	log.Info("x-weave-force-model applied",
 		"input_model", raw,
@@ -225,6 +225,7 @@ func (s *Service) applyForceModelHeader(
 		"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		"role", role,
 	)
+	return canonicalModel
 }
 
 // handleForceModelCommand processes a /force-model or /unforce-model directive:

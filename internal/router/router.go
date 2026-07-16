@@ -24,7 +24,11 @@ type Overrides struct {
 }
 
 type Request struct {
-	RequestedModel       string
+	RequestedModel string
+	// ForceModel is the canonical model named by a valid explicit force-model
+	// request. Router decorators must preserve the underlying selection rather
+	// than applying alternative-policy behavior such as exploration.
+	ForceModel           string
 	EstimatedInputTokens int
 	// OrganizationID and InstallationID are opaque external identifiers used
 	// to correlate policy decisions with rollout and privacy state.
