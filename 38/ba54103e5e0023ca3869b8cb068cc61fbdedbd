@@ -1,0 +1,20 @@
+internal/proxy/service.go
+  s_ebfa96f9db32d9::t_9cc30ab280f271 624-640,642-645,647-649,651,659-661,666-679
+  s_ebfa96f9db32d9::t_35b14309855f39 641,646,652-653,658,662
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "38ba54103e5e0023ca3869b8cb068cc61fbdedbd",
+  "prompts": {},
+  "sessions": {
+    "s_ebfa96f9db32d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82f09df5-4976-4e25-8c8a-84dea4f84240",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

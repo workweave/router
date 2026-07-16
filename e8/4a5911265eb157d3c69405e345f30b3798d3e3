@@ -1,0 +1,83 @@
+internal/router/AGENTS.md
+  s_c4ecee41717be0::t_207f4bc1a9e32f 19
+  s_ad266a1f33b81c::t_de13646f242906 1,3
+internal/router/cluster/CLAUDE.md
+  s_c4ecee41717be0::t_bf62f894e5e706 78
+internal/proxy/AGENTS.md
+  s_c4ecee41717be0::t_f5f2c9ce652ea0 66
+  s_c4ecee41717be0::t_d816497e8184c2 5
+  s_76fd6ae07299cc::t_399ccc6476c6a4 1,3
+internal/router/handover/summarizer_test.go
+  s_c4ecee41717be0::t_fc15e26fa6144c 368-370
+internal/router/CLAUDE.md
+  s_c4ecee41717be0::t_b47321761701cc 19
+internal/router/turntype/AGENTS.md
+  s_c4ecee41717be0::t_bb9d7a9a1f71d9 16-17
+cmd/router/main.go
+  s_c4ecee41717be0::t_1b35d93ad4aab7 522
+internal/router/turntype/CLAUDE.md
+  s_c4ecee41717be0::t_8f29a7e3631f7f 16-17
+internal/api/AGENTS.md
+  s_c4ecee41717be0::t_57a938f649053c 27
+  s_c4ecee41717be0::t_016f34b08f3439 13
+internal/api/CLAUDE.md
+  s_c4ecee41717be0::t_6377e2319e1415 13
+  s_c4ecee41717be0::t_342dc8bb5a007f 27
+internal/router/cluster/AGENTS.md
+  s_c4ecee41717be0::t_baec09a3cabbe0 78
+CLAUDE.md
+  s_c4ecee41717be0::t_f420496c608c1f 63-69
+  s_c4ecee41717be0::t_4b0421ed41a24e 112,114,116
+  s_c4ecee41717be0::t_b73eb707cf1da1 33-35
+  s_c4ecee41717be0::t_6d2532594a3b9a 90-93
+  s_c4ecee41717be0::t_b8fad9e8a0cbb0 167
+  s_c4ecee41717be0::t_cd160a2e351ba8 40-41,48,50-56
+  s_c4ecee41717be0::t_876965cf8d7591 131-132,137-139,142
+cmd/AGENTS.md
+  s_c4ecee41717be0::t_1488f902913357 12,17-18
+cmd/CLAUDE.md
+  s_c4ecee41717be0::t_4e50377274a03b 12,17-18
+internal/proxy/CLAUDE.md
+  s_c4ecee41717be0::t_c7bcc1f87d088a 5
+  s_c4ecee41717be0::t_02566ecc0cd632 66
+AGENTS.md
+  s_c4ecee41717be0::t_e7ffddfc52914a 1,3,33-35,40-41,48,50-56,63-69,90-93,112,114,116,131-132,137-139,142,167
+internal/router/catalog/AGENTS.md
+  s_c4ecee41717be0::t_4b57d169b865a0 1,3
+internal/router/planner/AGENTS.md
+  s_c4ecee41717be0::t_87f48d30f1b25a 1,3
+internal/router/rl/AGENTS.md
+  s_c4ecee41717be0::t_613ffd9f6979cc 1,3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e84a5911265eb157d3c69405e345f30b3798d3e3",
+  "prompts": {},
+  "sessions": {
+    "s_76fd6ae07299cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3fb66009734c27e2",
+        "model": "unknown"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_ad266a1f33b81c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38da743a-ec24-4e46-9146-bce9c32e91cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

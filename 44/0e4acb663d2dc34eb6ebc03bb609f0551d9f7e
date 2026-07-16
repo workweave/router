@@ -1,0 +1,23 @@
+.github/workflows/test.yml
+  s_4ae88d70db4dec::t_2e8b8ebbb55b04 9-11
+internal/api/admin/metrics.go
+  s_4ae88d70db4dec::t_2da9049eecedd9 137-138
+frontend/package.json
+  s_4ae88d70db4dec::t_971d5a5b39cd24 42-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "440e4acb663d2dc34eb6ebc03bb609f0551d9f7e",
+  "prompts": {},
+  "sessions": {
+    "s_4ae88d70db4dec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69868cb5-31d7-4a20-866c-07eacd7f727d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

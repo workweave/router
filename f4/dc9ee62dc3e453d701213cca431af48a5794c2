@@ -1,0 +1,26 @@
+internal/proxy/force_model_tier_fallback_internal_test.go
+  s_9906d2e7f8bf0f::t_411965bc88afe5 152-191,237-238
+  s_9906d2e7f8bf0f::t_c224c6e20ad774 6,70-100,192-236
+internal/proxy/service_session_pin_test.go
+  s_9906d2e7f8bf0f::t_ec9187bfd5e064 463
+internal/proxy/turnloop.go
+  s_9906d2e7f8bf0f::t_fb8fbc0c78e403 235-236,253-254,259
+  s_9906d2e7f8bf0f::t_288f5db79f6d9d 174-191,231-234,237-251,302,375
+  s_9906d2e7f8bf0f::t_c8dff3f7cf9340 252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f4dc9ee62dc3e453d701213cca431af48a5794c2",
+  "prompts": {},
+  "sessions": {
+    "s_9906d2e7f8bf0f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f683f-4286-7d21-9aad-7ed0bdb1e396",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

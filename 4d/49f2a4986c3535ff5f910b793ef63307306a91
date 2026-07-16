@@ -1,0 +1,19 @@
+internal/billing/service.go
+  s_f329c911a5861c::t_de854ee7302c79 37-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "4d49f2a4986c3535ff5f910b793ef63307306a91",
+  "prompts": {},
+  "sessions": {
+    "s_f329c911a5861c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9a3a147-a043-4caa-8424-19e37b94d138",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

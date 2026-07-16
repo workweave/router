@@ -1,0 +1,61 @@
+internal/proxy/turnloop_test.go
+  s_345838d581d61d::t_dba1ed819de5a9 1-315
+cmd/router/main.go
+  s_345838d581d61d::t_9137424ab54809 322-326
+internal/proxy/service.go
+  s_345838d581d61d::t_2c24bee113b6d6 1205,1226,1241-1243
+  s_345838d581d61d::t_d213f6fffac5f3 17-18
+  s_345838d581d61d::t_9dbab1f76b22bc 1088-1113,1118
+  s_345838d581d61d::t_e7d90580d21914 622,643,658-660
+  s_345838d581d61d::t_7afcb4f3fec4ec 441,458
+  s_345838d581d61d::t_e51bb4cb89e7fc 498-524,529
+  s_345838d581d61d::t_2ed4b0de1c92c6 1032,1049
+  s_345838d581d61d::t_e389479bcbbd79 35-36,44-46,67-80
+  s_345838d581d61d::t_ba8138cf29bffa 708-818
+  s_345838d581d61d::t_393b4ad731b2cb 108-117,119-122,125,129,140,145-149,153-195
+internal/proxy/service_observation_test.go
+  s_345838d581d61d::t_ae9d078e3b1b37 150
+internal/proxy/service_test.go
+  s_345838d581d61d::t_39788c7db45a62 55
+  s_345838d581d61d::t_59da7b08e2308f 248-251,253-263,265-269,271
+  s_345838d581d61d::t_f4fd5be89cf175 407,420,434
+internal/proxy/gemini.go
+  s_345838d581d61d::t_ae8b20fbf573e8 83-106,111
+  s_345838d581d61d::t_70675bab1e527d 53,70
+  s_345838d581d61d::t_11708e24d17078 145,165,175-177
+internal/proxy/service_session_pin_test.go
+  s_345838d581d61d::t_7932b20abe438f 117-122,140-143
+  s_345838d581d61d::t_3fcb8aa2521175 70-76
+  s_345838d581d61d::t_1aeb6d8aaafb7a 148-150,166-167,171
+  s_345838d581d61d::t_7dce3d276105cb 31-32,36-39
+  s_345838d581d61d::t_5e54b5f73a74d0 420
+  s_345838d581d61d::t_eefeb42cb53156 209-211,225-227
+  s_345838d581d61d::t_d1e6ad75aabbaa 336-338,356
+  s_345838d581d61d::t_687f86c5a3fbaa 329
+internal/proxy/gemini_test.go
+  s_345838d581d61d::t_6ec8ac57d06c1e 36,67
+internal/proxy/turnloop.go
+  s_345838d581d61d::t_64534dff4ca246 9-10,33-35,43-58,61-73,75-77,85,87,92-95,109-111,117-118,121-140,155-159,163-208,210-211,215-219,222-329
+  s_345838d581d61d::t_3e84411547bf6a 141-154,161-162
+internal/proxy/service_cache_test.go
+  s_345838d581d61d::t_87f38a295dae40 85,111,135,158
+  s_345838d581d61d::t_c2d9195757b552 182
+internal/router/planner/policy.go
+  s_345838d581d61d::t_a742e1519a4d46 95-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "be4165a786462f8c6683cfd8bb07be46d3f724b0",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
