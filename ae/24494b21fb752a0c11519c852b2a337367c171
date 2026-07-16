@@ -1,0 +1,25 @@
+docker-compose.yml
+  s_8ba580dbc82073::t_16d6f8ed98299d 91-92
+  s_8ba580dbc82073::t_73b36372b7cc82 42-62
+  s_8ba580dbc82073::t_ad0b520bc0fbeb 125-132
+.env.example
+  s_8ba580dbc82073::t_0da8ccae8cd7eb 169-181
+db/pubsub/entrypoint.sh
+  s_8ba580dbc82073::t_03268b32cdf719 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "ae24494b21fb752a0c11519c852b2a337367c171",
+  "prompts": {},
+  "sessions": {
+    "s_8ba580dbc82073": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "542466ad-af0f-4833-ad10-50ccfe2be8c7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

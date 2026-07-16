@@ -1,0 +1,110 @@
+db/queries/model_router_request_feedback.sql
+  s_76644b82386d76::t_3e4fca8d9092c1 1-16,19,22-54,56-57
+  s_76644b82386d76::t_90c57d67c24312 55,58-65
+  s_76644b82386d76::t_a285d5d29ad6bd 17-18,20-21
+cmd/router/main.go
+  s_76644b82386d76::t_ca39194b2ab13a 565-571
+  s_76644b82386d76::t_fc7f5ff5381eb6 584-585
+internal/proxy/feedback_internal_test.go
+  s_76644b82386d76::t_1cefe7db7b81d0 1-7,9-12,14-61,64-69,71-73,75-79,107-108,114,117,126-127,130
+  s_76644b82386d76::t_bc9a471ffc8fa0 8,13
+  s_76644b82386d76::t_257a46a26c6ff5 62-63,70,74,80-106,109-113,115-116,118-125,128-129
+internal/proxy/feedback.go
+  s_76644b82386d76::t_47174023302569 115-117
+  s_76644b82386d76::t_395180366466b9 7,13
+  s_76644b82386d76::t_97163eabac2e67 131
+  s_76644b82386d76::t_4d90e0b1e5bc89 1-6,8-12,14-44,54-57,63-64,68-114,118-119,123-130,132-134,194,200-208
+  s_76644b82386d76::t_ddce7306f2b31b 67
+  s_76644b82386d76::t_ec1ec92e4502a9 45-53,58-62,65-66
+  s_76644b82386d76::t_c0dce93109a0e6 120-122,135-193,195-199
+internal/router/cluster/artifacts/v0.75/rankings.json
+  s_76644b82386d76::t_fbeca8ce6d3ad9 1-625
+internal/router/cluster/artifacts/v0.76/metadata.yaml
+  s_76644b82386d76::t_6905898c0cdcd4 1-160
+db/migrations/0015_model_router_request_feedback.up.sql
+  s_76644b82386d76::t_8186b875611b7d 1-25
+internal/router/cluster/artifacts/v0.76/model_axes.json
+  s_76644b82386d76::t_6905898c0cdcd4 1-193
+internal/router/cluster/artifacts/v0.76/quality_means.json
+  s_76644b82386d76::t_6905898c0cdcd4 1-663
+internal/feedback/token_test.go
+  s_76644b82386d76::t_66cf07ba288bca 1-46
+internal/router/cluster/artifacts/v0.75/quality_means.json
+  s_76644b82386d76::t_fbeca8ce6d3ad9 1-625
+internal/proxy/gemini.go
+  s_76644b82386d76::t_df1c99dce5aaf6 104-108
+  s_76644b82386d76::t_607b8fd3598c7d 167
+internal/postgres/feedback.go
+  s_76644b82386d76::t_3930151da42119 6,13
+  s_76644b82386d76::t_bea0ffd5b26f27 34-35,38,40,49
+  s_76644b82386d76::t_70b48b51d92967 64,90
+  s_76644b82386d76::t_0630f93aca9e6a 119
+  s_76644b82386d76::t_a0e8cd168d42ff 12
+  s_76644b82386d76::t_82a10502aa76a3 33,36-37,39,41,46-47,50
+  s_76644b82386d76::t_a1cc0896c9f655 79-80,96,103,107-116
+  s_76644b82386d76::t_7e043eb4019adc 125-133
+  s_76644b82386d76::t_ec0a9089c08175 97-98
+  s_76644b82386d76::t_9004a470e51d13 100
+  s_76644b82386d76::t_3c08018c4794ae 1-5,7-11,14-32,42-45,48,51-63,65-78,81-89,91-95,99,101-102,104-106,117-118,120-124
+db/migrations/0015_model_router_request_feedback.down.sql
+  s_76644b82386d76::t_1e128bb3978c00 1-5
+internal/feedback/token.go
+  s_76644b82386d76::t_fe4d66ace2021a 1-83,85-107
+  s_76644b82386d76::t_14825cdd3d17ca 84
+internal/sqlc/models.go
+  s_76644b82386d76::t_2a425a1269e802 62-76
+internal/router/cluster/artifacts/v0.75/model_axes.json
+  s_76644b82386d76::t_fbeca8ce6d3ad9 1-186
+internal/router/cluster/artifacts/v0.76/model_features.json
+  s_76644b82386d76::t_6905898c0cdcd4 1-698
+internal/postgres/repository.go
+  s_76644b82386d76::t_2cbea61d19c6ba 20
+  s_76644b82386d76::t_c11a39c8f97813 31
+internal/api/admin/feedback.go
+  s_76644b82386d76::t_f5e6a2ac3e95ae 1-3,5-6,8,10-56,58-61,176-181
+  s_76644b82386d76::t_67e029257b19e7 4
+  s_76644b82386d76::t_79b958ce38d58f 7,9,57,62-175
+internal/proxy/headers.go
+  s_76644b82386d76::t_3f23c9554c4ae6 23-25
+internal/proxy/service.go
+  s_76644b82386d76::t_4763c734340a35 116-123
+  s_76644b82386d76::t_5de9c3743357e2 2270
+  s_76644b82386d76::t_a5372c5d0a11d7 1324
+  s_76644b82386d76::t_cdfc178f5f149b 748-752
+  s_76644b82386d76::t_d455c6f952a944 2188-2192
+  s_76644b82386d76::t_64ee43787c3572 722
+  s_76644b82386d76::t_c1f03aa42ee09a 1234
+  s_76644b82386d76::t_1526c449aa8cd3 1136-1140
+  s_76644b82386d76::t_976654a49f31aa 1318
+  s_76644b82386d76::t_c883cc45fba8f4 716-721
+  s_76644b82386d76::t_a75a53ac7d1051 1368
+internal/router/cluster/artifacts/v0.75/metadata.yaml
+  s_76644b82386d76::t_fbeca8ce6d3ad9 1-151
+internal/router/cluster/artifacts/v0.76/model_registry.json
+  s_76644b82386d76::t_6905898c0cdcd4 1-152
+internal/router/cluster/artifacts/v0.76/rankings.json
+  s_76644b82386d76::t_6905898c0cdcd4 1-658
+internal/server/server.go
+  s_76644b82386d76::t_923daab2b128d0 187-193
+  s_76644b82386d76::t_251da1a6b3f2b4 181-186
+internal/sqlc/model_router_request_feedback.sql.go
+  s_76644b82386d76::t_4a213a37d75779 15-35,95,124
+  s_76644b82386d76::t_2a425a1269e802 1-14,36-94,96-123,125-174,177,180-224
+  s_76644b82386d76::t_397cceb51f109d 175-176,178-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "d7b48e519c63da2836cc4e1a12baf80ac5437fd5",
+  "prompts": {},
+  "sessions": {
+    "s_76644b82386d76": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7439cac0-80e4-459c-9289-3912d3922007",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

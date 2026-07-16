@@ -1,0 +1,30 @@
+frontend/src/components/charts/DrillDownModal.tsx
+  s_d3fc1c517ba243::t_5747debbc2726b 183
+frontend/src/app/(app)/dashboard/page.tsx
+  s_d3fc1c517ba243::t_1c015373c9d4bd 57
+frontend/src/app/(app)/settings/page.tsx
+  s_d3fc1c517ba243::t_87a30d91da9a04 187
+  s_d3fc1c517ba243::t_dcfbcbd22fd6ce 170
+  s_d3fc1c517ba243::t_453cca0e619cbe 154
+  s_d3fc1c517ba243::t_481860cf6cb5da 847
+  s_d3fc1c517ba243::t_14e7ed1188afef 712
+  s_d3fc1c517ba243::t_4d35c87d6381bd 653
+  s_d3fc1c517ba243::t_bb7ab9d903b522 203,420
+  s_d3fc1c517ba243::t_3374568d96271d 369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a48d01eef35a2397a86a7c2aeb84b81b5290aea1",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+internal/providers/httputil/httputil.go
+  s_c4ecee41717be0::t_baccf33750767e 142-168
+  s_c4ecee41717be0::t_80a2f1d1b0bb70 12,17
+internal/providers/anthropic/client.go
+  s_c4ecee41717be0::t_a672c0e249f259 52-57,71
+internal/providers/httputil/httputil_test.go
+  s_c4ecee41717be0::t_871bb95b3b3ad4 293-347
+internal/providers/openai/client.go
+  s_c4ecee41717be0::t_2ac856bc60a814 161-164
+internal/providers/anthropic/client_test.go
+  s_c4ecee41717be0::t_f1a02ad01a9588 97-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3e54fc4e61e9be403e6898e5605a8a6af33c59f3",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

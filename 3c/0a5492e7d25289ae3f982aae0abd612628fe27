@@ -1,0 +1,34 @@
+frontend/src/lib/api.ts
+  s_b008e1ec45bd84::t_73d02e75d157f2 163-167
+db/migrations/0004_multiple-api-keys-per-installation.down.sql
+  s_b008e1ec45bd84::t_a39038884f104d 1-12
+internal/server/server.go
+  s_b008e1ec45bd84::t_f79ac295cd3bc3 80
+internal/auth/service.go
+  s_b008e1ec45bd84::t_9b54e6c25eed85 129-136,141,143-145,148-154
+internal/auth/errors.go
+  s_b008e1ec45bd84::t_8c637ad3089de1 11-13
+db/migrations/0004_multiple-api-keys-per-installation.up.sql
+  s_b008e1ec45bd84::t_125c295bb9c5c2 1-12
+internal/api/admin/keys.go
+  s_b008e1ec45bd84::t_1610d0dc3eafc1 61-63,88-90,97-102,104-107
+frontend/src/app/(app)/settings/page.tsx
+  s_b008e1ec45bd84::t_f17c340279ddb7 120,157,162,164,170
+  s_b008e1ec45bd84::t_c8128ce7ad99fb 225,262,284-285,288,295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3c0a5492e7d25289ae3f982aae0abd612628fe27",
+  "prompts": {},
+  "sessions": {
+    "s_b008e1ec45bd84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "65fd2a14-399a-44a2-9740-a3e2599006e4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+internal/translate/crossformat_request_test.go
+  s_c4ecee41717be0::t_30fb1bcb838cea 1662-1674,1694-1700
+internal/router/handover/summarizer_test.go
+  s_c4ecee41717be0::t_d039f3888ed9d3 330-445
+internal/translate/spiral_signals_test.go
+  s_c4ecee41717be0::t_3dd3375282c3d0 1-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8cc74be0c62a587269c2704078bd24a48df41bee",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+install/install.sh
+  s_09ca5e2e44a0ed::t_ed5a64f6765fc5 1546-1547
+  s_09ca5e2e44a0ed::t_d8619c642113e5 536-547,550-555
+  s_09ca5e2e44a0ed::t_34197035fb474e 582-584,586-593,600,605-608,613-619,625,627
+  s_09ca5e2e44a0ed::t_49d4ac87b3d09b 1852-1859
+  s_09ca5e2e44a0ed::t_0eb92424519592 653,661-667,672,676-677,688-692,698,705
+  s_09ca5e2e44a0ed::t_bb6bc155bb59f4 1591-1594
+install/opencode-weave/README.md
+  s_09ca5e2e44a0ed::t_8e9a10377b2019 1,3-14,19-21,25-27,32-50,52-54,56,58-60,62,64-69,73-78
+install/uninstall.sh
+  s_09ca5e2e44a0ed::t_bec1cb31e178e1 167-168,170-173,176,181
+  s_09ca5e2e44a0ed::t_abd5d1a9ac8210 198-200
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_c60858f562d073 2-3,5-10,12-18,20-34,38-40,42-43,46,49-74,76-77,152,162,166,173,182,188,195-290,298,303,395,405-467,472-482,485-486,494,520,523,526,536,542,552,558-559,582-584,598-629,631-632
+install/opencode-weave/test/capture.test.ts
+  s_09ca5e2e44a0ed::t_677921afd31ffb 1-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "23ae82abc0f9cdd92644ebff5e168a7080a5f715",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
