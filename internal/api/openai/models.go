@@ -21,10 +21,8 @@ func ModelsHandler(fallback gin.HandlerFunc) gin.HandlerFunc {
 			fallback(c)
 			return
 		}
-		// Codex does NOT use this endpoint as the source-of-truth for model
-		// discovery — it only refreshes from it periodically and merges the
-		// result into its file cache. An empty list is a safe no-op: the
-		// previous cached catalog stays intact.
-		c.JSON(http.StatusOK, codexModelsResponse{})
+		// Codex merges remote models into its file cache, so returning an empty
+		// list is safe — the previous cached catalog stays intact.
+		c.JSON(http.StatusOK, codexModelsResponse{Models: []struct{}{}})
 	}
 }

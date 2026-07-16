@@ -4280,10 +4280,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		marker = subscriptionOnlyWarningMarkerCodex
 	}
 
-	// When policy debug is enabled (x-weave-router-debug header), inject the
-	// verbose routing marker into the Responses badge. Codex renders the first
-	// assistant text delta reliably; this is the equivalent of the verbose
-	// in-band chat-completions marker that Claude Code sees.
+	// Inject verbose routing marker into the Responses badge when policy
+	// debug is enabled; Codex renders the first assistant text delta reliably.
 	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
 	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !codexPassthrough && debugEnabled {
 		rw.SetBadgeText(marker)
