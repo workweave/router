@@ -1,0 +1,21 @@
+internal/proxy/feedback_span_names_test.go
+  s_c4ecee41717be0::t_685c398d18c307 89-91
+internal/proxy/router_feedback.go
+  s_c4ecee41717be0::t_b978f0115d61c1 19-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b90d2072ce63a69508f86aaa0f4ac9f116e675ae",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

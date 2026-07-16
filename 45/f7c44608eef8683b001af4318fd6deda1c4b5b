@@ -1,0 +1,29 @@
+internal/sqlc/session_pins.sql.go
+  s_e314738a9195df::t_13affde8253c5b 229-241,278-286,305-317
+db/migrations/0030_session_pin_paired_model.up.sql
+  s_e314738a9195df::t_ad67868963d7d6 3-11
+db/queries/session_pins.sql
+  s_e314738a9195df::t_825066d2513347 29-37
+  s_e314738a9195df::t_b165e1d1d36b74 56-68
+internal/router/sessionpin/store.go
+  s_e314738a9195df::t_60ce11d15952aa 43-51
+internal/proxy/turnloop.go
+  s_e314738a9195df::t_479e52c210acec 735-737
+  s_e314738a9195df::t_aa116baa24f99c 757-762
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "45f7c44608eef8683b001af4318fd6deda1c4b5b",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

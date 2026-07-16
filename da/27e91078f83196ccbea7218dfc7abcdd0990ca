@@ -1,0 +1,46 @@
+internal/proxy/gemini.go
+  s_6497efcbf5fbe7::t_49f4fdb9f3206f 182
+internal/translate/strip_footer_test.go
+  s_6497efcbf5fbe7::t_c87a9d29bcd670 17,19
+internal/proxy/router_feedback_proxy_test.go
+  s_6497efcbf5fbe7::t_79ba99ecbddf1f 135-192
+internal/proxy/feedback_footer_internal_test.go
+  s_6497efcbf5fbe7::t_7e9d846bd1dff3 1-32
+internal/proxy/router_feedback.go
+  s_6497efcbf5fbe7::t_7525320bdfacb9 105-106
+  s_6497efcbf5fbe7::t_8633204e772880 64-67,70,72
+  s_6497efcbf5fbe7::t_47a0f9515f4bce 35-43
+  s_6497efcbf5fbe7::t_821f48d9207296 122,132,139,146-152,154-178,180
+  s_6497efcbf5fbe7::t_babc89e48293b5 153
+internal/proxy/client_identity.go
+  s_6497efcbf5fbe7::t_2e13de9d33e015 154
+internal/proxy/feedback.go
+  s_6497efcbf5fbe7::t_82031b58dc4664 178-205,208
+internal/proxy/service.go
+  s_6497efcbf5fbe7::t_e34a22d4000600 3160
+  s_6497efcbf5fbe7::t_15704de8010677 1684
+internal/translate/router_feedback.go
+  s_6497efcbf5fbe7::t_b7fa539f8b0bda 60-61,64-65,72-122
+  s_6497efcbf5fbe7::t_cae9658a595a5d 9-14,18-24
+internal/translate/router_feedback_test.go
+  s_6497efcbf5fbe7::t_57395c3cd36b71 17,29-67
+  s_6497efcbf5fbe7::t_39095793785845 146
+internal/translate/envelope.go
+  s_6497efcbf5fbe7::t_3228167d8d185e 774,778-780
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "da27e91078f83196ccbea7218dfc7abcdd0990ca",
+  "prompts": {},
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

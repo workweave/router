@@ -1,0 +1,34 @@
+internal/router/cluster/scorer.go
+  s_5689dedb9a5821::t_667eed8d9fff74 241,247-248,250-253,258-261,264-266,315,320
+  s_5689dedb9a5821::t_5e7351cf7c76aa 197-209,211-214,216
+  s_5689dedb9a5821::t_cd64065665ea8b 196,210,217-218
+  s_5689dedb9a5821::t_27af070e3fb21a 550-555,560,562
+  s_5689dedb9a5821::t_ee0bbaf9ff8432 221-230,232-240,242-246,254-257,263,267,269-272,276-277,279-282,284-294,296,299-305,312-314,316-319,321-322
+  s_5689dedb9a5821::t_6e8c35f4bf4fae 59-67
+internal/router/cluster/distribution.go
+  s_5689dedb9a5821::t_32b53b3a20201b 57
+  s_5689dedb9a5821::t_0abff55dad02cf 89,91
+internal/router/cluster/distribution_test.go
+  s_5689dedb9a5821::t_a3a649cb5f8a49 129-133,135-148,151-154,171-182
+  s_5689dedb9a5821::t_26c58eb3e59bd3 14-22,26-32,34-38,42-47,51-61
+  s_5689dedb9a5821::t_0a1b9d343e3c8f 4,6-7
+  s_5689dedb9a5821::t_cbda1560036032 128,134,149-150,155-170,183
+internal/router/router.go
+  s_5689dedb9a5821::t_4bc2836fecf6f1 13-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "87bd109627713789944e39930bd2dc66516242ea",
+  "prompts": {},
+  "sessions": {
+    "s_5689dedb9a5821": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a3cd192-0f8f-4e28-a4ab-2158686a6567",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

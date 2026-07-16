@@ -1,0 +1,30 @@
+internal/translate/anthropic_footer_test.go
+  s_97644c7dcc2f43::t_4dae9ff0ce0c5a 16
+internal/translate/strip_footer_test.go
+  s_97644c7dcc2f43::t_7ffd4474002b61 20
+internal/proxy/feedback.go
+  s_97644c7dcc2f43::t_f2d44bc1d160cf 197
+internal/translate/router_feedback_test.go
+  s_97644c7dcc2f43::t_0ccde84ff3c2ef 62-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "8b5ea17ededbadcea77ba3e77ca2567ec0be3913",
+  "prompts": {},
+  "humans": {
+    "h_66ba6bc4d87222": {
+      "author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_97644c7dcc2f43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d365b224-f1b6-4569-906c-ed98c73ef1a9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+internal/proxy/service.go
+  s_cba2e3935ad3ce::t_8de76048b83a9e 1980-2022
+  s_cba2e3935ad3ce::t_fbefdb07917869 1569-1581,1621-1624,1626
+  s_cba2e3935ad3ce::t_fcb35a3c160734 2662
+  s_cba2e3935ad3ce::t_c76d66f36f2740 1625
+db/migrations/0019_telemetry-response-outcome.down.sql
+  s_cba2e3935ad3ce::t_c36fa49c305145 1-13
+db/migrations/0019_telemetry-response-outcome.up.sql
+  s_cba2e3935ad3ce::t_95cc0a207cab9b 1-24
+db/queries/model_router_request_telemetry.sql
+  s_cba2e3935ad3ce::t_0bbd9c72d4bc78 52-58
+  s_cba2e3935ad3ce::t_c47d7312567898 98-104
+internal/proxy/telemetry.go
+  s_cba2e3935ad3ce::t_3332267c4fcc39 66-72
+internal/postgres/telemetry.go
+  s_cba2e3935ad3ce::t_7166d7d0ca4a92 93-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5a1b6fa8588fed6352769a86f5ed20a532d20467",
+  "prompts": {},
+  "sessions": {
+    "s_cba2e3935ad3ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34254bee-0fbf-4eaa-ba63-a0d1a16f188b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+internal/auth/service_test.go
+  s_3fd5826932f9db::t_b7bda45235317b 146-148
+  s_3fd5826932f9db::t_322241fa3fdc25 729-745
+  s_3fd5826932f9db::t_d8b3a215ff1dc5 105-108
+internal/auth/errors.go
+  s_3fd5826932f9db::t_cbc8e7ce735d2c 14-19
+internal/postgres/repository.go
+  s_3fd5826932f9db::t_ee092a8c0176c9 165,171-177
+  s_3fd5826932f9db::t_705c7f79895491 125,130-136
+  s_3fd5826932f9db::t_d456c26ff435d1 186,191-197
+  s_3fd5826932f9db::t_ce7cfe189112a7 145,150-156
+  s_3fd5826932f9db::t_8678a3882b3185 102,107-113
+db/queries/model_router_installations.sql
+  s_3fd5826932f9db::t_d7c9ad9fbc077f 40,51,62,74,88
+internal/sqlc/model_router_installations.sql.go
+  s_3fd5826932f9db::t_69aa0025de2c06 186,211-216,219,244-249,252,277-282,285,312-317,320,349-350,356-359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "11c89c1719511fbe645b2f629968bbd972b06448",
+  "prompts": {},
+  "sessions": {
+    "s_3fd5826932f9db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a709cb25-412c-478c-abd3-0049ca661a44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

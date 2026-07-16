@@ -1,0 +1,56 @@
+db/migrations/0026_installation-preferred-models.down.sql
+  s_5a2c049b60d592::t_c933bb5a2b8797 1-6
+internal/auth/installation.go
+  s_5a2c049b60d592::t_1c4b05098043d7 24-29
+internal/proxy/gemini.go
+  s_5a2c049b60d592::t_9f20b25d6ce1b6 97
+internal/router/cluster/distribution.go
+  s_5a2c049b60d592::t_6356cca7e22558 110
+internal/router/cluster/distribution_test.go
+  s_5a2c049b60d592::t_17897100ad7d8b 203
+internal/sqlc/model_router_api_keys.sql.go
+  s_5a2c049b60d592::t_d1728c456dc60d 95,114,145
+internal/server/middleware/auth.go
+  s_5a2c049b60d592::t_bf4ec288b51643 125-127
+internal/postgres/converters.go
+  s_5a2c049b60d592::t_9eb4f9619dbb40 22-25
+  s_5a2c049b60d592::t_425548c0c6c6d3 36
+internal/router/cluster/scorer.go
+  s_5a2c049b60d592::t_7ec97392889adb 1168-1176
+  s_5a2c049b60d592::t_a4ccdf0a664583 742
+  s_5a2c049b60d592::t_f3623385adec26 625-650
+  s_5a2c049b60d592::t_de52c1165bf3a7 284
+  s_5a2c049b60d592::t_7ba757b9430883 959-983
+  s_5a2c049b60d592::t_8112717455726d 989
+internal/sqlc/model_router_installations.sql.go
+  s_5a2c049b60d592::t_d1728c456dc60d 25,46,61,67,81,100,106,115,140
+internal/sqlc/models.go
+  s_5a2c049b60d592::t_d1728c456dc60d 79
+internal/router/cluster/scorer_test.go
+  s_5a2c049b60d592::t_069f2b2014bbc3 261-303
+db/migrations/0026_installation-preferred-models.up.sql
+  s_5a2c049b60d592::t_a17e4b81883608 1-13
+internal/proxy/service.go
+  s_5a2c049b60d592::t_d3fc1fd7d4efc5 441-460
+  s_5a2c049b60d592::t_a0c0ee6ee4a78c 3105
+  s_5a2c049b60d592::t_61243985157c7d 254-258
+  s_5a2c049b60d592::t_1e735eb3a6d8f4 1541
+internal/router/router.go
+  s_5a2c049b60d592::t_e21d0ef673c012 43-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "d0cf00383bfa273dfb309af5d8c08613ac571bac",
+  "prompts": {},
+  "sessions": {
+    "s_5a2c049b60d592": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b93a0f3-4f5b-4377-9a7a-91c9621d93c9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

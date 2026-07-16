@@ -1,0 +1,45 @@
+internal/proxy/service.go
+  s_035d3d44682683::t_25ed9eb11e42e9 835-839
+  s_035d3d44682683::t_5316b665aa4e56 64-71
+  s_035d3d44682683::t_e82676484ceba7 850
+  s_035d3d44682683::t_2be7d023986646 1832-1838,1840-1851
+  s_035d3d44682683::t_76d2a450e8cd6a 887-894
+  s_035d3d44682683::t_54c4a8cceb1314 876
+internal/router/planner/policy_test.go
+  s_035d3d44682683::t_88920f7fe146fa 130-181
+internal/proxy/turnloop_test.go
+  s_035d3d44682683::t_c498021e238e41 494-626
+internal/router/planner/policy.go
+  s_035d3d44682683::t_1bba414ada45ee 70-77
+  s_035d3d44682683::t_a5aee254ab297e 197-203
+  s_035d3d44682683::t_a95d3eb310090a 121
+internal/proxy/turnloop.go
+  s_035d3d44682683::t_960315edb1027a 110-117
+  s_035d3d44682683::t_9cc7a66be48860 734-748
+  s_035d3d44682683::t_f37b7cb5b74573 262-270,274,276-286
+  s_035d3d44682683::t_13feca1657c403 271-273,287-288
+  s_035d3d44682683::t_4af0fbda314919 306
+  s_035d3d44682683::t_6e289abea0099e 691-694
+  s_035d3d44682683::t_6db5e5f2e0fad3 255-260,275
+  s_035d3d44682683::t_ad57165853585e 261
+cmd/router/main.go
+  s_035d3d44682683::t_4e6011ded8abdf 764
+  s_035d3d44682683::t_db91c0a6ed7091 648,650-653
+  s_035d3d44682683::t_87ab3c27d0ac95 748
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "ab34423d18764c2397101ffb1268d3b03b087f89",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

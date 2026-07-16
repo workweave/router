@@ -1,0 +1,22 @@
+internal/router/cluster/artifacts.go
+  s_c4ecee41717be0::t_23b2e455a9ebb4 295-301,304,308,313,317,325,331-336
+  s_c4ecee41717be0::t_e915754ee1a34f 338
+  s_c4ecee41717be0::t_de6104bc4ca4f8 435,437
+  s_c4ecee41717be0::t_e0738164659253 337,339
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "df5464ff4c01654eaff9b359df4621b79721641d",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
