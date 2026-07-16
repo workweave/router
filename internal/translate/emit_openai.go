@@ -19,11 +19,8 @@ import (
 // call_id) — longer ids get a 400 ("string too long").
 const maxToolCallIDLen = 64
 
-// resolveReasoningEffortFor picks the user-forced level for Chat Completions
-// in priority order: ForceEffort (the user override from the new header /
-// pin suffix), ForceReasoningEffort (escalate-on-failure legacy seam), and
-// then "" (no override; let the request's own reasoning_effort stand).
-// Same priority chain the Responses path uses inline.
+// resolveReasoningEffortFor returns the effort to write on chat/completions:
+// ForceEffort wins over ForceReasoningEffort; both empty → "".
 func resolveReasoningEffortFor(opts EmitOptions) string {
 	if opts.ForceEffort != "" {
 		return ResolveForceEffort(opts.Capabilities, opts.ForceEffort)

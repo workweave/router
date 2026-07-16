@@ -53,14 +53,10 @@ type EmitOptions struct {
 	// Set by the proxy's escalate-on-failure policy: gpt-5.x starts "low", goes
 	// "high" after a failed/no-progress turn; gemini stays "low" (effort-immune).
 	ForceReasoningEffort string
-	// ForceEffort, when non-empty, is a USER-facing effort override (from
-	// x-weave-effort header or :level suffix on /force-model). Wins over
-	// ForceReasoningEffort when both are set, and applies across every
-	// provider ("low"/"medium"/"high"/"max"/"xhigh"). Per-model caps still
-	// apply downstream (xhigh → max on non-CapXhighEffort targets, gemini
-	// "xhigh" → "high", etc.) — see forceEffortFor. Empty = no user override.
+	// ForceEffort, when non-empty, is the user-requested effort level
+	// (x-weave-effort header / :level suffix). Wins over ForceReasoningEffort;
+	// per-model caps applied by ResolveForceEffort.
 	ForceEffort string
-	// EnableExtendedContext injects the context-1m-2025-08-07 beta so
 	// CapExtendedContext targets (Opus 4.6+, Sonnet 4.6) get a 1M window
 	// instead of 200K, avoiding a 400 "prompt is too long" on large requests.
 	// No-op below 200K input. deriveAnthropicHeaders gates on CapExtendedContext.
@@ -474,14 +470,8 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		}
 	}
 
-	// User-forced effort (x-weave-effort header / :level suffix on /force-model)
-	// wins last: the request-derived value, the budget-derived OutputConfigEffort
-	// above, AND any inbound output_config.effort / effort field all lose to the
-	// explicit user knob. Per-model cap (xhigh → max on non-CapXhighEffort)
-	// already happens upstream in resolveForceEffort, so this is always a
-	// wire-valid Anthropic value. Anthropic variants ship two sibling effort
-	// fields (`effort` and `output_config.effort`); we write both so a request
-	// that arrived setting one still ends up serving at the user-forced level.
+		// ForceOutputConfigEffort wins over any request-derived or inbound
+	// effort; write both sibling fields so either form is overridden.
 	if ov.ForceOutputConfigEffort != "" {
 		out, err = sjson.SetBytes(out, "output_config.effort", ov.ForceOutputConfigEffort)
 		if err != nil {
@@ -1010,12 +1000,8 @@ func IsValidEffort(level string) bool {
 	}
 }
 
-// ResolveForceEffort applies the per-model cap (xhigh → max on non-Opus-4-7+
-// Anthropic, gemini's "xhigh" → "high") and returns the canonical wire-format
-// string. Useful from contexts that don't have an EmitOptions handy (the
-// proxy pre-emptively copies the user value into both ForceEffort and
-// ForceReasoningEffort so all three downstream surfaces honor it).
-// Empty input → "" so callers can no-op without further checks.
+// ResolveForceEffort canonicalizes level and applies the per-model cap
+// (xhigh → max on non-CapXhighEffort). Empty input → "".
 func ResolveForceEffort(caps router.ModelSpec, level string) string {
 	if level == "" {
 		return ""

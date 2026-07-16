@@ -19,11 +19,8 @@ import (
 // headers, so casing doesn't matter at the wire.
 const ForceEffortOverrideHeader = "x-weave-effort"
 
-// WithForceEffortOverride parses the x-weave-effort request header and
-// stashes it on the request context as router.Overrides.ForceEffort. Probe
-// validators (translate.IsValidEffort) gate the value before storing so a
-// typo returns 400 with a format-aware envelope instead of routing garbage
-// to a provider that 400s on an unknown effort level.
+// WithForceEffortOverride parses x-weave-effort and stashes the canonical
+// level on the request context. Invalid values abort with 400.
 func WithForceEffortOverride() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := strings.TrimSpace(c.GetHeader(ForceEffortOverrideHeader))

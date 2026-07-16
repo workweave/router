@@ -21,9 +21,9 @@ type Overrides struct {
 	OutputCostRatio      *float64
 	ExpectedOutputTokens *int
 	PerModelVerbosity    *bool
-	// ForceEffort, when non-empty, overrides the request-derived reasoning
-	// effort for the served model. Wins over Service.effortEscalation's
-	// Wins over effortEscalation; per-model caps (xhigh→max on non-CapXhighEffort) still apply.
+	// ForceEffort, when non-empty, is the user-requested effort level
+	// (x-weave-effort header / :level suffix). Wins over effortEscalation;
+	// per-model caps (xhigh→max on non-CapXhighEffort) still apply.
 	ForceEffort string
 }
 
