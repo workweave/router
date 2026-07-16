@@ -121,6 +121,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		metrics.GET("/metrics/summary", admin.MetricsSummaryHandler(proxySvc))
 		metrics.GET("/metrics/timeseries", admin.MetricsTimeseriesHandler(proxySvc))
 		metrics.GET("/metrics/details", admin.MetricsDetailsHandler(proxySvc))
+		metrics.GET("/metrics/model-breakdown", admin.MetricsModelBreakdownHandler(proxySvc))
 
 		// Mutations: admin cookie REQUIRED. rk_ tokens are rejected so a leaked data-plane key can't mint fresh router keys or rotate provider credentials.
 		mgmt := engine.Group("/admin/v1", middleware.WithTimeout(adminTimeout), middleware.WithAdminOnly(authSvc))

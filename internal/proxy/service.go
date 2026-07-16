@@ -1339,6 +1339,23 @@ func (s *Service) MetricsTimeseriesAll(ctx context.Context, from, to time.Time, 
 	return s.telemetry.GetTelemetryTimeseriesAll(ctx, from, to, granularity)
 }
 
+// MetricsModelBreakdown returns per-bucket totals grouped by decision model
+// for the dashboard's per-model usage and spend charts.
+func (s *Service) MetricsModelBreakdown(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryModelBucket, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryModelBreakdown(ctx, installationID, from, to, granularity)
+}
+
+// MetricsModelBreakdownAll returns per-model buckets across every installation. Admin-only.
+func (s *Service) MetricsModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error) {
+	if s.telemetry == nil {
+		return nil, nil
+	}
+	return s.telemetry.GetTelemetryModelBreakdownAll(ctx, from, to, granularity)
+}
+
 // MetricsRows returns individual telemetry rows for an installation in [from, to).
 func (s *Service) MetricsRows(ctx context.Context, installationID string, from, to time.Time, limit int32) ([]TelemetryRow, error) {
 	if s.telemetry == nil {
