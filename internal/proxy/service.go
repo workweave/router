@@ -4256,6 +4256,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
+	// A caller whose Claude subscription has bound its plan window can't serve
+	// another turn on it (429 until reset). Suppress the spent token so
+	// resolution falls through to the deployment/BYOK key — same as ProxyMessages.
+	if s.claudeSubscriptionExhausted(ctx, r.Header) {
+		ctx = withSuppressedClaudeSubscription(ctx)
+	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	// See ProxyMessages for the preludeBuffer rationale — wrap unconditionally
@@ -4264,12 +4270,13 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
 
 	// Subscription-only mode: the turn must serve on the caller's own
-	// subscription (Codex/Claude OAuth). If routing didn't resolve to a
-	// subscription-served credential, refuse (402) rather than dispatch to a
-	// paid model against an already-negative balance. When it did, pin dispatch
-	// to that single binding so failover can't reroute onto a paid provider.
+	// subscription (Codex/Claude OAuth). Refuse (402) when the turn wouldn't
+	// run on the sub — paid route, or the Claude subscription is
+	// observed-exhausted (a doomed 429). When it did resolve to a
+	// subscription credential, pin dispatch to that single binding so failover
+	// can't reroute onto a paid provider.
 	if billing.SubscriptionOnlyFromContext(ctx) {
-		if !servedOnSubscription(ctx) {
+		if !servedOnSubscription(ctx) || s.anthropicSubscriptionObservedExhausted(ctx, r.Header) {
 			log.Info("Subscription-only request cannot be served on the subscription; refusing",
 				"requested_model", feats.Model, "external_id", externalID, "decision_provider", decision.Provider)
 			return ErrCreditsExhaustedSubscriptionUnavailable
