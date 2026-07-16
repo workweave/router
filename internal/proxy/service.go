@@ -4273,6 +4273,22 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 
+	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		// Always surface the depleted-credits warning (not gated by the
+		// routing-marker opt-out): a billing state change the caller must see.
+		marker = subscriptionOnlyWarningMarkerCodex
+	}
+
+	// When policy debug is enabled (x-weave-router-debug header), inject the
+	// verbose routing marker into the Responses badge. Codex renders the first
+	// assistant text delta reliably; this is the equivalent of the verbose
+	// in-band chat-completions marker that Claude Code sees.
+	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
+	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !codexPassthrough && debugEnabled {
+		rw.SetBadgeText(marker)
+	}
+
 	// Responses entry point delegates the eager response.created emit to
 	// this layer because it has the post-routing binding count. Fire only
 	// when single-binding so multi-binding requests stay failover-safe
@@ -4304,12 +4320,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		sink = captureW
 	}
 
-	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
-	if billing.SubscriptionOnlyFromContext(ctx) {
-		// Always surface the depleted-credits warning (not gated by the
-		// routing-marker opt-out): a billing state change the caller must see.
-		marker = subscriptionOnlyWarningMarkerCodex
-	}
 	if codexPassthrough {
 		// The client receives raw Responses SSE from the Codex backend; a
 		// chat-completions routing-marker chunk would corrupt that stream.

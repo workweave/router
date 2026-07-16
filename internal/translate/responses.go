@@ -76,6 +76,7 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	}
 	out["messages"] = messages
 
+	hasTools := false
 	if tools := root.Get("tools"); tools.IsArray() {
 		converted := make([]map[string]any, 0, len(tools.Array()))
 		for _, t := range tools.Array() {
@@ -110,10 +111,11 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 		}
 		if len(converted) > 0 {
 			out["tools"] = converted
+			hasTools = true
 		}
 	}
 
-	if tc := root.Get("tool_choice"); tc.Exists() {
+	if tc := root.Get("tool_choice"); tc.Exists() && hasTools {
 		out["tool_choice"] = json.RawMessage(tc.Raw)
 	}
 	if pt := root.Get("parallel_tool_calls"); pt.Exists() {
@@ -208,7 +210,7 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 // the first assistant text delta. Stripped on ingress so it doesn't accumulate
 // in history (defeats prompt-cache reuse) or leak router-injected content
 // upstream.
-var responsesBadgePattern = regexp.MustCompile(`(?im)\A\*\*WEAVE ROUTER\*\* — [^\n]*\n\n`)
+var responsesBadgePattern = regexp.MustCompile(`(?is)\A(?:\*\*WEAVE ROUTER\*\* — .*?\n\n|✦ \*\*WEAVE ROUTER\*\* → .*?\n\n)`)
 
 // responsesContentToChatContent flattens a content array. For assistant
 // messages we may also extract tool-call shells if a client embeds them.
@@ -280,6 +282,7 @@ type ResponsesWriter struct {
 	headersEmitted   bool
 	completedEmitted bool
 	badgePrepended   bool
+	badgeText        string
 	textItem         *responsesTextItem
 	toolItems        map[int]*responsesToolItem
 	finishReason     string
@@ -341,6 +344,16 @@ func (t *ResponsesWriter) WrapInner(fn func(http.ResponseWriter) http.ResponseWr
 	t.inner = wrapped
 	t.flusher, _ = wrapped.(http.Flusher)
 	t.bw = bufio.NewWriterSize(wrapped, 8192)
+}
+
+// SetBadgeText overrides the default routed-model badge prepended to the first
+// assistant text delta. Empty text keeps the model-derived default.
+func (t *ResponsesWriter) SetBadgeText(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	t.badgeText = text + "\n\n"
 }
 
 func (t *ResponsesWriter) Header() http.Header { return t.inner.Header() }
@@ -665,6 +678,9 @@ func (t *ResponsesWriter) nextOutputIndex() int {
 // delta, e.g. "**Weave Router** — <routed> ← <requested>" (arrow only when
 // swapped). Returns "" if no routed model is known yet.
 func (t *ResponsesWriter) computeBadgeText() string {
+	if t.badgeText != "" {
+		return t.badgeText
+	}
 	if t.model == "" {
 		return ""
 	}

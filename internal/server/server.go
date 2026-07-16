@@ -191,7 +191,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	)
 	passthroughGroup.POST("/v1/messages/count_tokens", anthropicapi.PassthroughHandler(proxySvc))
-	passthroughGroup.GET("/v1/models", anthropicapi.PassthroughHandler(proxySvc))
+	passthroughGroup.GET("/v1/models", openaiapi.ModelsHandler(anthropicapi.PassthroughHandler(proxySvc)))
 	passthroughGroup.GET("/v1/models/:model", anthropicapi.PassthroughHandler(proxySvc))
 
 	routeMiddleware := []gin.HandlerFunc{
