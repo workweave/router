@@ -34,6 +34,7 @@ func NewTelemetryRepo(tx sqlc.DBTX) *TelemetryRepo {
 }
 
 var _ proxy.TelemetryRepository = (*TelemetryRepo)(nil)
+var _ proxy.UsageReconciliationRepository = (*TelemetryRepo)(nil)
 var _ proxy.PolicyShadowStore = (*TelemetryRepo)(nil)
 
 func (r *TelemetryRepo) InsertPolicyShadowDecision(ctx context.Context, p proxy.PolicyShadowDecision) error {
@@ -137,10 +138,39 @@ func (r *TelemetryRepo) InsertRequestTelemetry(ctx context.Context, p proxy.Inse
 		FreshCandidateScores:   p.FreshCandidateScores,
 		PinAgeSec:              p.PinAgeSec,
 		ToolResultBytes:        p.ToolResultBytes,
+		UsageAuthorityStatus:   stringPtrOrNil(p.UsageAuthorityStatus),
+		UsageDetails:           p.UsageDetails,
 		CredentialKeyPrefix:    stringPtrOrNil(p.CredentialKeyPrefix),
 		CredentialKeySuffix:    stringPtrOrNil(p.CredentialKeySuffix),
 		CredentialSource:       stringPtrOrNil(p.CredentialSource),
 	})
+}
+
+// GetPendingUsageTelemetry returns requests whose provider usage is not
+// authoritative and therefore require manual or automated reconciliation.
+func (r *TelemetryRepo) GetPendingUsageTelemetry(ctx context.Context, from, to time.Time, limit int32) ([]proxy.PendingUsageTelemetry, error) {
+	q := sqlc.New(r.tx)
+	rows, err := q.GetPendingUsageTelemetry(ctx, sqlc.GetPendingUsageTelemetryParams{
+		FromTime:  pgtype.Timestamptz{Time: from, Valid: true},
+		ToTime:    pgtype.Timestamptz{Time: to, Valid: true},
+		LimitRows: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]proxy.PendingUsageTelemetry, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, proxy.PendingUsageTelemetry{
+			InstallationID:       row.InstallationID.String(),
+			RequestID:            row.RequestID,
+			DecisionModel:        derefString(row.DecisionModel),
+			DecisionProvider:     derefString(row.DecisionProvider),
+			Timestamp:            row.Timestamp.Time,
+			UsageAuthorityStatus: derefString(row.UsageAuthorityStatus),
+			UsageDetails:         row.UsageDetails,
+		})
+	}
+	return result, nil
 }
 
 var _ proxy.LoopEscalationStore = (*TelemetryRepo)(nil)

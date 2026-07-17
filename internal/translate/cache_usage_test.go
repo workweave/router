@@ -18,11 +18,32 @@ type fakeUsageSink struct {
 	output        int
 	cacheCreation int
 	cacheRead     int
+	usageValues   translate.UsageValues
 }
 
 func (f *fakeUsageSink) RecordUsage(input, output int) {
 	f.input = input
 	f.output = output
+}
+
+func (f *fakeUsageSink) RecordUsageValues(values translate.UsageValues) {
+	f.usageValues = values
+	if values.InputTokens != nil {
+		f.input = *values.InputTokens
+	}
+	if values.OutputTokens != nil {
+		f.output = *values.OutputTokens
+	}
+	if values.CacheCreationInputTokens != nil {
+		f.cacheCreation = *values.CacheCreationInputTokens
+	}
+	if values.CacheReadInputTokens != nil {
+		f.cacheRead = *values.CacheReadInputTokens
+	}
+}
+
+func (f *fakeUsageSink) RecordUsageObservation(observation translate.UsageObservation) {
+	f.RecordUsageValues(observation.Values)
 }
 
 func (f *fakeUsageSink) RecordCacheUsage(creation, read int) {
@@ -218,4 +239,25 @@ func TestSSETranslator_SinkAccumulatesInputAndOutputAcrossStream(t *testing.T) {
 	}
 
 	assert.Equal(t, 17, sink.output, "sink must record output tokens from message_delta")
+}
+
+func TestSSETranslator_SinkPreservesExplicitTerminalZeroOutput(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &fakeUsageSink{}
+	translator := translate.NewSSETranslator(rec, "claude-haiku-4-5", sink)
+
+	translator.Header().Set("Content-Type", "text/event-stream")
+	translator.WriteHeader(http.StatusOK)
+
+	events := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5\",\"usage\":{\"input_tokens\":42,\"output_tokens\":0}}}\n\n",
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n",
+	}
+	for _, event := range events {
+		_, err := translator.Write([]byte(event))
+		require.NoError(t, err)
+	}
+
+	require.NotNil(t, sink.usageValues.OutputTokens)
+	assert.Zero(t, *sink.usageValues.OutputTokens)
 }

@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Translation fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seeded-corpus:
+    name: Seeded translation corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Run deterministic translation and conformance seeds
+        run: go test ./internal/translate/... ./internal/proxy/...
+
+  extended-usage-fuzz:
+    name: Extended usage reducer fuzz
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Fuzz presence-aware usage reduction
+        run: go test -run=^$ -fuzz=FuzzUsageReducer -fuzztime=60s ./internal/translate

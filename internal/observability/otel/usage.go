@@ -8,14 +8,12 @@ import (
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/sse"
+	"workweave/router/internal/translate"
 )
 
 // UsageSink receives extracted token usage. Translators call it directly when
 // they've already parsed usage from an event, skipping a separate parse pass.
-type UsageSink interface {
-	RecordUsage(inputTokens, outputTokens int)
-	RecordCacheUsage(cacheCreationTokens, cacheReadTokens int)
-}
+type UsageSink = translate.UsageSink
 
 var (
 	_ http.ResponseWriter = (*UsageExtractor)(nil)
@@ -26,24 +24,20 @@ var (
 // UsageExtractor wraps an http.ResponseWriter and sniffs token usage (SSE or
 // JSON) as bytes flow through. Only the unconsumed tail is retained between writes.
 type UsageExtractor struct {
-	inner    http.ResponseWriter
-	provider string
-
-	input         int
-	output        int
-	cacheCreation int
-	cacheRead     int
+	inner  http.ResponseWriter
+	source providers.UsageSource
+	usage  translate.UsageReducer
 
 	leftover []byte
 }
 
-// NewUsageExtractor creates a usage-extracting writer for the given provider's
-// response format. If inner is nil, only RecordUsage/Tokens are valid — the
+// NewUsageExtractor creates a usage-extracting writer for the given upstream
+// wire source. If inner is nil, only RecordUsage/Tokens are valid — the
 // ResponseWriter methods must not be called.
-func NewUsageExtractor(inner http.ResponseWriter, provider string) *UsageExtractor {
+func NewUsageExtractor(inner http.ResponseWriter, source providers.UsageSource) *UsageExtractor {
 	return &UsageExtractor{
-		inner:    inner,
-		provider: provider,
+		inner:  inner,
+		source: source,
 	}
 }
 
@@ -97,40 +91,60 @@ func (u *UsageExtractor) ArmOutputProgress(mark func()) (armed bool) {
 // RecordUsage sets token counts directly, bypassing SSE parsing. Called by
 // translators that have already parsed usage from the upstream event stream.
 func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
-	if inputTokens > 0 {
-		u.input = inputTokens
-	}
-	if outputTokens > 0 {
-		u.output = outputTokens
-	}
+	u.RecordUsageObservation(translate.UsageObservation{
+		Phase: translate.UsagePhaseTerminal,
+		Values: translate.UsageValues{
+			InputTokens:  positiveUsageInt(inputTokens),
+			OutputTokens: positiveUsageInt(outputTokens),
+		},
+	})
+}
+
+// RecordUsageValues records a complete usage report while retaining explicit
+// zero counters as distinct from fields omitted by incremental translators.
+func (u *UsageExtractor) RecordUsageValues(values translate.UsageValues) {
+	u.RecordUsageObservation(translate.UsageObservation{
+		Phase:  translate.UsagePhaseTerminal,
+		Values: values,
+	})
+}
+
+// RecordUsageObservation records usage with its source-stream phase preserved.
+func (u *UsageExtractor) RecordUsageObservation(observation translate.UsageObservation) {
+	u.usage.Observe(observation)
 }
 
 // RecordCacheUsage sets cache token counts directly. OpenAI has no cache-creation
 // concept, so callers pass 0 for cacheCreationTokens.
 func (u *UsageExtractor) RecordCacheUsage(cacheCreationTokens, cacheReadTokens int) {
-	if cacheCreationTokens > 0 {
-		u.cacheCreation = cacheCreationTokens
-	}
-	if cacheReadTokens > 0 {
-		u.cacheRead = cacheReadTokens
-	}
+	u.usage.Observe(translate.UsageObservation{
+		Phase: translate.UsagePhaseTerminal,
+		Values: translate.UsageValues{
+			CacheCreationInputTokens: positiveUsageInt(cacheCreationTokens),
+			CacheReadInputTokens:     positiveUsageInt(cacheReadTokens),
+		},
+	})
 }
 
 // Tokens returns the extracted input and output token counts.
 func (u *UsageExtractor) Tokens() (input, output int) {
-	if u == nil {
-		return 0, 0
-	}
-	return u.input, u.output
+	snapshot := u.Usage()
+	return usageValue(snapshot.InputTokens), usageValue(snapshot.OutputTokens)
 }
 
 // CacheTokens returns the extracted cache creation/read counts. Zero means the
 // provider doesn't emit cache tokens (Google) or there were no cache hits.
 func (u *UsageExtractor) CacheTokens() (creation, read int) {
+	snapshot := u.Usage()
+	return usageValue(snapshot.CacheCreationInputTokens), usageValue(snapshot.CacheReadInputTokens)
+}
+
+// Usage returns the presence-aware, provider-authoritative usage state.
+func (u *UsageExtractor) Usage() translate.UsageSnapshot {
 	if u == nil {
-		return 0, 0
+		return translate.UsageSnapshot{Authority: translate.UsageAuthorityMissing}
 	}
-	return u.cacheCreation, u.cacheRead
+	return u.usage.Snapshot()
 }
 
 // scanBuffer splits buffered data on SSE event boundaries and extracts token
@@ -160,11 +174,11 @@ func (u *UsageExtractor) scanBuffer() {
 }
 
 func (u *UsageExtractor) extractFromSSEEvent(eventType []byte, data []byte) {
-	switch u.provider {
-	case providers.ProviderAnthropic:
+	switch u.source.Family {
+	case providers.FamilyAnthropic:
 		u.extractAnthropicSSE(eventType, data)
-	case providers.ProviderOpenAI, providers.ProviderGoogle:
-		u.extractOpenAISSE(data)
+	case providers.FamilyOpenAICompat, providers.FamilyGemini:
+		u.extractOpenAISSE(eventType, data)
 	}
 }
 
@@ -174,47 +188,35 @@ func (u *UsageExtractor) extractAnthropicSSE(eventType []byte, data []byte) {
 		return
 	}
 
-	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(data, providers.ProviderAnthropic)
+	values, found := extractUsageGJSON(data, u.source)
 	if !found {
 		return
 	}
 
 	if bytes.Equal(eventType, []byte("message_start")) {
-		if input > 0 {
-			u.input = input
-		}
-		if cacheCreation > 0 {
-			u.cacheCreation = cacheCreation
-		}
-		if cacheRead > 0 {
-			u.cacheRead = cacheRead
-		}
+		u.usage.Observe(translate.UsageObservation{Phase: translate.UsagePhaseStart, Values: values, Placeholder: true})
 	}
-	if bytes.Equal(eventType, []byte("message_delta")) && output > 0 {
-		u.output = output
+	if bytes.Equal(eventType, []byte("message_delta")) {
+		u.usage.Observe(translate.UsageObservation{Phase: translate.UsagePhaseTerminal, Values: values})
 	}
 }
 
 // Final chunk with stream_options.include_usage=true carries the counts.
-func (u *UsageExtractor) extractOpenAISSE(data []byte) {
+func (u *UsageExtractor) extractOpenAISSE(eventType []byte, data []byte) {
 	trimmed := bytes.TrimSpace(data)
 	if bytes.Equal(trimmed, []byte("[DONE]")) {
 		return
 	}
 
-	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(trimmed, u.provider)
+	values, found := extractUsageGJSON(trimmed, u.source)
 	if !found {
 		return
 	}
-
-	u.input = input
-	u.output = output
-	if cacheCreation > 0 {
-		u.cacheCreation = cacheCreation
+	phase := translate.UsagePhaseTerminal
+	if bytes.Equal(eventType, []byte("response.created")) {
+		phase = translate.UsagePhaseStart
 	}
-	if cacheRead > 0 {
-		u.cacheRead = cacheRead
-	}
+	u.usage.Observe(translate.UsageObservation{Phase: phase, Values: values, Placeholder: phase == translate.UsagePhaseStart})
 }
 
 func (u *UsageExtractor) tryExtractFromJSON() {
@@ -222,73 +224,102 @@ func (u *UsageExtractor) tryExtractFromJSON() {
 		return
 	}
 
-	input, output, cacheCreation, cacheRead, found := extractUsageGJSON(u.leftover, u.provider)
+	values, found := extractUsageGJSON(u.leftover, u.source)
 	if !found {
 		return
 	}
-
-	if input > 0 {
-		u.input = input
-	}
-	if output > 0 {
-		u.output = output
-	}
-	if cacheCreation > 0 {
-		u.cacheCreation = cacheCreation
-	}
-	if cacheRead > 0 {
-		u.cacheRead = cacheRead
-	}
+	u.usage.Observe(translate.UsageObservation{Phase: translate.UsagePhaseTerminal, Values: values})
 }
 
 // extractUsageGJSON probes usage fields via gjson (no json.Unmarshal/map allocs).
 // OpenAI has no cache-creation field; cacheRead maps from cached_tokens.
 // Google's native :generateContent uses usageMetadata; its OpenAI-compat surface
 // uses the OpenAI shape instead.
-func extractUsageGJSON(data []byte, provider string) (input, output, cacheCreation, cacheRead int, found bool) {
-	if provider == providers.ProviderGoogle {
+func extractUsageGJSON(data []byte, source providers.UsageSource) (values translate.UsageValues, found bool) {
+	if source.Family == providers.FamilyGemini {
 		if meta := gjson.GetBytes(data, "usageMetadata"); meta.Exists() {
-			input = int(meta.Get("promptTokenCount").Int())
-			output = int(meta.Get("candidatesTokenCount").Int())
-			cacheRead = int(meta.Get("cachedContentTokenCount").Int())
-			return input, output, 0, cacheRead, true
+			return translate.UsageValues{
+				InputTokens:          usageGJSONInt(meta.Get("promptTokenCount")),
+				OutputTokens:         usageGJSONInt(meta.Get("candidatesTokenCount")),
+				CacheReadInputTokens: usageGJSONInt(meta.Get("cachedContentTokenCount")),
+				ReasoningTokens:      usageGJSONInt(meta.Get("thoughtsTokenCount")),
+			}, true
 		}
 	}
 
 	usage := gjson.GetBytes(data, "usage")
-	if !usage.Exists() && provider == providers.ProviderAnthropic {
+	if !usage.Exists() && source.Family == providers.FamilyAnthropic {
 		usage = gjson.GetBytes(data, "message.usage")
 	}
 	// OpenAI Responses streaming nests usage under the terminal response event
 	// (response.completed); the non-streaming body carries it at the top level.
-	if !usage.Exists() && provider == providers.ProviderOpenAI {
+	if !usage.Exists() && source.Family == providers.FamilyOpenAICompat {
 		usage = gjson.GetBytes(data, "response.usage")
 	}
 	if !usage.Exists() {
-		return 0, 0, 0, 0, false
+		return translate.UsageValues{}, false
 	}
 
-	switch provider {
-	case providers.ProviderAnthropic:
-		input = int(usage.Get("input_tokens").Int())
-		output = int(usage.Get("output_tokens").Int())
-		cacheCreation = int(usage.Get("cache_creation_input_tokens").Int())
-		cacheRead = int(usage.Get("cache_read_input_tokens").Int())
-	case providers.ProviderOpenAI, providers.ProviderGoogle:
+	switch source.Family {
+	case providers.FamilyAnthropic:
+		return translate.UsageValues{
+			InputTokens:              usageGJSONInt(usage.Get("input_tokens")),
+			OutputTokens:             usageGJSONInt(usage.Get("output_tokens")),
+			CacheCreationInputTokens: usageGJSONInt(usage.Get("cache_creation_input_tokens")),
+			CacheReadInputTokens:     usageGJSONInt(usage.Get("cache_read_input_tokens")),
+		}, true
+	case providers.FamilyOpenAICompat, providers.FamilyGemini:
 		// Chat Completions uses prompt_tokens/completion_tokens; Responses API
 		// (Codex passthrough) uses input_tokens/output_tokens. Probe both.
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {
-			input = int(pt.Int())
-			output = int(usage.Get("completion_tokens").Int())
-			cacheRead = int(usage.Get("prompt_tokens_details.cached_tokens").Int())
-		} else {
-			input = int(usage.Get("input_tokens").Int())
-			output = int(usage.Get("output_tokens").Int())
-			cacheRead = int(usage.Get("input_tokens_details.cached_tokens").Int())
+			return translate.UsageValues{
+				InputTokens:              usageGJSONInt(pt),
+				OutputTokens:             usageGJSONInt(usage.Get("completion_tokens")),
+				CacheReadInputTokens:     usageGJSONInt(usage.Get("prompt_tokens_details.cached_tokens")),
+				ReasoningTokens:          usageGJSONInt(usage.Get("completion_tokens_details.reasoning_tokens")),
+				AudioInputTokens:         usageGJSONInt(usage.Get("prompt_tokens_details.audio_tokens")),
+				AudioOutputTokens:        usageGJSONInt(usage.Get("completion_tokens_details.audio_tokens")),
+				AcceptedPredictionTokens: usageGJSONInt(usage.Get("completion_tokens_details.accepted_prediction_tokens")),
+				RejectedPredictionTokens: usageGJSONInt(usage.Get("completion_tokens_details.rejected_prediction_tokens")),
+			}, true
 		}
+		return translate.UsageValues{
+			InputTokens:              usageGJSONInt(usage.Get("input_tokens")),
+			OutputTokens:             usageGJSONInt(usage.Get("output_tokens")),
+			CacheReadInputTokens:     usageGJSONInt(usage.Get("input_tokens_details.cached_tokens")),
+			ReasoningTokens:          usageGJSONInt(usage.Get("output_tokens_details.reasoning_tokens")),
+			AudioInputTokens:         usageGJSONInt(usage.Get("input_tokens_details.audio_tokens")),
+			AudioOutputTokens:        usageGJSONInt(usage.Get("output_tokens_details.audio_tokens")),
+			AcceptedPredictionTokens: usageGJSONInt(usage.Get("output_tokens_details.accepted_prediction_tokens")),
+			RejectedPredictionTokens: usageGJSONInt(usage.Get("output_tokens_details.rejected_prediction_tokens")),
+		}, true
 	default:
-		return 0, 0, 0, 0, false
+		return translate.UsageValues{}, false
 	}
+}
 
-	return input, output, cacheCreation, cacheRead, true
+func usageGJSONInt(value gjson.Result) *int {
+	if !value.Exists() {
+		return nil
+	}
+	result := int(value.Int())
+	return &result
+}
+
+func usageInt(value int) *int {
+	return &value
+}
+
+func positiveUsageInt(value int) *int {
+	if value <= 0 {
+		return nil
+	}
+	return usageInt(value)
+}
+
+func usageValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

@@ -21,6 +21,12 @@ type TelemetryRepository interface {
 	GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error)
 }
 
+// UsageReconciliationRepository exposes unbilled request usage for control-plane reconciliation.
+// Deliberately separate from TelemetryRepository so telemetry sinks don't need read capabilities.
+type UsageReconciliationRepository interface {
+	GetPendingUsageTelemetry(ctx context.Context, from, to time.Time, limit int32) ([]PendingUsageTelemetry, error)
+}
+
 // InsertTelemetryParams mirrors one router.upstream span row.
 type InsertTelemetryParams struct {
 	InstallationID string
@@ -121,6 +127,22 @@ type InsertTelemetryParams struct {
 	CredentialKeyPrefix string
 	CredentialKeySuffix string
 	CredentialSource    string
+
+	// UsageAuthorityStatus and UsageDetails record billing authority and presence-aware token counters; UsageDetails must never carry request content.
+	UsageAuthorityStatus string
+	UsageDetails         []byte
+}
+
+// PendingUsageTelemetry identifies an upstream request whose usage cannot be
+// billed automatically and needs reconciliation.
+type PendingUsageTelemetry struct {
+	InstallationID       string
+	RequestID            string
+	DecisionModel        string
+	DecisionProvider     string
+	Timestamp            time.Time
+	UsageAuthorityStatus string
+	UsageDetails         []byte
 }
 
 // TelemetrySummary holds aggregated totals for the dashboard cards.

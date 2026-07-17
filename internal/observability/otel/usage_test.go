@@ -8,11 +8,92 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"workweave/router/internal/observability/otel"
+	"workweave/router/internal/providers"
+	"workweave/router/internal/translate"
 )
+
+func TestUsageExtractor_OpenAICompatibleFamilyUsesWireParser(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ext := otel.NewUsageExtractor(rec, providers.UsageSource{
+		Family:   providers.FamilyOpenAICompat,
+		Endpoint: providers.UsageEndpointOpenAIChatCompletions,
+	})
+
+	_, err := ext.Write([]byte(`{"usage":{"prompt_tokens":12,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":3}}}`))
+	require.NoError(t, err)
+
+	snapshot := ext.Usage()
+	require.NotNil(t, snapshot.InputTokens)
+	require.NotNil(t, snapshot.OutputTokens)
+	assert.Equal(t, 12, *snapshot.InputTokens)
+	assert.Equal(t, 4, *snapshot.OutputTokens)
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
+}
+
+func TestUsageExtractor_PreservesExplicitTerminalZero(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider(providers.ProviderOpenRouter))
+
+	_, err := ext.Write([]byte(`{"usage":{"input_tokens":9,"output_tokens":0}}`))
+	require.NoError(t, err)
+
+	snapshot := ext.Usage()
+	require.NotNil(t, snapshot.OutputTokens)
+	assert.Zero(t, *snapshot.OutputTokens)
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
+}
+
+func TestUsageExtractor_RecordUsageValuesPreservesExplicitTerminalZero(t *testing.T) {
+	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderOpenRouter))
+	input, output := 9, 0
+
+	ext.RecordUsageValues(translate.UsageValues{
+		InputTokens:  &input,
+		OutputTokens: &output,
+	})
+
+	snapshot := ext.Usage()
+	require.NotNil(t, snapshot.OutputTokens)
+	assert.Zero(t, *snapshot.OutputTokens)
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
+}
+
+func TestUsageExtractor_StartObservationStaysPartialUntilTerminalUsage(t *testing.T) {
+	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
+	input, output := 9, 0
+
+	ext.RecordUsageObservation(translate.UsageObservation{
+		Phase:       translate.UsagePhaseStart,
+		Placeholder: true,
+		Values: translate.UsageValues{
+			InputTokens:  &input,
+			OutputTokens: &output,
+		},
+	})
+	assert.Equal(t, translate.UsageAuthorityPartial, ext.Usage().Authority)
+
+	ext.RecordUsageValues(translate.UsageValues{OutputTokens: &output})
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, ext.Usage().Authority)
+}
+
+func TestUsageExtractor_LegacySinkObservationsDoNotTreatOmittedFieldsAsZeros(t *testing.T) {
+	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
+
+	ext.RecordUsage(100, 0)
+	ext.RecordUsage(0, 20)
+
+	snapshot := ext.Usage()
+	require.NotNil(t, snapshot.InputTokens)
+	require.NotNil(t, snapshot.OutputTokens)
+	assert.Equal(t, 100, *snapshot.InputTokens)
+	assert.Equal(t, 20, *snapshot.OutputTokens)
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
+	assert.Empty(t, snapshot.Contradictions)
+}
 
 func TestUsageExtractor_AnthropicNonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "anthropic")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("anthropic"))
 
 	body := `{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"text","text":"Hello!"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":42,"output_tokens":17}}`
 	_, err := ext.Write([]byte(body))
@@ -25,7 +106,7 @@ func TestUsageExtractor_AnthropicNonStreaming(t *testing.T) {
 
 func TestUsageExtractor_AnthropicStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "anthropic")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("anthropic"))
 
 	events := []string{
 		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":100,\"output_tokens\":0}}}\n\n",
@@ -45,7 +126,7 @@ func TestUsageExtractor_AnthropicStreaming(t *testing.T) {
 
 func TestUsageExtractor_OpenAINonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	body := `{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":8,"total_tokens":23}}`
 	_, err := ext.Write([]byte(body))
@@ -58,7 +139,7 @@ func TestUsageExtractor_OpenAINonStreaming(t *testing.T) {
 
 func TestUsageExtractor_OpenAIStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	events := []string{
 		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
@@ -83,7 +164,7 @@ func TestUsageExtractor_OpenAIResponsesStreaming(t *testing.T) {
 	// not the chat-completions prompt_tokens shape. Billing the 5% subscription
 	// fee depends on this parse.
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	events := []string{
 		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
@@ -103,7 +184,7 @@ func TestUsageExtractor_OpenAIResponsesStreaming(t *testing.T) {
 
 func TestUsageExtractor_OpenAIResponsesNonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	body := `{"id":"resp_2","object":"response","usage":{"input_tokens":50,"output_tokens":9,"input_tokens_details":{"cached_tokens":0}}}`
 	_, err := ext.Write([]byte(body))
@@ -116,7 +197,7 @@ func TestUsageExtractor_OpenAIResponsesNonStreaming(t *testing.T) {
 
 func TestUsageExtractor_GoogleStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "google")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("google"))
 
 	events := []string{
 		"data: {\"id\":\"chatcmpl-g\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Yo\"}}]}\n\n",
@@ -136,7 +217,7 @@ func TestUsageExtractor_GoogleStreaming(t *testing.T) {
 
 func TestUsageExtractor_NoUsageReturnsZero(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "anthropic")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("anthropic"))
 
 	body := `{"id":"msg_1","type":"message","content":[]}`
 	_, err := ext.Write([]byte(body))
@@ -153,7 +234,7 @@ func TestUsageExtractor_NoUsageReturnsZero(t *testing.T) {
 
 func TestUsageExtractor_AnthropicCacheTokens_NonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "anthropic")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("anthropic"))
 
 	body := `{"id":"msg_456","type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":42,"output_tokens":17,"cache_creation_input_tokens":256,"cache_read_input_tokens":1024}}`
 	_, err := ext.Write([]byte(body))
@@ -170,7 +251,7 @@ func TestUsageExtractor_AnthropicCacheTokens_NonStreaming(t *testing.T) {
 
 func TestUsageExtractor_AnthropicCacheTokens_Streaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "anthropic")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("anthropic"))
 
 	// cache tokens arrive in message_start; subsequent message_delta carries
 	// only output_tokens and must not clobber the cache values.
@@ -196,7 +277,7 @@ func TestUsageExtractor_AnthropicCacheTokens_Streaming(t *testing.T) {
 
 func TestUsageExtractor_OpenAICacheTokens_NonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	// OpenAI exposes cached prompt tokens via prompt_tokens_details.cached_tokens.
 	// There is no creation analogue, so cache_creation stays at 0.
@@ -215,7 +296,7 @@ func TestUsageExtractor_OpenAICacheTokens_NonStreaming(t *testing.T) {
 
 func TestUsageExtractor_OpenAICacheTokens_Streaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "openai")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("openai"))
 
 	events := []string{
 		"data: {\"id\":\"chatcmpl-2\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
@@ -239,7 +320,7 @@ func TestUsageExtractor_OpenAICacheTokens_Streaming(t *testing.T) {
 
 func TestUsageExtractor_GoogleNativeCacheTokens_NonStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ext := otel.NewUsageExtractor(rec, "google")
+	ext := otel.NewUsageExtractor(rec, providers.UsageSourceForProvider("google"))
 
 	// Native Gemini :generateContent body — no "usage" field, only "usageMetadata"
 	// with cachedContentTokenCount. Without the native-shape branch the

@@ -170,6 +170,10 @@ type RouterModelRouterRequestTelemetry struct {
 	TrainingAllowed      *bool
 	CaptureMode          *string
 	DebugRef             *string
+	// Provider usage authority: authoritative, partial, missing, or contradictory. NULL on rows written before usage authority tracking.
+	UsageAuthorityStatus *string
+	// Presence-aware canonical token usage and stable contradiction codes. Contains token counts only; never request content.
+	UsageDetails []byte
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.

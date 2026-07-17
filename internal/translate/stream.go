@@ -123,14 +123,7 @@ func (t *SSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usage")
 		if usage.Exists() {
-			t.usageSink.RecordUsage(
-				int(usage.Get("input_tokens").Int()),
-				int(usage.Get("output_tokens").Int()),
-			)
-			t.usageSink.RecordCacheUsage(
-				int(usage.Get("cache_creation_input_tokens").Int()),
-				int(usage.Get("cache_read_input_tokens").Int()),
-			)
+			t.usageSink.RecordUsageValues(anthropicUsageValues(usage))
 		}
 	}
 
@@ -233,11 +226,11 @@ func (t *SSETranslator) handleMessageStart(data []byte) error {
 		sse.WriteJSONInt(t.bw, inputTokens+outputTokens)
 		t.bw.WriteByte('}')
 		if t.usageSink != nil {
-			t.usageSink.RecordUsage(int(inputTokens), 0)
-			t.usageSink.RecordCacheUsage(
-				int(usageResult.Get("cache_creation_input_tokens").Int()),
-				int(usageResult.Get("cache_read_input_tokens").Int()),
-			)
+			t.usageSink.RecordUsageObservation(UsageObservation{
+				Phase:       UsagePhaseStart,
+				Values:      anthropicUsageValues(usageResult),
+				Placeholder: true,
+			})
 		}
 	}
 
@@ -340,7 +333,7 @@ func (t *SSETranslator) handleMessageDelta(data []byte) error {
 		sse.WriteJSONInt(t.bw, int64(t.inputTokens)+outputTokens)
 		t.bw.WriteByte('}')
 		if t.usageSink != nil {
-			t.usageSink.RecordUsage(0, int(outputTokens))
+			t.usageSink.RecordUsageValues(anthropicUsageValues(usageResult))
 		}
 	}
 
@@ -809,14 +802,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usage")
 		if usage.Exists() {
-			t.usageSink.RecordUsage(
-				int(usage.Get("prompt_tokens").Int()),
-				int(usage.Get("completion_tokens").Int()),
-			)
-			t.usageSink.RecordCacheUsage(
-				int(usage.Get("prompt_tokens_details.cache_creation_tokens").Int()),
-				int(usage.Get("prompt_tokens_details.cached_tokens").Int()),
-			)
+			t.usageSink.RecordUsageValues(openAIUsageValues(usage))
 		}
 	}
 
@@ -949,8 +935,7 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
-		t.usageSink.RecordUsage(int(prompt), int(completion))
-		t.usageSink.RecordCacheUsage(int(cacheCreation), int(cachedRead))
+		t.usageSink.RecordUsageValues(openAIUsageValues(usage))
 	}
 }
 
