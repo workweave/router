@@ -1916,15 +1916,18 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 		InstallationID: installationID,
 		Provider:       fbProvider,
 		Model:          fbModel,
-		Reason:         "cyber-refusal-repin",
+		Reason:         cyberRefusalRepinReason,
 		TurnCount:      1,
-		PinnedUntil:    pinExpiry("cyber-refusal-repin"),
+		PinnedUntil:    pinExpiry(cyberRefusalRepinReason),
 	}
 	// context.Background(): ctx may already be canceled here (response written,
 	// client disconnected); a canceled ctx would drop the re-pin write.
 	if err := s.pinStore.Upsert(context.Background(), pin); err != nil {
 		log.Error("cyber-refusal re-pin: pin upsert failed", "err", err, "from_model", served.Model, "to_model", fbModel)
 		return
+	}
+	if err := s.expireSessionPin(context.Background(), installationID, sessionKey, hmmHistoryRole(role), cyberRefusalRepinReason); err != nil {
+		log.Error("cyber-refusal re-pin: hmm_history expiry failed", "err", err, "session_key", shortSessionKey(sessionKey))
 	}
 	log.Info("cyber refusal — re-pinned session off refusing model",
 		"session_key", shortSessionKey(sessionKey),

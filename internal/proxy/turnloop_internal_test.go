@@ -804,6 +804,109 @@ func TestHMMCostGate_IgnoresNonHMMActivePin(t *testing.T) {
 	assert.Equal(t, planner.ReasonNoPin, plan.Reason)
 }
 
+func TestHMMEVStay_RespectsCyberRefusalRepin(t *testing.T) {
+	t.Parallel()
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderMakora: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	now := time.Now()
+	activePin := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		LastServedModel: "claude-sonnet-5",
+		Reason:          cyberRefusalRepinReason,
+		LastTurnEndedAt: now.Add(-5 * time.Second),
+		PinnedUntil:     now.Add(time.Hour),
+	}
+	history := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		LastServedModel: "claude-opus-4-8",
+		Reason:          hmmHistoryReason,
+		LastTurnEndedAt: now.Add(-3 * time.Second),
+		PinnedUntil:     now.Add(time.Hour),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderMakora,
+		Model:    "deepseek/deepseek-v4-flash",
+		Reason:   "hmm_policy(classifier 'Simple Tool Call Request')",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.70,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		activePin,
+		history,
+		fresh,
+		100,
+		false,
+	)
+
+	assert.True(t, sticky, "cyber-refusal-repin fallback must not lose to stale hmm_history")
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, "claude-sonnet-5", stayModel)
+	assert.Equal(t, planner.OutcomeStay, plan.Outcome)
+	assert.Equal(t, planner.ReasonEVNegative, plan.Reason)
+}
+
+func TestHMMEVStay_CyberRefusalRepinBlocksConfidentUpgrade(t *testing.T) {
+	t.Parallel()
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderAnthropic: nil, providers.ProviderMakora: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+	activePin := sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-sonnet-5",
+		LastServedModel: "claude-sonnet-5",
+		Reason:          cyberRefusalRepinReason,
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+	fresh := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    "claude-opus-4-8",
+		Reason:   "hmm_policy(mock_hmm_sidecar)",
+		Metadata: &router.RoutingMetadata{
+			Strategy:    string(router.StrategyHMM),
+			RouteID:     "route-1",
+			ChosenScore: 0.99,
+		},
+	}
+
+	decision, plan, sticky, stayModel := svc.hmmCostGatedDecision(
+		router.Request{},
+		activePin,
+		sessionpin.Pin{},
+		fresh,
+		100,
+		false,
+	)
+
+	assert.True(t, sticky)
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, "claude-sonnet-5", stayModel)
+	assert.Equal(t, planner.OutcomeStay, plan.Outcome)
+	assert.NotEqual(t, hmmReasonConfidentUpgrade, plan.Reason)
+}
+
 func TestHMMCostGate_HonorsHMMReasonedActivePin(t *testing.T) {
 	svc := NewService(
 		nil,
