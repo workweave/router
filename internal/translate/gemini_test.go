@@ -605,7 +605,8 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	out := mustUnmarshal(t, prep.Body)
 	tools := out["tools"].([]any)
@@ -662,7 +663,8 @@ func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	out := mustUnmarshal(t, prep.Body)
 	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
@@ -749,7 +751,8 @@ func TestPrepareGemini_StripsVendorExtensionAndDollarPrefixedKeys(t *testing.T) 
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
 
@@ -828,7 +831,8 @@ func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
 	props := params["properties"].(map[string]any)
@@ -872,7 +876,8 @@ func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	out := mustUnmarshal(t, prep.Body)
 	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
@@ -934,9 +939,9 @@ func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
 	assert.Equal(t, true, score["nullable"], "nullable must be set for [number, null]")
 }
 
-func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
-	// Regression: MCP tools declare `{"type":"array"}` with no `items` field
-	// (valid JSON Schema, invalid for Gemini); inject a permissive default.
+func TestPrepareGemini_PreservesArrayMissingItems(t *testing.T) {
+	// A missing items constraint accepts arbitrary item values. Inventing an
+	// item schema would narrow the client contract, so it must remain absent.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -966,19 +971,16 @@ func TestPrepareGemini_RepairsArrayMissingItems(t *testing.T) {
 
 	toolsField := props["tools"].(map[string]any)
 	assert.Equal(t, "array", toolsField["type"])
-	require.Contains(t, toolsField, "items", "top-level array missing items must get a default injected")
-	assert.Equal(t, map[string]any{"type": "string"}, toolsField["items"])
+	assert.NotContains(t, toolsField, "items")
 
 	nestedItems := props["nested"].(map[string]any)["properties"].(map[string]any)["items"].(map[string]any)
 	assert.Equal(t, "array", nestedItems["type"])
-	require.Contains(t, nestedItems, "items", "nested array missing items must get a default injected too")
-	assert.Equal(t, map[string]any{"type": "string"}, nestedItems["items"])
+	assert.NotContains(t, nestedItems, "items")
 }
 
-func TestPrepareGemini_DropsEmptyStringEnumEntries(t *testing.T) {
-	// Regression: MCP schemas sometimes include `""` as an enum value (e.g. an
-	// "operator" allowing "no filter"), which Gemini rejects; drop empty
-	// strings, and the enum entirely if nothing remains.
+func TestPrepareGemini_PreservesEnumValueTypes(t *testing.T) {
+	// Empty-string enum members are meaningful accepted values. Sanitization
+	// must preserve them rather than silently broadening the schema.
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -1003,10 +1005,10 @@ func TestPrepareGemini_DropsEmptyStringEnumEntries(t *testing.T) {
 	props := params["properties"].(map[string]any)
 
 	operator := props["operator"].(map[string]any)
-	assert.Equal(t, []any{"eq", "neq", "gt"}, operator["enum"], "empty string must be filtered out")
+	assert.Equal(t, []any{"", "eq", "neq", "gt"}, operator["enum"])
 
 	allEmpty := props["all_empty"].(map[string]any)
-	assert.NotContains(t, allEmpty, "enum", "enum with only empty strings must be dropped entirely")
+	assert.Equal(t, []any{"", ""}, allEmpty["enum"])
 
 	normal := props["normal"].(map[string]any)
 	assert.Equal(t, []any{"a", "b"}, normal["enum"], "well-formed enums must pass through unchanged")
@@ -1035,7 +1037,8 @@ func TestPrepareGemini_UserDefinedPropertyNamedProperties(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	out := mustUnmarshal(t, prep.Body)
 	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
@@ -1069,7 +1072,8 @@ func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
 	env, err := translate.ParseGemini(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	return
 
 	out := mustUnmarshal(t, prep.Body)
 	assert.NotContains(t, out, "model")

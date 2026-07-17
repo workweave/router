@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
@@ -50,7 +49,8 @@ var (
 // model to reason (a `thinking` budget, or an explicit reasoning_effort). Used
 // by the proxy to gate the Responses-API dispatch for reasoning OpenAI models.
 func (e *RequestEnvelope) ReasoningRequested() bool {
-	return reasoningEffortFromAnthropic(e.body) != ""
+	intent := e.ReasoningIntent()
+	return intent.Kind != "" && intent.Kind != ReasoningDisabled
 }
 
 // UseOpenAIResponsesAPI reports whether an Anthropic ingress dispatch to the
@@ -63,25 +63,22 @@ func UseOpenAIResponsesAPI(provider string, caps router.ModelSpec, hasTools bool
 		hasTools
 }
 
-// reasoningEffortFromAnthropic resolves the Responses `reasoning.effort` from
-// the `thinking` budget or an explicit `reasoning_effort` field. "" = none.
+// reasoningEffortFromAnthropic is retained for callers that only need the
+// legacy effort projection. Target validation belongs to ApplyReasoningIntent.
 func reasoningEffortFromAnthropic(body []byte) string {
-	if t := gjson.GetBytes(body, "thinking"); t.Exists() && t.Get("type").String() != "disabled" {
-		return effortForBudget(t.Get("budget_tokens").Int())
-	}
-	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		return r.String()
+	intent := ParseReasoningIntent(FormatAnthropic, body)
+	switch intent.Kind {
+	case ReasoningLevel:
+		return intent.Level
+	case ReasoningBudget:
+		return effortForBudget(intent.BudgetTokens)
 	}
 	return ""
 }
 
-// responsesReasoningEffort promotes "medium" to "high" for gpt-5.x: measured
-// SWE-bench Pro scores (low 16%, medium 0%, high 41%) show medium is strictly
-// dominated, so never serve it to a gpt-5.x reasoning model.
+// responsesReasoningEffort preserves client-selected effort. Routing policy may
+// select a model, but translation must not silently promote a valid level.
 func responsesReasoningEffort(eff, model string) string {
-	if eff == "medium" && strings.HasPrefix(model, "gpt-5") {
-		return "high"
-	}
 	return eff
 }
 
@@ -125,11 +122,19 @@ func (e *RequestEnvelope) buildResponsesFromAnthropic(opts EmitOptions) ([]byte,
 
 	reasoningEnabled := false
 	if opts.Capabilities.Supports(router.CapReasoning) {
-		eff := reasoningEffortFromAnthropic(body)
-		if opts.ForceReasoningEffort != "" {
-			eff = opts.ForceReasoningEffort
+		intent, err := ApplyReasoningIntent(ParseReasoningIntent(FormatAnthropic, body), opts.Capabilities, opts.ForceReasoningEffort)
+		if err != nil {
+			return nil, stats, err
 		}
-		if eff := responsesReasoningEffort(eff, opts.TargetModel); eff != "" {
+		eff := ""
+		switch intent.Kind {
+		case ReasoningLevel:
+			eff = intent.Level
+		case ReasoningBudget:
+			eff = effortForBudget(intent.BudgetTokens)
+		}
+		if eff != "" {
+			eff = responsesReasoningEffort(eff, opts.TargetModel)
 			reasoningEnabled = true
 			jw.Key("reasoning")
 			jw.Obj()

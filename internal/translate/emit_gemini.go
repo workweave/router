@@ -3,19 +3,38 @@ package translate
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 
 	"workweave/router/internal/providers"
+	"workweave/router/internal/router"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
+var (
+	// ErrGeminiSchemaIncompatible marks a JSON Schema constraint that the Gemini
+	// function declaration schema cannot represent without changing its meaning.
+	ErrGeminiSchemaIncompatible = errors.New("gemini schema is not representable")
+	// ErrGeminiToolDeclarationConflict marks duplicate function names with
+	// different declarations. Gemini would make their resolution ambiguous.
+	ErrGeminiToolDeclarationConflict = errors.New("gemini function declarations conflict")
+	// ErrGeminiUnsignedToolHistory marks a Gemini 3.x continuation that would
+	// require deleting prior tool history to reach the upstream.
+	ErrGeminiUnsignedToolHistory = errors.New("gemini tool history lacks thought signatures")
+)
+
 // PrepareGemini builds a Gemini native REST request body. Native is required for
 // multi-turn tool use on Gemini 3.x: OpenAI-compat doesn't return thought_signature.
 func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (providers.PreparedRequest, error) {
+	if isGemini3xModel(opts.TargetModel) && e.HasUnsignedToolCallHistory() {
+		return providers.PreparedRequest{}, fmt.Errorf("%w: Gemini 3.x requires a thoughtSignature on every historical function call", ErrGeminiUnsignedToolHistory)
+	}
 	// Strip synthetic top-level "model" and "stream" — belonging to routing, not Gemini.
 	if e.format == FormatGemini {
 		body := e.body
@@ -64,7 +83,9 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		}
 		stats.GeminiValidatedToolMode = !opts.DowngradeGeminiValidatedToAuto &&
 			geminiEmitsValidatedToolMode(filtered, opts.TargetModel, FormatAnthropic)
-		writeGeminiFromAnthropic(jw, filtered, opts)
+		if err := writeGeminiFromAnthropic(jw, filtered, opts); err != nil {
+			return providers.PreparedRequest{}, err
+		}
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Gemini emit: %d", e.format)
 	}
@@ -90,50 +111,97 @@ func sanitizeGeminiTools(body []byte) ([]byte, error) {
 	if !gjson.GetBytes(body, "tools").Exists() {
 		return body, nil
 	}
-	var err error
-	body, err = sjson.SetBytes(body, "tools", sanitizeGeminiToolsRaw(gjson.GetBytes(body, "tools").Value()))
+	tools, err := sanitizeGeminiToolsRaw(gjson.GetBytes(body, "tools").Value())
+	if err != nil {
+		return nil, err
+	}
+	body, err = sjson.SetBytes(body, "tools", tools)
 	if err != nil {
 		return nil, fmt.Errorf("set sanitized tools: %w", err)
+	}
+	if allowed := gjson.GetBytes(body, "toolConfig.functionCallingConfig.allowedFunctionNames"); allowed.Exists() {
+		declared := geminiDeclarationNames(tools)
+		for _, name := range allowed.Array() {
+			if _, ok := declared[name.String()]; !ok {
+				return nil, fmt.Errorf("%w: allowed function %q has no declaration", ErrGeminiToolDeclarationConflict, name.String())
+			}
+		}
 	}
 	return body, nil
 }
 
 // sanitizeGeminiToolsRaw is the gjson-compatible walker for the tools array.
-func sanitizeGeminiToolsRaw(v any) any {
+func sanitizeGeminiToolsRaw(v any) (any, error) {
 	tools, ok := v.([]any)
 	if !ok {
-		return v
+		return v, nil
 	}
-	out := make([]any, len(tools))
-	for i, t := range tools {
+	out := make([]any, 0, len(tools))
+	seen := make(map[string]any)
+	for _, t := range tools {
 		tool, _ := t.(map[string]any)
 		if tool == nil {
-			out[i] = t
+			out = append(out, t)
 			continue
 		}
 		fds, _ := tool["functionDeclarations"].([]any)
 		if len(fds) == 0 {
-			out[i] = t
+			out = append(out, t)
 			continue
 		}
-		sanitized := make([]any, len(fds))
-		for j, fd := range fds {
+		sanitized := make([]any, 0, len(fds))
+		for _, fd := range fds {
 			fdMap, _ := fd.(map[string]any)
 			if fdMap == nil {
-				sanitized[j] = fd
+				sanitized = append(sanitized, fd)
 				continue
+			}
+			name, _ := fdMap["name"].(string)
+			if name == "" {
+				return nil, fmt.Errorf("%w: declaration has no name", ErrGeminiToolDeclarationConflict)
 			}
 			if params, ok := fdMap["parameters"]; ok && params != nil {
 				fdMap = copyMap(fdMap)
-				fdMap["parameters"] = sanitizeSchemaForGemini(inlineSchemaDefs(params))
+				var err error
+				fdMap["parameters"], err = sanitizeSchemaForGemini(params)
+				if err != nil {
+					return nil, fmt.Errorf("function %q parameters: %w", name, err)
+				}
 			}
-			sanitized[j] = fdMap
+			if previous, exists := seen[name]; exists {
+				if !semanticJSONEqual(previous, fdMap) {
+					return nil, fmt.Errorf("%w: duplicate declaration %q differs", ErrGeminiToolDeclarationConflict, name)
+				}
+				continue
+			}
+			seen[name] = fdMap
+			sanitized = append(sanitized, fdMap)
+		}
+		if len(sanitized) == 0 {
+			continue
 		}
 		toolCopy := copyMap(tool)
 		toolCopy["functionDeclarations"] = sanitized
-		out[i] = toolCopy
+		out = append(out, toolCopy)
 	}
-	return out
+	return out, nil
+}
+
+func geminiDeclarationNames(v any) map[string]struct{} {
+	names := make(map[string]struct{})
+	tools, _ := v.([]any)
+	for _, t := range tools {
+		tool, _ := t.(map[string]any)
+		declarations, _ := tool["functionDeclarations"].([]any)
+		for _, declaration := range declarations {
+			if d, ok := declaration.(map[string]any); ok {
+				if name, _ := d["name"].(string); name != "" {
+					names[name] = struct{}{}
+				}
+			}
+		}
+	}
+	return names
 }
 
 // copyMap returns a shallow copy of m so that modifying the copy does not
@@ -153,11 +221,9 @@ func copyMap(m map[string]any) map[string]any {
 func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error {
 	msgs := gjson.GetBytes(body, "messages")
 
-	// Build tool_call ID → name map, and check for any missing thoughtSignature:
-	// Gemini 3.x rejects a functionCall without one, so if any is missing we drop
-	// ALL tool_call/role:tool blocks (covers history from a pre-switch provider).
+	// Build tool_call ID → name map for tool-result recovery. Unsigned Gemini
+	// 3.x history is rejected by PrepareGemini before we begin emission.
 	toolNames := make(map[string]string)
-	anyToolCallMissingSig := false
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		if msg.Get("role").String() != "assistant" {
 			return true
@@ -166,15 +232,10 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 			if id := tc.Get("id").String(); id != "" {
 				toolNames[id] = tc.Get("function.name").String()
 			}
-			if extractThoughtSignature(tc) == "" {
-				anyToolCallMissingSig = true
-			}
 			return true
 		})
 		return true
 	})
-	dropToolBlocks := anyToolCallMissingSig && isGemini3xModel(opts.TargetModel)
-
 	// Collect system text.
 	var sysParts []string
 	msgs.ForEach(func(_, msg gjson.Result) bool {
@@ -215,9 +276,8 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 		jw.EndObj()
 	}
 
-	// Build entries, then collapse before emitting: dropping sig-less tool turns
-	// can leave placeholder entries adjacent to real content of the same role
-	// (e.g. a role:"tool" placeholder immediately before a real user turn).
+	// Build entries, then collapse before emitting to preserve Gemini's role
+	// alternation requirement.
 	entries := make([]contentEntry, 0, 8)
 	var walkErr error
 	msgs.ForEach(func(_, msg gjson.Result) bool {
@@ -237,28 +297,11 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 				walkErr = parseErr
 				return false
 			}
-			placeholder := false
-			if dropToolBlocks {
-				before := len(parts)
-				parts = filterOutGeminiFunctionCallParts(parts)
-				if before > 0 && len(parts) == 0 {
-					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
-					placeholder = true
-				}
-			}
 			if len(parts) == 0 {
 				return true
 			}
-			entries = append(entries, contentEntry{role: "model", parts: parts, placeholder: placeholder})
+			entries = append(entries, contentEntry{role: "model", parts: parts})
 		case "tool":
-			if dropToolBlocks {
-				entries = append(entries, contentEntry{
-					role:        "user",
-					parts:       []string{geminiTextPart(droppedToolResultPlaceholder)},
-					placeholder: true,
-				})
-				return true
-			}
 			tcID := msg.Get("tool_call_id").String()
 			name := toolNames[tcID]
 			if name == "" {
@@ -277,9 +320,13 @@ func writeGeminiFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error 
 	}
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
-	writeGeminiToolsFromOpenAI(jw, body)
+	if err := writeGeminiToolsFromOpenAI(jw, body); err != nil {
+		return err
+	}
 	writeGeminiToolChoiceFromOpenAI(jw, body, opts.TargetModel, opts.DowngradeGeminiValidatedToAuto)
-	writeGeminiGenerationConfigFromOpenAI(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
+	if err := writeGeminiGenerationConfigFromOpenAI(jw, body, opts); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -405,13 +452,14 @@ func geminiTextPart(text string) string {
 }
 
 // writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
-func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
+func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) error {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
-		return
+		return nil
 	}
 
-	var decls []string
+	declarations := make([]any, 0, int(tools.Get("#").Int()))
+	var emitErr error
 	tools.ForEach(func(_, t gjson.Result) bool {
 		fn := t.Get("function")
 		if !fn.Exists() {
@@ -421,44 +469,52 @@ func writeGeminiToolsFromOpenAI(jw *jsonWriter, body []byte) {
 		if name == "" {
 			return true
 		}
-		dw := newJSONWriter()
-		dw.Obj()
-		dw.Key("name")
-		dw.Str(name)
+		declaration := map[string]any{"name": name}
 		if desc := fn.Get("description"); desc.Exists() {
-			dw.Key("description")
-			dw.Str(desc.String())
+			declaration["description"] = desc.String()
 		}
 		if params := fn.Get("parameters"); params.Exists() {
 			var schema any
-			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
-				schema = inlineSchemaDefs(schema)
-				schema = sanitizeSchemaForGemini(schema)
-				if schemaBytes, err := json.Marshal(schema); err == nil {
-					dw.Key("parameters")
-					dw.RawBytes(schemaBytes)
-				}
+			if err := json.Unmarshal([]byte(params.Raw), &schema); err != nil {
+				emitErr = fmt.Errorf("function %q parameters: invalid JSON: %w", name, err)
+				return false
 			}
+			clean, err := sanitizeSchemaForGemini(schema)
+			if err != nil {
+				emitErr = fmt.Errorf("function %q parameters: %w", name, err)
+				return false
+			}
+			declaration["parameters"] = clean
 		}
-		dw.EndObj()
-		decls = append(decls, string(dw.Bytes()))
+		declarations = append(declarations, declaration)
 		return true
 	})
-
-	if len(decls) == 0 {
-		return
+	if emitErr != nil {
+		return emitErr
+	}
+	declarations, err := dedupeGeminiDeclarations(declarations)
+	if err != nil {
+		return err
+	}
+	if len(declarations) == 0 {
+		return nil
 	}
 	jw.Key("tools")
 	jw.Arr()
 	jw.Obj()
 	jw.Key("functionDeclarations")
 	jw.Arr()
-	for _, d := range decls {
-		jw.Raw(d)
+	for _, declaration := range declarations {
+		encoded, err := json.Marshal(declaration)
+		if err != nil {
+			return fmt.Errorf("marshal function declaration: %w", err)
+		}
+		jw.RawBytes(encoded)
 	}
 	jw.EndArr()
 	jw.EndObj()
 	jw.EndArr()
+	return nil
 }
 
 // writeGeminiToolChoiceFromOpenAI writes toolConfig into jw from an OpenAI body.
@@ -471,7 +527,8 @@ func writeGeminiToolChoiceFromOpenAI(jw *jsonWriter, body []byte, model string, 
 }
 
 // writeGeminiGenerationConfigFromOpenAI writes generationConfig into jw from an OpenAI body.
-func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model, forceEffort string) {
+func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, opts EmitOptions) error {
+	model := opts.TargetModel
 	// Collect all generation config fields; only write the object if non-empty.
 	type field struct {
 		key string
@@ -509,21 +566,18 @@ func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model, f
 			fields = append(fields, field{"responseMimeType", `"application/json"`})
 		}
 	}
-	effort := ""
-	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		effort = r.String()
+	intent, err := applyGeminiReasoning(ParseReasoningIntent(FormatOpenAI, body), opts)
+	if err != nil {
+		return err
 	}
-	if forceEffort != "" {
-		effort = forceEffort
-	}
-	if effort != "" {
-		if raw := thinkingConfigRaw(effort, model); raw != "" {
-			fields = append(fields, field{"thinkingConfig", raw})
-		}
+	if raw, err := geminiThinkingConfigRaw(intent, model); err != nil {
+		return err
+	} else if raw != "" {
+		fields = append(fields, field{"thinkingConfig", raw})
 	}
 
 	if len(fields) == 0 {
-		return
+		return nil
 	}
 	jw.Key("generationConfig")
 	jw.Obj()
@@ -532,13 +586,14 @@ func writeGeminiGenerationConfigFromOpenAI(jw *jsonWriter, body []byte, model, f
 		jw.Raw(f.raw)
 	}
 	jw.EndObj()
+	return nil
 }
 
 // ----- Anthropic → Gemini -----
 
 // writeGeminiFromAnthropic translates an Anthropic-format body into Gemini fields
 // written directly into jw (caller has already opened the root object).
-func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
+func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) error {
 	// System prompt.
 	system := gjson.GetBytes(body, "system")
 	var sysParts []string
@@ -577,13 +632,9 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 
 	msgs := gjson.GetBytes(body, "messages")
 
-	// Collect tool_use ID → name for tool_result recovery, and check for any
-	// missing thoughtSignature: Gemini 3.x rejects a functionCall without one,
-	// so if any is missing we drop ALL tool_use/tool_result blocks — avoids
-	// 400s on sticky-pin turns whose history came from a different provider.
+	// Collect tool_use ID → name for tool-result recovery. PrepareGemini
+	// rejects unsigned Gemini 3.x history before emission begins.
 	toolNames := make(map[string]string)
-	anyToolUseMissingSig := false
-	dropToolBlocks := false
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		if msg.Get("role").String() != "assistant" {
 			return true
@@ -593,77 +644,50 @@ func writeGeminiFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) {
 				if id := block.Get("id").String(); id != "" {
 					toolNames[id] = block.Get("name").String()
 				}
-				if extractThoughtSignature(block) == "" {
-					anyToolUseMissingSig = true
-				}
 			}
 			return true
 		})
 		return true
 	})
-	// Only 3.x hard-requires thoughtSignature; 2.x accepts sig-less calls.
-	if anyToolUseMissingSig && isGemini3xModel(opts.TargetModel) {
-		dropToolBlocks = true
-	}
-
-	// Build entries, then collapse + emit (see collapseConsecutiveRoles) to
-	// preserve role alternation when the drop guard leaves same-role runs.
+	// Build entries, then collapse + emit to preserve role alternation.
 	entries := make([]contentEntry, 0, 8)
 	msgs.ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
 		switch role {
 		case "user":
 			parts := anthropicUserPartsGJSON(msg.Get("content"), toolNames)
-			placeholder := false
-			if dropToolBlocks {
-				before := len(parts)
-				parts = filterOutGeminiToolResponseParts(parts)
-				if before > 0 && len(parts) == 0 {
-					parts = []string{geminiTextPart(droppedToolResultPlaceholder)}
-					placeholder = true
-				}
-			}
 			if len(parts) == 0 {
 				return true
 			}
-			entries = append(entries, contentEntry{role: "user", parts: parts, placeholder: placeholder})
+			entries = append(entries, contentEntry{role: "user", parts: parts})
 		case "assistant":
 			parts := anthropicAssistantPartsGJSON(msg.Get("content"))
-			placeholder := false
-			if dropToolBlocks {
-				before := len(parts)
-				parts = filterOutGeminiFunctionCallParts(parts)
-				if before > 0 && len(parts) == 0 {
-					parts = []string{geminiTextPart(droppedToolCallPlaceholder)}
-					placeholder = true
-				}
-			}
 			if len(parts) == 0 {
 				return true
 			}
-			entries = append(entries, contentEntry{role: "model", parts: parts, placeholder: placeholder})
+			entries = append(entries, contentEntry{role: "model", parts: parts})
 		}
 		return true
 	})
 	emitGeminiContents(jw, collapseConsecutiveRoles(entries))
 
-	writeGeminiToolsFromAnthropic(jw, body)
+	if err := writeGeminiToolsFromAnthropic(jw, body); err != nil {
+		return err
+	}
 	writeGeminiToolChoiceFromAnthropic(jw, body, opts.TargetModel, opts.DowngradeGeminiValidatedToAuto)
-	writeGeminiGenerationConfigFromAnthropic(jw, body, opts.TargetModel, opts.ForceReasoningEffort)
+	if err := writeGeminiGenerationConfigFromAnthropic(jw, body, opts); err != nil {
+		return err
+	}
+	return nil
 }
 
-// contentEntry is a buffered Gemini `contents` entry, collected so a post-pass
-// can merge placeholders with real same-role content, preserving alternation.
+// contentEntry is a buffered Gemini `contents` entry.
 type contentEntry struct {
-	role        string   // "user" or "model"
-	parts       []string // pre-serialized Gemini part JSON objects
-	placeholder bool     // synthesized by the sig-less-tool drop guard
+	role  string   // "user" or "model"
+	parts []string // pre-serialized Gemini part JSON objects
 }
 
-// collapseConsecutiveRoles merges adjacent same-role entries: real content
-// wins over a neighboring placeholder, otherwise parts are merged. Needed
-// because the sig-less-tool drop guard can emit non-alternating role runs,
-// which Gemini 400s on.
+// collapseConsecutiveRoles merges adjacent same-role entries.
 func collapseConsecutiveRoles(in []contentEntry) []contentEntry {
 	if len(in) == 0 {
 		return in
@@ -674,15 +698,7 @@ func collapseConsecutiveRoles(in []contentEntry) []contentEntry {
 			out = append(out, e)
 			continue
 		}
-		prev := &out[len(out)-1]
-		switch {
-		case prev.placeholder && !e.placeholder:
-			*prev = e
-		case !prev.placeholder && e.placeholder:
-			// keep prev, drop incoming placeholder
-		default:
-			prev.parts = append(prev.parts, e.parts...)
-		}
+		out[len(out)-1].parts = append(out[len(out)-1].parts, e.parts...)
 	}
 	return out
 }
@@ -728,13 +744,6 @@ func geminiFunctionResponsePart(name, result string) string {
 	pw.EndObj()
 	return string(pw.Bytes())
 }
-
-// Placeholders inserted when sig-less tool blocks are dropped, to preserve
-// role alternation (Gemini 400s on non-alternating roles).
-const (
-	droppedToolCallPlaceholder   = "[router: prior tool call omitted — provider's signed thinking state was unavailable for cross-model carry-over]"
-	droppedToolResultPlaceholder = "[router: prior tool result omitted — paired with a dropped tool call]"
-)
 
 // isGemini3xModel reports whether model is a Gemini 3.x preview, which
 // requires thoughtSignature on every functionCall; 2.x accepts sig-less calls.
@@ -940,56 +949,66 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 }
 
 // writeGeminiToolsFromAnthropic writes the tools array into jw from an Anthropic body.
-func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) {
+func writeGeminiToolsFromAnthropic(jw *jsonWriter, body []byte) error {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() || tools.Get("#").Int() == 0 {
-		return
+		return nil
 	}
 
-	var decls []string
+	declarations := make([]any, 0, int(tools.Get("#").Int()))
+	var emitErr error
 	tools.ForEach(func(_, t gjson.Result) bool {
 		name := t.Get("name").String()
 		if name == "" {
 			return true
 		}
-		dw := newJSONWriter()
-		dw.Obj()
-		dw.Key("name")
-		dw.Str(name)
+		declaration := map[string]any{"name": name}
 		if desc := t.Get("description"); desc.Exists() {
-			dw.Key("description")
-			dw.Str(desc.String())
+			declaration["description"] = desc.String()
 		}
 		if params := t.Get("input_schema"); params.Exists() {
 			var schema any
-			if err := json.Unmarshal([]byte(params.Raw), &schema); err == nil {
-				schema = inlineSchemaDefs(schema)
-				schema = sanitizeSchemaForGemini(schema)
-				if schemaBytes, err := json.Marshal(schema); err == nil {
-					dw.Key("parameters")
-					dw.RawBytes(schemaBytes)
-				}
+			if err := json.Unmarshal([]byte(params.Raw), &schema); err != nil {
+				emitErr = fmt.Errorf("function %q input_schema: invalid JSON: %w", name, err)
+				return false
 			}
+			clean, err := sanitizeSchemaForGemini(schema)
+			if err != nil {
+				emitErr = fmt.Errorf("function %q input_schema: %w", name, err)
+				return false
+			}
+			declaration["parameters"] = clean
 		}
-		dw.EndObj()
-		decls = append(decls, string(dw.Bytes()))
+		declarations = append(declarations, declaration)
 		return true
 	})
-
-	if len(decls) == 0 {
-		return
+	if emitErr != nil {
+		return emitErr
+	}
+	var err error
+	declarations, err = dedupeGeminiDeclarations(declarations)
+	if err != nil {
+		return err
+	}
+	if len(declarations) == 0 {
+		return nil
 	}
 	jw.Key("tools")
 	jw.Arr()
 	jw.Obj()
 	jw.Key("functionDeclarations")
 	jw.Arr()
-	for _, d := range decls {
-		jw.Raw(d)
+	for _, declaration := range declarations {
+		encoded, err := json.Marshal(declaration)
+		if err != nil {
+			return fmt.Errorf("marshal function declaration: %w", err)
+		}
+		jw.RawBytes(encoded)
 	}
 	jw.EndArr()
 	jw.EndObj()
 	jw.EndArr()
+	return nil
 }
 
 // writeGeminiToolChoiceFromAnthropic writes toolConfig into jw from an Anthropic
@@ -1044,7 +1063,8 @@ func writeGeminiFunctionCallingMode(jw *jsonWriter, mode, name string) {
 }
 
 // writeGeminiGenerationConfigFromAnthropic writes generationConfig into jw from an Anthropic body.
-func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model, forceEffort string) {
+func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, opts EmitOptions) error {
+	model := opts.TargetModel
 	type field struct {
 		key string
 		raw string
@@ -1071,20 +1091,18 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 			fields = append(fields, field{"stopSequences", raw})
 		}
 	}
-	// Claude Code drives reasoning via `thinking`; map its budget onto Gemini's
-	// thinkingConfig so 3.x doesn't run at its minimal default. reasoning_effort wins if set.
-	effort := geminiReasoningEffort(body)
-	if forceEffort != "" {
-		effort = forceEffort
+	intent, err := applyGeminiReasoning(ParseReasoningIntent(FormatAnthropic, body), opts)
+	if err != nil {
+		return err
 	}
-	if effort != "" {
-		if raw := thinkingConfigRaw(effort, model); raw != "" {
-			fields = append(fields, field{"thinkingConfig", raw})
-		}
+	if raw, err := geminiThinkingConfigRaw(intent, model); err != nil {
+		return err
+	} else if raw != "" {
+		fields = append(fields, field{"thinkingConfig", raw})
 	}
 
 	if len(fields) == 0 {
-		return
+		return nil
 	}
 	jw.Key("generationConfig")
 	jw.Obj()
@@ -1093,6 +1111,7 @@ func writeGeminiGenerationConfigFromAnthropic(jw *jsonWriter, body []byte, model
 		jw.Raw(f.raw)
 	}
 	jw.EndObj()
+	return nil
 }
 
 // clampToModelOutputCap caps v to the model's max output token limit.
@@ -1133,21 +1152,44 @@ func stopToArrayRaw(r gjson.Result) string {
 	return "[" + strings.Join(items, ",") + "]"
 }
 
-// geminiReasoningEffort resolves reasoning effort for a native-Gemini request:
-// explicit reasoning_effort, else an Anthropic-style `thinking` budget
-// (Claude Code sends `thinking`, not reasoning_effort). "" = none.
-func geminiReasoningEffort(body []byte) string {
-	if r := gjson.GetBytes(body, "reasoning_effort"); r.Exists() && r.Type == gjson.String {
-		return r.String()
+func applyGeminiReasoning(intent ReasoningIntent, opts EmitOptions) (ReasoningIntent, error) {
+	caps := opts.Capabilities
+	if len(caps.Reasoning().Levels) == 0 {
+		caps = router.Lookup(opts.TargetModel)
 	}
-	if t := gjson.GetBytes(body, "thinking"); t.Exists() && t.Get("type").String() != "disabled" {
-		return effortForBudget(t.Get("budget_tokens").Int())
-	}
-	return ""
+	return ApplyReasoningIntent(intent, caps, opts.ForceReasoningEffort)
 }
 
-// thinkingConfigRaw returns raw JSON for a Gemini thinkingConfig given an
-// OpenAI reasoning_effort string, or "" for unrecognised values.
+// geminiThinkingConfigRaw applies a validated canonical intent to Gemini's
+// native thinkingConfig shape.
+func geminiThinkingConfigRaw(intent ReasoningIntent, model string) (string, error) {
+	if intent.Kind == "" || intent.Kind == ReasoningAuto {
+		return "", nil
+	}
+	if intent.Kind == ReasoningDisabled {
+		if isGemini3xModel(model) {
+			return "", nil
+		}
+		return thinkingConfigRaw("none", model), nil
+	}
+	if intent.Kind == ReasoningBudget {
+		if isGemini3xModel(model) {
+			return "", fmt.Errorf("%w: Gemini 3.x does not support thinking budgets", ErrReasoningIncompatible)
+		}
+		fw := newJSONWriter()
+		fw.Obj()
+		fw.Key("thinkingBudget")
+		fw.Int(intent.BudgetTokens)
+		fw.EndObj()
+		return string(fw.Bytes()), nil
+	}
+	if intent.Kind != ReasoningLevel {
+		return "", fmt.Errorf("%w: unsupported Gemini reasoning intent", ErrReasoningIncompatible)
+	}
+	return thinkingConfigRaw(intent.Level, model), nil
+}
+
+// thinkingConfigRaw returns raw JSON for a validated Gemini reasoning level.
 func thinkingConfigRaw(effort, model string) string {
 	// 3.x uses thinkingLevel; the legacy numeric thinkingBudget is documented as
 	// suboptimal there and mixing both fields 400s. 2.5 keeps thinkingBudget.
@@ -1229,187 +1271,435 @@ var geminiSupportedFormats = map[string]struct{}{
 	"int64":     {},
 }
 
-// sanitizeSchemaForGemini returns a deep copy of v with only the JSON Schema
-// fields Gemini accepts, so the caller can mutate without touching the
-// original input_schema (other emitters DO accept full JSON Schema).
-func sanitizeSchemaForGemini(v any) any {
-	return sanitizeSchemaFiltered(v, true)
+// sanitizeSchemaForGemini preserves schema meaning or returns a typed error.
+// Gemini schema support is a routing constraint, not an excuse to broaden a
+// tool's accepted input language.
+func sanitizeSchemaForGemini(v any) (any, error) {
+	inlined, err := inlineGeminiSchemaRefs(v)
+	if err != nil {
+		return nil, err
+	}
+	return sanitizeGeminiSchemaNode(inlined, "$")
 }
 
-// sanitizeSchemaFiltered is the recursive workhorse. filterKeys=false passes
-// all map keys through unfiltered (used inside "properties", where keys are
-// user-defined, not schema keywords).
-func sanitizeSchemaFiltered(v any, filterKeys bool) any {
+func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
+	if truth, ok := v.(bool); ok {
+		if truth {
+			return map[string]any{}, nil
+		}
+		return nil, fmt.Errorf("%w at %s: false schemas cannot be represented", ErrGeminiSchemaIncompatible, path)
+	}
+	node, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w at %s: schema must be an object", ErrGeminiSchemaIncompatible, path)
+	}
+
+	if allOf, exists := node["allOf"]; exists {
+		merged, err := mergeGeminiAllOf(allOf, path+".allOf")
+		if err != nil {
+			return nil, err
+		}
+		base := mergeSchemaMaps(node, nil, false)
+		delete(base, "allOf")
+		node, ok = mergeSchemaMapsExact(base, merged)
+		if !ok {
+			return nil, fmt.Errorf("%w at %s.allOf: branches conflict with sibling constraints", ErrGeminiSchemaIncompatible, path)
+		}
+	}
+	if _, exists := node["oneOf"]; exists {
+		return nil, fmt.Errorf("%w at %s.oneOf: Gemini does not support oneOf", ErrGeminiSchemaIncompatible, path)
+	}
+
+	out := make(map[string]any, len(node))
+	for key, child := range node {
+		if key == "$defs" || key == "definitions" || key == "$ref" {
+			continue
+		}
+		if key == "const" {
+			continue
+		}
+		if _, supported := geminiSchemaAllowedKeys[key]; !supported {
+			return nil, fmt.Errorf("%w at %s.%s: unsupported constraint", ErrGeminiSchemaIncompatible, path, key)
+		}
+		switch key {
+		case "properties":
+			properties, ok := child.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("%w at %s.properties: expected object", ErrGeminiSchemaIncompatible, path)
+			}
+			clean := make(map[string]any, len(properties))
+			for name, value := range properties {
+				var err error
+				clean[name], err = sanitizeGeminiSchemaNode(value, path+".properties."+name)
+				if err != nil {
+					return nil, err
+				}
+			}
+			out[key] = clean
+		case "items":
+			clean, err := sanitizeGeminiSchemaNode(child, path+".items")
+			if err != nil {
+				return nil, err
+			}
+			out[key] = clean
+		case "anyOf":
+			branches, ok := child.([]any)
+			if !ok || len(branches) == 0 {
+				return nil, fmt.Errorf("%w at %s.anyOf: expected non-empty array", ErrGeminiSchemaIncompatible, path)
+			}
+			clean := make([]any, len(branches))
+			for i, branch := range branches {
+				var err error
+				clean[i], err = sanitizeGeminiSchemaNode(branch, fmt.Sprintf("%s.anyOf[%d]", path, i))
+				if err != nil {
+					return nil, err
+				}
+			}
+			out[key] = clean
+		case "format":
+			format, ok := child.(string)
+			if !ok {
+				return nil, fmt.Errorf("%w at %s.format: expected string", ErrGeminiSchemaIncompatible, path)
+			}
+			if _, supported := geminiSupportedFormats[format]; !supported {
+				return nil, fmt.Errorf("%w at %s.format: %q is unsupported", ErrGeminiSchemaIncompatible, path, format)
+			}
+			out[key] = format
+		default:
+			out[key] = deepCopyJSON(child)
+		}
+	}
+
+	if constant, exists := node["const"]; exists {
+		if enum, exists := out["enum"]; exists && !valueInEnum(constant, enum) {
+			return nil, fmt.Errorf("%w at %s: const conflicts with enum", ErrGeminiSchemaIncompatible, path)
+		}
+		out["enum"] = []any{deepCopyJSON(constant)}
+	}
+	if err := normalizeGeminiNullableType(out, path); err != nil {
+		return nil, err
+	}
+	if err := validateGeminiRequired(out, path); err != nil {
+		return nil, err
+	}
+	if err := validateGeminiEnum(out, path); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func mergeGeminiAllOf(v any, path string) (map[string]any, error) {
+	branches, ok := v.([]any)
+	if !ok || len(branches) == 0 {
+		return nil, fmt.Errorf("%w at %s: expected non-empty array", ErrGeminiSchemaIncompatible, path)
+	}
+	merged := map[string]any{}
+	for i, branch := range branches {
+		clean, err := sanitizeGeminiSchemaNode(branch, fmt.Sprintf("%s[%d]", path, i))
+		if err != nil {
+			return nil, err
+		}
+		object, ok := clean.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%w at %s[%d]: branch is not an object schema", ErrGeminiSchemaIncompatible, path, i)
+		}
+		var mergedOK bool
+		merged, mergedOK = mergeSchemaMapsExact(merged, object)
+		if !mergedOK {
+			return nil, fmt.Errorf("%w at %s[%d]: branches conflict", ErrGeminiSchemaIncompatible, path, i)
+		}
+	}
+	return merged, nil
+}
+
+func mergeSchemaMaps(base, extra map[string]any, overwrite bool) map[string]any {
+	out := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = deepCopyJSON(value)
+	}
+	for key, value := range extra {
+		if _, exists := out[key]; !exists || overwrite {
+			out[key] = deepCopyJSON(value)
+		}
+	}
+	return out
+}
+
+func mergeSchemaMapsExact(left, right map[string]any) (map[string]any, bool) {
+	out := mergeSchemaMaps(left, nil, false)
+	for key, value := range right {
+		current, exists := out[key]
+		if !exists {
+			out[key] = deepCopyJSON(value)
+			continue
+		}
+		if key == "properties" {
+			leftProperties, leftOK := current.(map[string]any)
+			rightProperties, rightOK := value.(map[string]any)
+			if !leftOK || !rightOK {
+				return nil, false
+			}
+			mergedProperties, ok := mergeSchemaMapsExact(leftProperties, rightProperties)
+			if !ok {
+				return nil, false
+			}
+			out[key] = mergedProperties
+			continue
+		}
+		if key == "required" {
+			out[key] = uniqueStrings(current, value)
+			if out[key] == nil {
+				return nil, false
+			}
+			continue
+		}
+		if !semanticJSONEqual(current, value) {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func uniqueStrings(left, right any) any {
+	values := make(map[string]struct{})
+	for _, list := range []any{left, right} {
+		entries, ok := list.([]any)
+		if !ok {
+			return nil
+		}
+		for _, entry := range entries {
+			name, ok := entry.(string)
+			if !ok {
+				return nil
+			}
+			values[name] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, len(keys))
+	for i, key := range keys {
+		out[i] = key
+	}
+	return out
+}
+
+func normalizeGeminiNullableType(schema map[string]any, path string) error {
+	types, isArray := schema["type"].([]any)
+	if !isArray {
+		return nil
+	}
+	if len(types) != 2 {
+		return fmt.Errorf("%w at %s.type: only [type, null] is representable", ErrGeminiSchemaIncompatible, path)
+	}
+	primary := ""
+	hasNull := false
+	for _, candidate := range types {
+		name, ok := candidate.(string)
+		if !ok {
+			return fmt.Errorf("%w at %s.type: type names must be strings", ErrGeminiSchemaIncompatible, path)
+		}
+		if name == "null" {
+			if hasNull {
+				return fmt.Errorf("%w at %s.type: duplicate null", ErrGeminiSchemaIncompatible, path)
+			}
+			hasNull = true
+			continue
+		}
+		if primary != "" {
+			return fmt.Errorf("%w at %s.type: multiple non-null types", ErrGeminiSchemaIncompatible, path)
+		}
+		primary = name
+	}
+	if primary == "" || !hasNull {
+		return fmt.Errorf("%w at %s.type: only [type, null] is representable", ErrGeminiSchemaIncompatible, path)
+	}
+	schema["type"] = primary
+	schema["nullable"] = true
+	return nil
+}
+
+func validateGeminiRequired(schema map[string]any, path string) error {
+	required, exists := schema["required"]
+	if !exists {
+		return nil
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	entries, ok := required.([]any)
+	if !ok {
+		return fmt.Errorf("%w at %s.required: expected array", ErrGeminiSchemaIncompatible, path)
+	}
+	for _, entry := range entries {
+		name, ok := entry.(string)
+		if !ok || properties == nil {
+			return fmt.Errorf("%w at %s.required: cannot represent required property", ErrGeminiSchemaIncompatible, path)
+		}
+		if _, exists := properties[name]; !exists {
+			return fmt.Errorf("%w at %s.required: %q has no declared property", ErrGeminiSchemaIncompatible, path, name)
+		}
+	}
+	return nil
+}
+
+func validateGeminiEnum(schema map[string]any, path string) error {
+	values, exists := schema["enum"]
+	if !exists {
+		return nil
+	}
+	enum, ok := values.([]any)
+	if !ok || len(enum) == 0 {
+		return fmt.Errorf("%w at %s.enum: expected non-empty array", ErrGeminiSchemaIncompatible, path)
+	}
+	typ, _ := schema["type"].(string)
+	for _, value := range enum {
+		if !enumMatchesType(value, typ, schema["nullable"] == true) {
+			return fmt.Errorf("%w at %s.enum: value needs type coercion", ErrGeminiSchemaIncompatible, path)
+		}
+	}
+	return nil
+}
+
+func enumMatchesType(value any, typ string, nullable bool) bool {
+	if value == nil {
+		return nullable || typ == ""
+	}
+	if typ == "" {
+		return true
+	}
+	switch typ {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "number", "integer":
+		_, ok := value.(float64)
+		return ok
+	default:
+		return false
+	}
+}
+
+func valueInEnum(value, enum any) bool {
+	values, ok := enum.([]any)
+	if !ok {
+		return false
+	}
+	for _, candidate := range values {
+		if semanticJSONEqual(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func inlineGeminiSchemaRefs(v any) (any, error) {
+	root, ok := v.(map[string]any)
+	if !ok {
+		return v, nil
+	}
+	defs := make(map[string]any)
+	for _, key := range []string{"$defs", "definitions"} {
+		if definitions, ok := root[key].(map[string]any); ok {
+			for name, value := range definitions {
+				defs[key+"/"+name] = value
+			}
+		}
+	}
+	return resolveGeminiSchemaRefs(v, defs, map[string]struct{}{}, "$")
+}
+
+func resolveGeminiSchemaRefs(v any, defs map[string]any, visiting map[string]struct{}, path string) (any, error) {
+	switch node := v.(type) {
+	case map[string]any:
+		if ref, ok := node["$ref"].(string); ok {
+			name := strings.TrimPrefix(ref, "#/")
+			target, exists := defs[name]
+			if !exists {
+				return nil, fmt.Errorf("%w at %s: unresolved reference %q", ErrGeminiSchemaIncompatible, path, ref)
+			}
+			if _, cycle := visiting[name]; cycle {
+				return nil, fmt.Errorf("%w at %s: cyclic reference %q", ErrGeminiSchemaIncompatible, path, ref)
+			}
+			visiting[name] = struct{}{}
+			resolved, err := resolveGeminiSchemaRefs(deepCopyJSON(target), defs, visiting, path)
+			delete(visiting, name)
+			return resolved, err
+		}
+		out := make(map[string]any, len(node))
+		for key, child := range node {
+			if key == "$defs" || key == "definitions" {
+				continue
+			}
+			resolved, err := resolveGeminiSchemaRefs(child, defs, visiting, path+"."+key)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = resolved
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(node))
+		for i, child := range node {
+			resolved, err := resolveGeminiSchemaRefs(child, defs, visiting, fmt.Sprintf("%s[%d]", path, i))
+			if err != nil {
+				return nil, err
+			}
+			out[i] = resolved
+		}
+		return out, nil
+	default:
+		return deepCopyJSON(v), nil
+	}
+}
+
+func semanticJSONEqual(left, right any) bool {
+	return reflect.DeepEqual(canonicalJSON(left), canonicalJSON(right))
+}
+
+func canonicalJSON(v any) any {
 	switch node := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(node))
-		for k, child := range node {
-			if filterKeys {
-				if _, ok := geminiSchemaAllowedKeys[k]; !ok {
-					continue
-				}
-			}
-			if k == "enum" && filterKeys {
-				cleaned := filterStringEnum(child)
-				if len(cleaned) == 0 {
-					continue
-				}
-				out[k] = cleaned
-				continue
-			}
-			// Unsupported "format" values (e.g. "uri", "email") make Google reject
-			// the whole request; keep only supported values.
-			if k == "format" && filterKeys {
-				if s, ok := child.(string); ok {
-					if _, supported := geminiSupportedFormats[s]; supported {
-						out[k] = s
-					}
-				}
-				continue
-			}
-			// Property names under "properties" are user-defined, not schema
-			// keywords, but their values are still schemas and must be filtered.
-			if k == "properties" && filterKeys {
-				out[k] = sanitizeSchemaFiltered(child, false)
-				continue
-			}
-			// Inside a properties map, a bool value (valid JSON Schema "any type"/
-			// "reject all") is rejected by Gemini's proto Schema — use empty Schema instead.
-			if !filterKeys {
-				if _, isBool := child.(bool); isBool {
-					out[k] = map[string]any{}
-					continue
-				}
-			}
-			// "default"/"example" values are arbitrary JSON data, not schema —
-			// pass through unfiltered so their object keys aren't stripped.
-			if (k == "default" || k == "example") && filterKeys {
-				out[k] = child
-				continue
-			}
-			out[k] = sanitizeSchemaFiltered(child, true)
-		}
-		// JSON Schema allows "type": ["array", "null"]; Gemini wants single Type + nullable bool.
-		out = collapseTypeArray(out)
-		// JSON Schema allows `items` to be a boolean (true = any, false = none).
-		// Gemini's proto Schema.items is optional Schema and rejects booleans.
-		out = collapseItemsBool(out)
-		// Anthropic permits `{"type":"array"}` with no `items`; Gemini rejects it
-		// ("missing field"). Inject a permissive default.
-		if t, ok := out["type"].(string); ok && t == "array" {
-			if existing, has := out["items"]; !has || existing == nil {
-				out["items"] = map[string]any{"type": "string"}
-			}
-		}
-		// Prune dangling "required" entries (name not in "properties") since the
-		// allow-list keeps the key but doesn't reconcile it. Skip when
-		// filterKeys is false: there we're inside "properties" and a key
-		// literally named "required" is a user property, not the keyword.
-		if filterKeys {
-			out = pruneDanglingRequired(out)
+		for key, value := range node {
+			out[key] = canonicalJSON(value)
 		}
 		return out
 	case []any:
 		out := make([]any, len(node))
-		for i, child := range node {
-			out[i] = sanitizeSchemaFiltered(child, true)
+		for i, value := range node {
+			out[i] = canonicalJSON(value)
 		}
 		return out
 	default:
-		return v
+		return node
 	}
 }
 
-// pruneDanglingRequired drops "required" entries missing from "properties"
-// (valid JSON Schema, but Gemini 400s on it), removing the key entirely if
-// nothing remains.
-func pruneDanglingRequired(out map[string]any) map[string]any {
-	req, ok := out["required"].([]any)
-	if !ok {
-		return out
-	}
-	props, _ := out["properties"].(map[string]any)
-	kept := make([]any, 0, len(req))
-	for _, name := range req {
-		s, isStr := name.(string)
-		if !isStr {
-			continue
-		}
-		if _, present := props[s]; present {
-			kept = append(kept, s)
-		}
-	}
-	if len(kept) == 0 {
-		delete(out, "required")
-		return out
-	}
-	out["required"] = kept
-	return out
-}
-
-// collapseTypeArray collapses JSON Schema ["array", "null"] into Gemini's
-// single Type + nullable convention. Drops "type" entirely if only "null".
-func collapseTypeArray(out map[string]any) map[string]any {
-	types, ok := out["type"].([]any)
-	if !ok {
-		return out
-	}
-	var primary string
-	hasNull := false
-	for _, t := range types {
-		s, ok := t.(string)
+func dedupeGeminiDeclarations(declarations []any) ([]any, error) {
+	seen := make(map[string]any, len(declarations))
+	out := make([]any, 0, len(declarations))
+	for _, declaration := range declarations {
+		object, ok := declaration.(map[string]any)
 		if !ok {
+			return nil, fmt.Errorf("%w: declaration is not an object", ErrGeminiToolDeclarationConflict)
+		}
+		name, _ := object["name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("%w: declaration has no name", ErrGeminiToolDeclarationConflict)
+		}
+		if previous, exists := seen[name]; exists {
+			if !semanticJSONEqual(previous, object) {
+				return nil, fmt.Errorf("%w: duplicate declaration %q differs", ErrGeminiToolDeclarationConflict, name)
+			}
 			continue
 		}
-		if s == "null" {
-			hasNull = true
-		} else if primary == "" {
-			primary = s
-		}
+		seen[name] = object
+		out = append(out, object)
 	}
-	if primary == "" {
-		delete(out, "type")
-		return out
-	}
-	out["type"] = primary
-	if hasNull {
-		out["nullable"] = true
-	}
-	return out
-}
-
-// collapseItemsBool converts boolean "items" (true = any, false = none) into
-// Gemini's Schema-or-null convention: true → empty Schema, false → removed.
-func collapseItemsBool(out map[string]any) map[string]any {
-	v, ok := out["items"]
-	if !ok {
-		return out
-	}
-	switch v := v.(type) {
-	case bool:
-		if v {
-			out["items"] = map[string]any{}
-		} else {
-			delete(out, "items")
-		}
-	}
-	return out
-}
-
-// filterStringEnum returns non-empty string enum entries; Gemini requires
-// TYPE_STRING enums and rejects empty strings.
-func filterStringEnum(v any) []any {
-	arr, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]any, 0, len(arr))
-	for _, item := range arr {
-		s, ok := item.(string)
-		if !ok || s == "" {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
+	return out, nil
 }

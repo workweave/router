@@ -2,7 +2,7 @@ package proxy_test
 
 // OpenAI Responses API conformance: reasoning gpt-5.x + tools routes here
 // instead of chat/completions. Guards #331 (must stream upstream) and #328
-// (medium-effort promotion).
+// (medium-effort preservation).
 
 import (
 	"net/http"
@@ -56,9 +56,8 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 			},
 		},
 		{
-			// Guards router #328: gpt-5.x has a measured "medium" dead-zone, so a
-			// budget that resolves to medium must be promoted to high.
-			name:            "responses/effort_medium_promotes_high",
+			// Translation must preserve a valid client-selected medium level.
+			name:            "responses/effort_medium_preserved",
 			provider:        providers.ProviderOpenAI,
 			model:           "gpt-5.5",
 			newClient:       openAIClient,
@@ -66,8 +65,7 @@ func TestConformance_OpenAIResponses(t *testing.T) {
 			stream:          true,
 			upstreamFixture: "responses/toolcall.upstream.sse",
 			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
-				assert.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String(),
-					"a medium-effort budget must promote to high for gpt-5.x (router #328 dead-zone)")
+				assert.Equal(t, "medium", gjson.GetBytes(body, "reasoning.effort").String())
 			},
 		},
 		{
