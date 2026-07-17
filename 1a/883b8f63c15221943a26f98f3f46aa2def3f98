@@ -1,0 +1,30 @@
+internal/router/cluster/artifacts_test.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 267,275,280,285-303
+cmd/router/main.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 348,354,356
+internal/proxy/service_session_pin_test.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 559-597,616,638,670,682-741,772
+  s_a80e824a11b7fd::t_4817b6037ab0ae 742-743
+internal/proxy/turnloop.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 48-49,51-55,116,148-153,173,192,204,219,244,334-343,357
+internal/router/cluster/artifacts.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 326,330-337,340,351-352
+internal/proxy/service.go
+  s_a80e824a11b7fd::t_92b14371fc4bda 70-72,75,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "1a883b8f63c15221943a26f98f3f46aa2def3f98",
+  "prompts": {},
+  "sessions": {
+    "s_a80e824a11b7fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a472358e-8ebc-4ed7-af48-5d8f9c2a2693",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

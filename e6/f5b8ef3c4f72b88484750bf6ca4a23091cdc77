@@ -1,0 +1,34 @@
+install/install.sh
+  s_d3fc1c517ba243::t_7b70d00590a3da 1538
+  s_d3fc1c517ba243::t_7e5e39e6b28fb2 990
+  s_d3fc1c517ba243::t_fdf47630a92171 807
+  s_d3fc1c517ba243::t_a0c8b27d12b112 877
+  s_d3fc1c517ba243::t_5f61c78ba5f86d 1550
+  s_d3fc1c517ba243::t_82e02dd6fc8b9f 825
+  s_d3fc1c517ba243::t_6bf9fe7eedaa57 840
+  s_d3fc1c517ba243::t_95171578c36814 803
+  s_d3fc1c517ba243::t_c05985dbdc052e 886
+  s_d3fc1c517ba243::t_7c177ee860594d 917
+  s_d3fc1c517ba243::t_b738ba126717b1 973
+  s_d3fc1c517ba243::t_05d69f71ae1d12 820
+install/uninstall.sh
+  s_d3fc1c517ba243::t_8e1b195c529820 57
+  s_d3fc1c517ba243::t_35feb19cd669da 425
+  s_d3fc1c517ba243::t_173d9604f85e40 139,222,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e6f5b8ef3c4f72b88484750bf6ca4a23091cdc77",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

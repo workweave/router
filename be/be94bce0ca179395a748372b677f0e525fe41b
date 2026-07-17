@@ -1,0 +1,20 @@
+internal/billing/service.go
+  s_f329c911a5861c::t_de854ee7302c79 40
+  s_f329c911a5861c::t_057a69b5167a5d 37-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "bebe94bce0ca179395a748372b677f0e525fe41b",
+  "prompts": {},
+  "sessions": {
+    "s_f329c911a5861c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9a3a147-a043-4caa-8424-19e37b94d138",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

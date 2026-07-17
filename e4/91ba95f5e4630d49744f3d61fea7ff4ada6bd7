@@ -1,0 +1,52 @@
+.github/pull_request_template.md
+  s_7ab94525849bfa::t_796505820b116f 1-31
+CODE_OF_CONDUCT.md
+  s_7ab94525849bfa::t_a217efebf79cc5 1-122
+CONTRIBUTING.md
+  s_7ab94525849bfa::t_c81dfc59360377 15-25
+  s_7ab94525849bfa::t_64133dd10bb7c2 195-214
+.claude/skills/add-provider/SKILL.md
+  s_7ab94525849bfa::t_d9bfed85112d7b 1-98
+.github/ISSUE_TEMPLATE/feature_request.yml
+  s_7ab94525849bfa::t_111d131de6ccaa 1-47
+.github/workflows/claude.yml
+  s_7ab94525849bfa::t_178493d87ea585 1-49
+.github/workflows/stale.yml
+  s_7ab94525849bfa::t_ca11f232731bdf 1-46
+.github/dependabot.yml
+  s_7ab94525849bfa::t_757fc2d8c6c940 1-39
+.github/CODEOWNERS
+  s_7ab94525849bfa::t_6bf4edd00565b2 1-20
+.github/workflows/claude-issue-triage.yml
+  s_7ab94525849bfa::t_41a005ff8c33f7 1-62
+.github/workflows/claude-review.yml
+  s_7ab94525849bfa::t_16f57f80097cc2 1-68
+SECURITY.md
+  s_7ab94525849bfa::t_cd50a57a36f7ea 1-52
+.github/ISSUE_TEMPLATE/provider_request.yml
+  s_7ab94525849bfa::t_50da020668842b 1-57
+README.md
+  s_7ab94525849bfa::t_25e73cdffad318 170-181
+.github/ISSUE_TEMPLATE/config.yml
+  s_7ab94525849bfa::t_5b68183a41e4a9 1-11
+.github/ISSUE_TEMPLATE/bug_report.yml
+  s_7ab94525849bfa::t_1c45d22bcf5c7f 1-72
+.claude/skills/triage-issue/SKILL.md
+  s_7ab94525849bfa::t_b019928a8040e0 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "e491ba95f5e4630d49744f3d61fea7ff4ada6bd7",
+  "prompts": {},
+  "sessions": {
+    "s_7ab94525849bfa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0461dfc3-9784-4f73-9c0b-b6e076ba6243",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

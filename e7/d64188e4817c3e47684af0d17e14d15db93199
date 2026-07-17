@@ -1,0 +1,20 @@
+internal/proxy/service.go
+  s_cba2e3935ad3ce::t_f09dd750926f11 1623-1628
+  s_cba2e3935ad3ce::t_bcaea430dcc25d 1984-1991
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e7d64188e4817c3e47684af0d17e14d15db93199",
+  "prompts": {},
+  "sessions": {
+    "s_cba2e3935ad3ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34254bee-0fbf-4eaa-ba63-a0d1a16f188b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+internal/api/gemini/generate_content.go
+  s_d3fc1c517ba243::t_4e8eb9e0e57bc8 48,52,59
+  s_d3fc1c517ba243::t_6c55f7056a7e7e 93,99
+  s_d3fc1c517ba243::t_1a310b4b889951 41
+  s_d3fc1c517ba243::t_8f6091ee93b864 111,115
+  s_d3fc1c517ba243::t_55b87cd8eef999 73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "4e43a0236f59a029e29ea98bf7c489afe5b57b76",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

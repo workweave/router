@@ -1,0 +1,21 @@
+internal/postgres/feedback.go
+  s_74c1d8358797be::t_1769149bf2422a 51-54,62-65,70,73-77
+internal/api/feedback/integration_test.go
+  s_74c1d8358797be::t_6d1991dd7d0439 123-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "54fee0947286a302119205d877dd09b69705ee3a",
+  "prompts": {},
+  "sessions": {
+    "s_74c1d8358797be": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3922321c-192c-48af-aa2f-c6638fdf350c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
