@@ -1,0 +1,36 @@
+internal/proxy/service.go
+  s_eaa7fc513f2fff::t_d6e91587348806 1969-1974
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_eaa7fc513f2fff::t_8e8770087f6b4b 547-548,563
+  s_eaa7fc513f2fff::t_14947bffa0472c 613-632
+internal/translate/emit_openai.go
+  s_eaa7fc513f2fff::t_147db038e58c19 269-272
+internal/translate/responses_outbound_test.go
+  s_eaa7fc513f2fff::t_3b1ea41aacd326 363-370
+internal/translate/crossformat_request_test.go
+  s_eaa7fc513f2fff::t_297b4554a84ae7 9
+  s_eaa7fc513f2fff::t_cb62628d07bed6 1232-1254
+internal/translate/responses_to_anthropic_writer.go
+  s_eaa7fc513f2fff::t_cb57e933830c99 737-740
+  s_eaa7fc513f2fff::t_748cf1b5e683c8 746-770
+  s_eaa7fc513f2fff::t_2de5be529b868a 325-327
+  s_eaa7fc513f2fff::t_dbfe76438607c4 644-650
+internal/translate/emit_openai_responses.go
+  s_eaa7fc513f2fff::t_d60ef6fa234b4d 62-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "5587674e71702192f68c89e2d3def4ccaf25dcb3",
+  "prompts": {},
+  "sessions": {
+    "s_eaa7fc513f2fff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23a7366d-2ca0-46f8-93ec-a4be57d8f0a5",
+        "model": "composer-2.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

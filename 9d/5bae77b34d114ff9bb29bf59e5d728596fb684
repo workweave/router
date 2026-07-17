@@ -1,0 +1,45 @@
+internal/router/policy/contract.go
+  s_1bd9528555e07b::t_b59cfeede2ca07 30-35
+  s_1bd9528555e07b::t_94be9447b86d02 29
+cmd/router/hmm_capabilities_test.go
+  s_1bd9528555e07b::t_ae557c16170318 1-60
+cmd/AGENTS.md
+  s_1bd9528555e07b::t_ae557c16170318 17
+sidecars/hmm/CLAUDE.md
+  s_1bd9528555e07b::t_ae557c16170318 15
+internal/router/policy/sidecar_router.go
+  s_1bd9528555e07b::t_b59cfeede2ca07 6,33-34,57-60,66-71,73-76,83-86,94-97
+  s_1bd9528555e07b::t_94be9447b86d02 65
+internal/router/policy/sidecar_router_test.go
+  s_1bd9528555e07b::t_ae557c16170318 148-166,188
+  s_1bd9528555e07b::t_dd70aa8aab5075 6,167-187
+internal/proxy/strategy_registry_internal_test.go
+  s_1bd9528555e07b::t_ae557c16170318 21-29,87-105
+cmd/router/hmm_capabilities.go
+  s_1bd9528555e07b::t_5946cd5e7e9ff0 38
+  s_1bd9528555e07b::t_b59cfeede2ca07 1-37,39-43
+cmd/CLAUDE.md
+  s_1bd9528555e07b::t_ae557c16170318 17
+internal/proxy/service.go
+  s_1bd9528555e07b::t_b59cfeede2ca07 1482-1486
+cmd/router/main.go
+  s_1bd9528555e07b::t_b59cfeede2ca07 593-610
+sidecars/hmm/AGENTS.md
+  s_1bd9528555e07b::t_ae557c16170318 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "9d5bae77b34d114ff9bb29bf59e5d728596fb684",
+  "prompts": {},
+  "sessions": {
+    "s_1bd9528555e07b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f591f-df79-7591-94f9-edeb03c45610",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

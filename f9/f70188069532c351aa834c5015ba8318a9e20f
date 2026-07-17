@@ -1,0 +1,23 @@
+internal/postgres/user_repo.go
+  s_4e7ed014e8ae78::t_388a2d1806b203 37-48
+db/queries/model_router_users.sql
+  s_4e7ed014e8ae78::t_072fd6b568b141 7-15,17-45,47-49
+internal/sqlc/model_router_users.sql.go
+  s_4e7ed014e8ae78::t_7e3554ef2e4a3f 158-186,188-190,195-203,205-207,218-255,257-260,264-265,267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "f9f70188069532c351aa834c5015ba8318a9e20f",
+  "prompts": {},
+  "sessions": {
+    "s_4e7ed014e8ae78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13bcbea4-2be4-476b-8c59-973927efe1ab",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

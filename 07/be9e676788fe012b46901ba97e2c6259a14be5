@@ -1,0 +1,22 @@
+internal/proxy/toolresult_bytes_internal_test.go
+  s_3f8d95a685b537::t_8f80653f2dee5e 1-32
+internal/proxy/service.go
+  s_3f8d95a685b537::t_7cf1e1cf09c03f 1786,2912
+  s_3f8d95a685b537::t_8bb6194329335f 2178-2190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "07be9e676788fe012b46901ba97e2c6259a14be5",
+  "prompts": {},
+  "sessions": {
+    "s_3f8d95a685b537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86141471-a1a5-4e3a-bdf9-190038e3d42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

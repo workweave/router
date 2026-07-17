@@ -1,0 +1,21 @@
+scripts/feedback_integration_check/main.go
+  s_c4ecee41717be0::t_4e3ad406e7ab47 1-264
+scripts/feedback_integration_check/README.md
+  s_c4ecee41717be0::t_7f3939a7b127c6 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7080e81b1cffd6517c22b5a697934508cb772e73",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

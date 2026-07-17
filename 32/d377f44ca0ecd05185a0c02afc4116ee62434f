@@ -1,0 +1,39 @@
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_28f95075f4bb78::t_3108475d508552 27
+  s_28f95075f4bb78::t_33fcda71ed80e7 3-6
+  s_28f95075f4bb78::t_34accbe4a0dbe1 1-2,7-26,28-29
+internal/router/cluster/artifacts/v0.38/rankings.json
+  s_28f95075f4bb78::t_34accbe4a0dbe1 1-21,23-62,64-82,84-102,104-122,124-142,144-162,164-182,184-202,204-222,224-242,244-262,264-282,284-302,304-322,324-342,344-362,364-365
+  s_28f95075f4bb78::t_cd65011a958859 63,83,103,123,143,163,183,203,223,243,263,283,303,323,343,363,366
+  s_28f95075f4bb78::t_e5b12454bbadfd 22
+internal/router/capability/tier_test.go
+  s_28f95075f4bb78::t_7bbf03fbdda62b 126
+  s_28f95075f4bb78::t_1a7179778fbff5 106
+internal/router/pricing/pricing.go
+  s_28f95075f4bb78::t_a3483c01760868 95-98
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_28f95075f4bb78::t_93e94b00d10061 1-2,4,70
+  s_28f95075f4bb78::t_34accbe4a0dbe1 3,5-69
+install/install.sh
+  s_28f95075f4bb78::t_53e51b34ac32dc 627,667
+install/cc-statusline.sh
+  s_28f95075f4bb78::t_53e51b34ac32dc 169,209
+internal/router/cluster/artifacts/latest
+  s_28f95075f4bb78::t_91cab627d920a6 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "32d377f44ca0ecd05185a0c02afc4116ee62434f",
+  "prompts": {},
+  "sessions": {
+    "s_28f95075f4bb78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b9912d02-7fd8-4474-90e0-08c0b96c5667",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
