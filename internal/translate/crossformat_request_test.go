@@ -638,42 +638,16 @@ func TestCrossFormat_OpenAIToGemini_ToolConversation(t *testing.T) {
 	assert.Equal(t, "package main\n\nfunc main() {}", result["result"])
 }
 
-// TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x mirrors the
-// Anthropic→Gemini guard: tool_calls without thought_signature 400 on Gemini
-// 3.x preview models, so the translator must drop sig-less tool history.
-func TestCrossFormat_OpenAIToGemini_DropsSigLessToolsForGemini3x(t *testing.T) {
+// Gemini 3.x history is never rewritten to hide missing signatures.
+func TestCrossFormat_OpenAIToGemini_RejectsSigLessToolsForGemini3x(t *testing.T) {
 	env, err := translate.ParseOpenAI(openAIToolConversation)
 	require.NoError(t, err)
 
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
-	require.NoError(t, err)
-
-	doc := unmarshalBody(t, prep.Body)
-	contents := getArray(t, doc, "contents")
-
-	// No part across any turn should carry a functionCall or
-	// functionResponse — they were all sig-less and would 400.
-	var lastRole string
-	for i, c := range contents {
-		msg := c.(map[string]any)
-		role, _ := msg["role"].(string)
-		assert.NotEqual(t, lastRole, role,
-			"contents[%d] role=%q must not match preceding turn's role — Gemini rejects non-alternating roles; placeholders should keep alternation across drops",
-			i, role)
-		lastRole = role
-		parts, _ := msg["parts"].([]any)
-		for _, p := range parts {
-			pmap := p.(map[string]any)
-			assert.Nil(t, pmap["functionCall"], "contents[%d] must not carry functionCall when sig-less history was dropped", i)
-			assert.Nil(t, pmap["functionResponse"], "contents[%d] must not carry functionResponse when matching functionCall was dropped", i)
-		}
-	}
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.ErrorIs(t, err, translate.ErrGeminiUnsignedToolHistory)
 }
 
-// When the sig-less drop guard fires on multi-tool turns, consecutive
-// `role:"tool"` messages must coalesce into a single user placeholder —
-// otherwise Gemini 400s on non-alternating roles.
-func TestCrossFormat_OpenAIToGemini_MultiToolDropCoalescesPlaceholders(t *testing.T) {
+func TestCrossFormat_OpenAIToGemini_RejectsMultiToolUnsignedHistory(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5",
 		"messages":[
@@ -690,20 +664,8 @@ func TestCrossFormat_OpenAIToGemini_MultiToolDropCoalescesPlaceholders(t *testin
 	env, err := translate.ParseOpenAI(body)
 	require.NoError(t, err)
 
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
-	require.NoError(t, err)
-
-	doc := unmarshalBody(t, prep.Body)
-	contents := getArray(t, doc, "contents")
-
-	var lastRole string
-	for i, c := range contents {
-		role, _ := c.(map[string]any)["role"].(string)
-		assert.NotEqual(t, lastRole, role,
-			"contents[%d] role=%q must not match preceding turn's role — consecutive tool messages must coalesce into one placeholder",
-			i, role)
-		lastRole = role
-	}
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+	require.ErrorIs(t, err, translate.ErrGeminiUnsignedToolHistory)
 }
 
 // Gemini 2.x accepts sig-less tool calls, so the drop guard must NOT fire

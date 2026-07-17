@@ -31,6 +31,14 @@ func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (pr
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Anthropic emit: %d", e.format)
 	}
+	if e.format == FormatOpenAI {
+		body, err = applyAnthropicCachePolicy(body, true)
+	} else {
+		body, err = applyAnthropicCachePolicy(body, false)
+	}
+	if err != nil {
+		return providers.PreparedRequest{}, err
+	}
 	return providers.PreparedRequest{Body: body, Headers: deriveAnthropicHeaders(in, opts)}, nil
 }
 
@@ -184,6 +192,7 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 
 		switch role {
 		case "system":
+			policy := sourceMessageCacheControl(msg)
 			// Collect text from system messages into the top-level system field.
 			if content.Type == gjson.String {
 				if s := content.String(); s != "" {
@@ -194,7 +203,7 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 					sb.Key("text")
 					sb.Str(s)
 					sb.EndObj()
-					systemBlocks = append(systemBlocks, string(sb.Bytes()))
+					systemBlocks = append(systemBlocks, appendCacheControlRaw(string(sb.Bytes()), policy))
 				}
 			} else if content.IsArray() {
 				content.ForEach(func(_, part gjson.Result) bool {
@@ -207,7 +216,7 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 							sb.Key("text")
 							sb.Str(t)
 							sb.EndObj()
-							systemBlocks = append(systemBlocks, string(sb.Bytes()))
+							systemBlocks = append(systemBlocks, appendCacheControlRaw(string(sb.Bytes()), policy))
 						}
 					}
 					return true
@@ -223,11 +232,11 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 
 		case "assistant":
 			flushToolBatch()
-			msgParts = append(msgParts, buildAnthropicAssistantMessage(msg))
+			msgParts = append(msgParts, cacheControlOnLastBlockWithPolicy(buildAnthropicAssistantMessage(msg), sourceMessageCacheControl(msg)))
 
 		default: // "user" and anything unrecognized
 			flushToolBatch()
-			msgParts = append(msgParts, buildAnthropicUserMessage(role, content))
+			msgParts = append(msgParts, cacheControlOnLastBlockWithPolicy(buildAnthropicUserMessage(role, content), sourceMessageCacheControl(msg)))
 		}
 		return true
 	})
@@ -236,12 +245,7 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	if len(systemBlocks) > 0 {
 		jw.Key("system")
 		jw.Arr()
-		for i, b := range systemBlocks {
-			// Cache the system + tools prefix (the large stable floor) by
-			// marking the last system block.
-			if i == len(systemBlocks)-1 {
-				b = appendCacheControl(b)
-			}
+		for _, b := range systemBlocks {
 			jw.Raw(b)
 		}
 		jw.EndArr()
@@ -250,38 +254,44 @@ func writeAnthropicSystemAndMessages(jw *jsonWriter, body []byte) {
 	if len(msgParts) > 0 {
 		jw.Key("messages")
 		jw.Arr()
-		for i, m := range msgParts {
-			// Mark the last block so the prefix reads from cache next turn.
-			if i == len(msgParts)-1 {
-				m = cacheControlOnLastBlock(m)
-			}
+		for _, m := range msgParts {
 			jw.Raw(m)
 		}
 		jw.EndArr()
 	}
 }
 
-// cacheControlMember is the Anthropic prompt-cache breakpoint. OpenAI/Gemini
-// clients never send cache_control, and Anthropic has no implicit caching, so
-// the OpenAI->Anthropic path injects it or clients like Cursor re-bill the
-// whole stable prefix every turn. It's a no-op below the model's minimum
-// cacheable prefix, so always safe to add.
+// cacheControlMember is the router-generated Anthropic prompt-cache breakpoint.
 const cacheControlMember = `"cache_control":{"type":"ephemeral"}`
 
 // appendCacheControl inserts the cache_control marker into a raw JSON content
 // block we constructed (final byte is the closing brace); guard fails open on
 // anything unexpected.
 func appendCacheControl(block string) string {
+	return appendCacheControlRaw(block, `{"type":"ephemeral"}`)
+}
+
+func appendCacheControlRaw(block, policy string) string {
 	if len(block) < 2 || block[len(block)-1] != '}' || !strings.Contains(block, ":") {
 		return block
 	}
-	return block[:len(block)-1] + "," + cacheControlMember + "}"
+	if policy == "" {
+		return block
+	}
+	return block[:len(block)-1] + `,"cache_control":` + policy + "}"
 }
 
 // cacheControlOnLastBlock adds a cache_control breakpoint to a message's final
 // content block, promoting string content to a text block to carry it
 // (Anthropic treats "x" and [{"type":"text","text":"x"}] identically).
 func cacheControlOnLastBlock(msg string) string {
+	return cacheControlOnLastBlockWithPolicy(msg, `{"type":"ephemeral"}`)
+}
+
+func cacheControlOnLastBlockWithPolicy(msg, policy string) string {
+	if policy == "" {
+		return msg
+	}
 	content := gjson.Get(msg, "content")
 	role := gjson.Get(msg, "role").String()
 
@@ -298,7 +308,7 @@ func cacheControlOnLastBlock(msg string) string {
 		jw.Arr()
 		for i, b := range blocks {
 			if i == len(blocks)-1 {
-				jw.Raw(appendCacheControl(b.Raw))
+				jw.Raw(appendCacheControlRaw(b.Raw, policy))
 			} else {
 				jw.Raw(b.Raw)
 			}
@@ -321,7 +331,7 @@ func cacheControlOnLastBlock(msg string) string {
 		jw.Key("text")
 		jw.Str(content.String())
 		jw.Key("cache_control")
-		jw.Raw(`{"type":"ephemeral"}`)
+		jw.Raw(policy)
 		jw.EndObj()
 		jw.EndArr()
 		jw.EndObj()
@@ -330,6 +340,14 @@ func cacheControlOnLastBlock(msg string) string {
 
 	// null / scalar content: no block to attach a breakpoint to.
 	return msg
+}
+
+func sourceMessageCacheControl(msg gjson.Result) string {
+	policy := msg.Get("cache_control")
+	if !policy.Exists() {
+		return ""
+	}
+	return policy.Raw
 }
 
 // buildToolResultBlock constructs a single Anthropic tool_result JSON object.

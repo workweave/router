@@ -55,7 +55,7 @@ func TestConformance_GeminiNative(t *testing.T) {
 			provider:        providers.ProviderGoogle,
 			model:           "gemini-3.1-pro-preview",
 			newClient:       geminiClient,
-			inbound:         `{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":24576},"messages":[{"role":"user","content":"Think hard."}]}`,
+			inbound:         `{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"reasoning_effort":"high","messages":[{"role":"user","content":"Think hard."}]}`,
 			stream:          true,
 			upstreamFixture: "gemini_native/basic_text.upstream.sse",
 			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {

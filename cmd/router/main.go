@@ -60,6 +60,10 @@ import (
 
 func main() {
 	logger := observability.Get()
+	if err := router.ValidateCatalogReasoningCapabilities(); err != nil {
+		logger.Error("Refusing to boot with invalid model reasoning capabilities", "err", err)
+		panic(err)
+	}
 
 	cfg, err := pgxpool.ParseConfig(config.PostgresDSN())
 	if err != nil {
