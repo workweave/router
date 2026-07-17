@@ -20,6 +20,9 @@
 -- the upstream credential; credential_source names the precedence branch it came
 -- from. All NULL on deployment-key turns. Matching prefix/suffix values across
 -- distinct router_user_ids reveal one subscription paying for many seats.
+-- usage_authority_status distinguishes billable provider-authoritative usage
+-- from partial, missing, and contradictory reports. usage_details carries only
+-- presence-aware token counters and stable contradiction codes.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -84,6 +87,8 @@ INSERT INTO router.model_router_request_telemetry (
     fresh_candidate_scores,
     pin_age_sec,
     tool_result_bytes,
+    usage_authority_status,
+    usage_details,
     credential_key_prefix,
     credential_key_suffix,
     credential_source
@@ -150,11 +155,33 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('fresh_candidate_scores')::jsonb,
     sqlc.narg('pin_age_sec')::bigint,
     sqlc.narg('tool_result_bytes')::int,
+    sqlc.narg('usage_authority_status')::varchar,
+    sqlc.narg('usage_details')::jsonb,
     sqlc.narg('credential_key_prefix')::varchar,
     sqlc.narg('credential_key_suffix')::varchar,
     sqlc.narg('credential_source')::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
+
+-- Returns telemetry rows whose provider did not report authoritative usage,
+-- so control-plane reconciliation can find unbilled requests without reading
+-- customer content.
+-- name: GetPendingUsageTelemetry :many
+SELECT
+    installation_id,
+    request_id,
+    decision_model,
+    decision_provider,
+    timestamp,
+    usage_authority_status,
+    usage_details
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+  AND timestamp >= @from_time::timestamptz
+  AND timestamp < @to_time::timestamptz
+ORDER BY timestamp ASC
+LIMIT @limit_rows::int;
 
 -- Returns the routing context for a single request, used to render the
 -- no-login feedback page (`/f/<token>`): which model/provider served the turn,

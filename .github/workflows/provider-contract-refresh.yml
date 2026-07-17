@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Provider contract refresh
+
+on:
+  schedule:
+    - cron: '43 4 1 * *'
+  workflow_dispatch:
+    inputs:
+      catalog_change:
+        description: 'Set when this refresh accompanies a model or API catalog change.'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh redacted provider fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Verify dedicated fixture credentials
+        env:
+          OPENAI_API_KEY: ${{ secrets.ROUTER_FIXTURE_OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.ROUTER_FIXTURE_OPENROUTER_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.ROUTER_FIXTURE_GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ROUTER_FIXTURE_ANTHROPIC_API_KEY }}
+        run: |
+          for key in OPENAI_API_KEY OPENROUTER_API_KEY GOOGLE_API_KEY ANTHROPIC_API_KEY; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing dedicated fixture credential: ${key}"
+              exit 1
+            fi
+          done
+      - name: Record synthetic provider fixtures
+        env:
+          RECORD: '1'
+          OPENAI_API_KEY: ${{ secrets.ROUTER_FIXTURE_OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.ROUTER_FIXTURE_OPENROUTER_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.ROUTER_FIXTURE_GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ROUTER_FIXTURE_ANTHROPIC_API_KEY }}
+        run: go run ./scripts/record_provider_fixtures
+      - name: Regenerate offline conformance goldens
+        run: go test ./internal/proxy/ -run TestConformance -update
+      - name: Write fixture diff for review
+        if: always()
+        run: git diff --binary -- internal/proxy/testdata/conformance > provider-fixture-diff.patch
+      - name: Upload redacted fixture review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-fixture-refresh
+          path: |
+            provider-fixture-diff.patch
+            internal/proxy/testdata/conformance
+          if-no-files-found: error

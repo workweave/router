@@ -207,7 +207,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		sink = mw
 	}
 	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(sink, decision.Provider)
+		extractor = otel.NewUsageExtractor(sink, providers.UsageSourceForProvider(decision.Provider))
 		sink = extractor
 	}
 	proxyErr := p.Proxy(ctx, decision, prep, sink, r)
@@ -215,6 +215,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	usageSnapshot := extractor.Usage()
 	geminiUpstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
@@ -232,6 +233,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+		String("usage.authority_status", string(usageSnapshot.Authority)).
 		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
@@ -259,7 +261,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	s.recordTurnUsage(routeRes, decision.Provider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
-		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead, usageSnapshot.Authority)
 	}
 
 	log.Info("ProxyGeminiGenerateContent complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)

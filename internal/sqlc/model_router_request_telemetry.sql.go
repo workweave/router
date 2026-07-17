@@ -12,6 +12,87 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getPendingUsageTelemetry = `-- name: GetPendingUsageTelemetry :many
+SELECT
+    installation_id,
+    request_id,
+    decision_model,
+    decision_provider,
+    timestamp,
+    usage_authority_status,
+    usage_details
+FROM router.model_router_request_telemetry
+WHERE span_type = 'router.upstream'
+  AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+  AND timestamp >= $1::timestamptz
+  AND timestamp < $2::timestamptz
+ORDER BY timestamp ASC
+LIMIT $3::int
+`
+
+type GetPendingUsageTelemetryParams struct {
+	FromTime  pgtype.Timestamptz
+	ToTime    pgtype.Timestamptz
+	LimitRows int32
+}
+
+type GetPendingUsageTelemetryRow struct {
+	InstallationID       uuid.UUID
+	RequestID            string
+	DecisionModel        *string
+	DecisionProvider     *string
+	Timestamp            pgtype.Timestamptz
+	UsageAuthorityStatus *string
+	UsageDetails         []byte
+}
+
+// Returns telemetry rows whose provider did not report authoritative usage,
+// so control-plane reconciliation can find unbilled requests without reading
+// customer content.
+//
+//	SELECT
+//	    installation_id,
+//	    request_id,
+//	    decision_model,
+//	    decision_provider,
+//	    timestamp,
+//	    usage_authority_status,
+//	    usage_details
+//	FROM router.model_router_request_telemetry
+//	WHERE span_type = 'router.upstream'
+//	  AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+//	  AND timestamp >= $1::timestamptz
+//	  AND timestamp < $2::timestamptz
+//	ORDER BY timestamp ASC
+//	LIMIT $3::int
+func (q *Queries) GetPendingUsageTelemetry(ctx context.Context, arg GetPendingUsageTelemetryParams) ([]GetPendingUsageTelemetryRow, error) {
+	rows, err := q.db.Query(ctx, getPendingUsageTelemetry, arg.FromTime, arg.ToTime, arg.LimitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPendingUsageTelemetryRow
+	for rows.Next() {
+		var i GetPendingUsageTelemetryRow
+		if err := rows.Scan(
+			&i.InstallationID,
+			&i.RequestID,
+			&i.DecisionModel,
+			&i.DecisionProvider,
+			&i.Timestamp,
+			&i.UsageAuthorityStatus,
+			&i.UsageDetails,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRequestForFeedback = `-- name: GetRequestForFeedback :one
 SELECT
     t.decision_model,
@@ -1295,6 +1376,8 @@ INSERT INTO router.model_router_request_telemetry (
     fresh_candidate_scores,
     pin_age_sec,
     tool_result_bytes,
+    usage_authority_status,
+    usage_details,
     credential_key_prefix,
     credential_key_suffix,
     credential_source
@@ -1362,8 +1445,10 @@ INSERT INTO router.model_router_request_telemetry (
     $61::bigint,
     $62::int,
     $63::varchar,
-    $64::varchar,
-    $65::varchar
+    $64::jsonb,
+    $65::varchar,
+    $66::varchar,
+    $67::varchar
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -1431,6 +1516,8 @@ type InsertRequestTelemetryParams struct {
 	FreshCandidateScores   []byte
 	PinAgeSec              *int64
 	ToolResultBytes        *int32
+	UsageAuthorityStatus   *string
+	UsageDetails           []byte
 	CredentialKeyPrefix    *string
 	CredentialKeySuffix    *string
 	CredentialSource       *string
@@ -1458,6 +1545,9 @@ type InsertRequestTelemetryParams struct {
 // the upstream credential; credential_source names the precedence branch it came
 // from. All NULL on deployment-key turns. Matching prefix/suffix values across
 // distinct router_user_ids reveal one subscription paying for many seats.
+// usage_authority_status distinguishes billable provider-authoritative usage
+// from partial, missing, and contradictory reports. usage_details carries only
+// presence-aware token counters and stable contradiction codes.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -1522,6 +1612,8 @@ type InsertRequestTelemetryParams struct {
 //	    fresh_candidate_scores,
 //	    pin_age_sec,
 //	    tool_result_bytes,
+//	    usage_authority_status,
+//	    usage_details,
 //	    credential_key_prefix,
 //	    credential_key_suffix,
 //	    credential_source
@@ -1589,8 +1681,10 @@ type InsertRequestTelemetryParams struct {
 //	    $61::bigint,
 //	    $62::int,
 //	    $63::varchar,
-//	    $64::varchar,
-//	    $65::varchar
+//	    $64::jsonb,
+//	    $65::varchar,
+//	    $66::varchar,
+//	    $67::varchar
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1657,6 +1751,8 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.FreshCandidateScores,
 		arg.PinAgeSec,
 		arg.ToolResultBytes,
+		arg.UsageAuthorityStatus,
+		arg.UsageDetails,
 		arg.CredentialKeyPrefix,
 		arg.CredentialKeySuffix,
 		arg.CredentialSource,

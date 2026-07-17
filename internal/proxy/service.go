@@ -1767,7 +1767,7 @@ func (s *Service) anthropicNativeAttempt(
 		}
 		proxyWriter := attemptSink
 		if s.usageRequired() {
-			ex := otel.NewUsageExtractor(attemptSink, d.Provider)
+			ex := otel.NewUsageExtractor(attemptSink, providers.UsageSourceForProvider(d.Provider))
 			proxyWriter = ex
 			setExtractor(ex)
 		}
@@ -2488,7 +2488,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			logUpstreamBody(log, routeRes.SessionKey, d, feats, prep.Body)
 			var usage otel.UsageSink
 			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				extractor = otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(d.Provider))
 				usage = extractor
 			}
 			var translator translate.ResponseTranslator
@@ -2548,7 +2548,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			respSummary = translate.ResponseSummary{}
 			var usage otel.UsageSink
 			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				extractor = otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(d.Provider))
 				usage = extractor
 			}
 			// SSE chain: Gemini → OpenAI → Anthropic.
@@ -2829,6 +2829,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	usageSnapshot := extractor.Usage()
 	upstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
@@ -2849,6 +2850,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+		String("usage.authority_status", string(usageSnapshot.Authority)).
 		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
@@ -2978,7 +2980,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
 			// Shadow-mode tier-cap instrumentation: tool-output size on
 			// tool_result turns. NULL elsewhere. No routing action taken.
-			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
+			ToolResultBytes:      toolResultBytesPtr(inboundLastUser, tt),
+			UsageAuthorityStatus: string(usageSnapshot.Authority),
+			UsageDetails:         usageTelemetryDetails(usageSnapshot),
 			// Credential attribution: safe display key parts, so a shared
 			// subscription (one account, many seats) shows via equal
 			// prefix/suffix across router_user_ids.
@@ -2991,7 +2995,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// No-op when billing is unwired (selfhosted); only reached on a real
 	// upstream call since the cache-hit branch above already returned.
 	if proxyErr == nil {
-		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead, usageSnapshot.Authority)
 		if compRes.Summarized {
 			s.billCompactionSummary(ctx, requestID, externalID, compRes.SummaryUsage)
 		}
@@ -3819,8 +3823,18 @@ func (s *Service) fireTelemetry(p InsertTelemetryParams) {
 // (`_summary` request_id suffix). No-op when billing is unwired or
 // externalID is empty. Unknown summarizer model prices as zero rather than
 // skipping the ledger row, keeping the audit trail complete.
-func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing catalog.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int) {
+func (s *Service) emitBilling(ctx context.Context, requestID, externalID string, decision router.Decision, actPricing catalog.Pricing, routeRes turnLoopResult, in, out, cacheCreation, cacheRead int, authority translate.UsageAuthority) {
 	if s.billing == nil || externalID == "" {
+		return
+	}
+	if authority != translate.UsageAuthorityAuthoritative {
+		observability.Get().Warn("router_billing_reconciliation_pending",
+			"organization_id", externalID,
+			"router_request_id", requestID,
+			"model", decision.Model,
+			"provider", decision.Provider,
+			"usage_authority_status", authority,
+		)
 		return
 	}
 	hasOverride := billing.HasOverrideFromContext(ctx)
@@ -4404,7 +4418,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			attemptSink := makeMarkerSink()
 			proxyWriter := attemptSink
 			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(attemptSink, d.Provider)
+				extractor = otel.NewUsageExtractor(attemptSink, providers.UsageSourceForProvider(d.Provider))
 				proxyWriter = extractor
 			}
 			if preludeBuf != nil {
@@ -4438,7 +4452,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		dispatchGemini := func(actx context.Context, d router.Decision, p providers.Client, pr providers.PreparedRequest) (error, func(error) error) {
 			var usage otel.UsageSink
 			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(nil, d.Provider)
+				extractor = otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(d.Provider))
 				usage = extractor
 			}
 			attemptSink := makeMarkerSink()
@@ -4486,7 +4500,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var usage otel.UsageSink
 			if s.usageRequired() {
-				extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
+				extractor = otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
 				usage = extractor
 			}
 			attemptSink := makeMarkerSink()
@@ -4546,6 +4560,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	usageSnapshot := extractor.Usage()
 	openaiUpstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
@@ -4564,6 +4579,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		Int64("usage.output_tokens", int64(out)).
 		Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 		Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+		String("usage.authority_status", string(usageSnapshot.Authority)).
 		Float64("cost.requested_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider)).
 		Float64("cost.requested_output_usd", catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M)).
 		Float64("cost.actual_input_usd", catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider)).
@@ -4613,7 +4629,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 
 	if proxyErr == nil {
-		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
+		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead, usageSnapshot.Authority)
 		if compResOAI.Summarized {
 			s.billCompactionSummary(ctx, requestID, externalID, compResOAI.SummaryUsage)
 		}
@@ -4685,7 +4701,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			PinAgeSec:            int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
 			// Shadow-mode tier-cap instrumentation: tool-output size on
 			// tool_result turns. NULL elsewhere. No routing action taken.
-			ToolResultBytes: toolResultBytesPtr(inboundLastUser, tt),
+			ToolResultBytes:      toolResultBytesPtr(inboundLastUser, tt),
+			UsageAuthorityStatus: string(usageSnapshot.Authority),
+			UsageDetails:         usageTelemetryDetails(usageSnapshot),
 			// Credential attribution — see the Anthropic-path write site.
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,

@@ -289,7 +289,7 @@ func (s *Service) bypassToAnthropic(
 	// Weave's router cost-savings metric — subscription turns are otherwise invisible.
 	var extractor *otel.UsageExtractor
 	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(respW, decision.Provider)
+		extractor = otel.NewUsageExtractor(respW, providers.UsageSourceForProvider(decision.Provider))
 		respW = extractor
 	}
 
@@ -316,6 +316,7 @@ func (s *Service) bypassToAnthropic(
 	// actual to $0 downstream when cost.subscription_served is set.
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	usageSnapshot := extractor.Usage()
 	pricing, _ := catalog.PriceFor(decision.Provider, decision.Model)
 	inputCost := catalog.EffectiveInputCost(in, cacheCreation, cacheRead, pricing.InputUSDPer1M, pricing, decision.Provider)
 	outputCost := catalog.EffectiveOutputCost(out, pricing.OutputUSDPer1M)
@@ -342,6 +343,7 @@ func (s *Service) bypassToAnthropic(
 			Int64("usage.output_tokens", int64(out)).
 			Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
 			Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+			String("usage.authority_status", string(usageSnapshot.Authority)).
 			Float64("cost.requested_input_usd", inputCost).
 			Float64("cost.requested_output_usd", outputCost).
 			Float64("cost.actual_input_usd", inputCost).

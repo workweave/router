@@ -77,6 +77,49 @@ const (
 	FamilyGemini
 )
 
+// UsageEndpoint identifies the upstream response protocol used to report
+// token usage. It is intentionally independent from a provider name: every
+// OpenAI-compatible provider shares the OpenAI parsers.
+type UsageEndpoint int
+
+const (
+	// UsageEndpointUnknown is used when a caller has no endpoint-specific
+	// information. Parsers may use the translation family's compatible shapes.
+	UsageEndpointUnknown UsageEndpoint = iota
+	// UsageEndpointAnthropicMessages is the Anthropic Messages response shape.
+	UsageEndpointAnthropicMessages
+	// UsageEndpointOpenAIChatCompletions is the OpenAI Chat Completions shape.
+	UsageEndpointOpenAIChatCompletions
+	// UsageEndpointOpenAIResponses is the OpenAI Responses response shape.
+	UsageEndpointOpenAIResponses
+	// UsageEndpointGeminiGenerateContent is the native Gemini response shape.
+	UsageEndpointGeminiGenerateContent
+)
+
+// UsageSource identifies the wire family and endpoint from which usage is
+// observed. Provider identity belongs in telemetry metadata, not parsing.
+type UsageSource struct {
+	Family   TranslationFamily
+	Endpoint UsageEndpoint
+}
+
+// UsageSourceForProvider returns the default response wire source for a
+// provider. OpenAI-compatible providers may serve either Chat Completions or
+// Responses, so their endpoint remains unknown while their family selects the
+// shared OpenAI parser.
+func UsageSourceForProvider(provider string) UsageSource {
+	switch FamilyFor(provider) {
+	case FamilyAnthropic:
+		return UsageSource{Family: FamilyAnthropic, Endpoint: UsageEndpointAnthropicMessages}
+	case FamilyGemini:
+		return UsageSource{Family: FamilyGemini, Endpoint: UsageEndpointGeminiGenerateContent}
+	case FamilyOpenAICompat:
+		return UsageSource{Family: FamilyOpenAICompat, Endpoint: UsageEndpointUnknown}
+	default:
+		return UsageSource{Family: FamilyUnknown, Endpoint: UsageEndpointUnknown}
+	}
+}
+
 // ProviderFamilies is the single source of truth for cross-format dispatch;
 // keep it covering EVERY Provider* constant (see the three-map note above).
 var ProviderFamilies = map[string]TranslationFamily{

@@ -216,6 +216,26 @@ The first five follow the [OTel SDK env spec](https://opentelemetry.io/docs/spec
 `OTEL_BSP_*` follows the [Batch Span Processor spec](https://opentelemetry.io/docs/specs/otel/trace/sdk/#batch-span-processor).
 `OTEL_EXPORT_WORKERS` is a router-specific extension.
 
+### Usage authority and billing
+
+The router records usage by upstream wire family rather than provider name. A
+completed request receives one of four `usage.authority_status` values on its
+`router.upstream` span and telemetry row:
+
+- `authoritative`: complete, non-conflicting terminal provider usage; eligible
+  for billing.
+- `partial`: some provider usage was observed but no complete terminal record
+  was available.
+- `missing`: no provider usage was reported.
+- `contradictory`: provider reports conflict, such as a terminal zero after a
+  positive observed value.
+
+Only `authoritative` usage is billed. Other states preserve the successful
+customer response, write a durable reconciliation marker, and emit the
+`router_billing_reconciliation_pending` structured event. `usage_details`
+contains token counters and stable contradiction codes only; it never stores
+prompts, tool data, media, or credentials.
+
 ## Cluster-routing artifacts
 
 Each embedder the cluster scorer can use needs two files at runtime —
