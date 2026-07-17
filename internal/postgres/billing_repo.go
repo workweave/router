@@ -94,6 +94,42 @@ func (r *BillingRepo) GetAPIKeySpend(ctx context.Context, apiKeyID string) (int6
 	return row.SpentUsdMicros, row.SpendCapUsdMicros, true, nil
 }
 
+// GetUserMonthlySpendAndLimit resolves the effective monthly limit
+// (per-user override > org default; NULL override = explicitly uncapped).
+func (r *BillingRepo) GetUserMonthlySpendAndLimit(ctx context.Context, organizationID, routerUserID string) (int64, *int64, error) {
+	parsed, err := uuid.Parse(routerUserID)
+	if err != nil {
+		// A malformed id can't match any row; treat as "no limit to enforce"
+		// rather than failing the request closed on a client-shaped value.
+		return 0, nil, nil
+	}
+	q := sqlc.New(r.tx)
+	row, err := q.GetUserMonthlySpendAndLimit(ctx, sqlc.GetUserMonthlySpendAndLimitParams{
+		RouterUserID:   parsed,
+		OrganizationID: organizationID,
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	limit := row.OrgDefaultLimitUsdMicros
+	if row.HasOverride {
+		limit = row.OverrideLimitUsdMicros
+	}
+	return row.SpentUsdMicros, limit, nil
+}
+
+// GetOrgMonthlySpendAndLimit reads the org's current UTC-month spend and its
+// configured monthly cap. Scalar subqueries always return a row, so a missing
+// config or spend row surfaces as nil limit / zero spend, not an error.
+func (r *BillingRepo) GetOrgMonthlySpendAndLimit(ctx context.Context, organizationID string) (int64, *int64, error) {
+	q := sqlc.New(r.tx)
+	row, err := q.GetOrgMonthlySpendAndLimit(ctx, organizationID)
+	if err != nil {
+		return 0, nil, err
+	}
+	return row.SpentUsdMicros, row.OrgLimitUsdMicros, nil
+}
+
 // GetAutopayConfig reads the org's autopay enabled flag and recharge threshold.
 // Maps pgx.ErrNoRows (org never configured autopay) to enabled=false with a nil
 // error so the debit hook skips the crossing check rather than treating a

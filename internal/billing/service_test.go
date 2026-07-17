@@ -50,6 +50,12 @@ type fakeRepo struct {
 	autopayEnabled   bool
 	autopayThreshold int64
 	autopayErr       error
+	userMonthSpent   int64
+	userMonthLimit   *int64
+	userMonthErr     error
+	orgMonthSpent    int64
+	orgMonthLimit    *int64
+	orgMonthErr      error
 }
 
 func (r *fakeRepo) GetBalance(_ context.Context, _ string) (int64, error) {
@@ -88,6 +94,20 @@ func (r *fakeRepo) BillingTablesExist(_ context.Context) (bool, error) { return 
 
 func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
 	return 0, nil, false, nil
+}
+
+func (r *fakeRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, *int64, error) {
+	if r.userMonthErr != nil {
+		return 0, nil, r.userMonthErr
+	}
+	return r.userMonthSpent, r.userMonthLimit, nil
+}
+
+func (r *fakeRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, *int64, error) {
+	if r.orgMonthErr != nil {
+		return 0, nil, r.orgMonthErr
+	}
+	return r.orgMonthSpent, r.orgMonthLimit, nil
 }
 
 func (r *fakeRepo) GetAutopayConfig(_ context.Context, _ string) (bool, int64, error) {

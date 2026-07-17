@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"workweave/router/internal/billing"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/bandit"
@@ -39,6 +40,8 @@ const (
 	DispatchErrorCreditsExhausted
 	DispatchErrorTranslationIntrinsicallyIncompatible
 	DispatchErrorTranslationProviderUnavailable
+	DispatchErrorUserSpendLimitReached
+	DispatchErrorSpendLimitUnavailable
 )
 
 // DispatchErrorClass is the format-agnostic classification of a dispatch
@@ -119,6 +122,23 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			Message:    "No provider keys available for any deployed model: register a BYOK key or supply a provider Authorization header.",
 			LogLevel:   "warn",
 			LogMessage: "No eligible provider for request",
+		}, true
+	case errors.Is(err, billing.ErrUserMonthlySpendLimitReached):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorUserSpendLimitReached,
+			Status:     http.StatusPaymentRequired,
+			Message:    "You've reached your monthly Weave Router spend limit. Ask your org admin to raise it, or it resets next month.",
+			LogLevel:   "warn",
+			LogMessage: "Request refused: engineer monthly spend limit reached",
+		}, true
+	case errors.Is(err, billing.ErrSpendLimitCheckUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorSpendLimitUnavailable,
+			Status:     http.StatusServiceUnavailable,
+			Message:    "Billing system is temporarily unavailable. Retry in a few moments.",
+			RetryAfter: true,
+			LogLevel:   "error",
+			LogMessage: "Spend-limit check unavailable",
 		}, true
 	case errors.Is(err, ErrCreditsExhaustedSubscriptionUnavailable):
 		return DispatchErrorClass{

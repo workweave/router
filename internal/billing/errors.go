@@ -16,3 +16,11 @@ var ErrInsufficientCredits = errors.New("billing: insufficient credits")
 // row can be distinguished from a depleted balance in the operator log
 // without changing the customer response.
 var ErrBalanceRowMissing = errors.New("billing: balance row missing")
+
+// ErrUserMonthlySpendLimitReached is returned when the engineer's current
+// UTC-month spend meets their effective monthly limit. Mapped to HTTP 402.
+var ErrUserMonthlySpendLimitReached = errors.New("billing: engineer monthly spend limit reached")
+
+// ErrSpendLimitCheckUnavailable is returned on a repo failure reading spend
+// limits; gates fail closed (HTTP 503) to prevent unbounded-spend windows.
+var ErrSpendLimitCheckUnavailable = errors.New("billing: spend limit check unavailable")
