@@ -324,6 +324,19 @@ var Models = []Model{
 		{Provider: providers.ProviderGoogle, UpstreamID: "gemma-4-26b-a4b-it", Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.10}},
 	}},
 
+	// --- Meta --- Muse Spark 1.1, GA 2026-07-09 (Meta's first paid model,
+	// Meta Model API public preview, US-only). Bare ID (not "meta/"-prefixed):
+	// direct first-party API like Anthropic/OpenAI/Google/xAI, not an
+	// aggregator-hosted OSS entry. Native 1M context (Meta docs list
+	// 1,048,576). Strong agentic/tool-use, mid-pack coding (SWE-Bench Pro
+	// 61.5 vs opus-4.8's 69.2) — priced accordingly below the high tier's
+	// flagships. Meta is the only wired provider (first-party, no OpenRouter
+	// fallback yet); add one if/when it earns roster traffic.
+	{ID: "muse-spark-1.1", Tier: TierHigh, ContextWindow: 1_048_576, Providers: []ProviderBinding{
+		{Provider: providers.ProviderMeta,
+			Price: Pricing{InputUSDPer1M: 1.25, OutputUSDPer1M: 4.25, CacheReadMultiplier: 0.15 / 1.25}},
+	}},
+
 	// --- OSS pool ---
 	//
 	// Each row carries an ordered Providers list. Managed-prod ships only the

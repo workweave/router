@@ -46,6 +46,10 @@ var defaultMechanismProviders = map[string]struct{}{
 	providers.ProviderFireworks: {},
 	providers.ProviderMakora:    {},
 	providers.ProviderTogether:  {},
+	// Meta's docs advertise prompt caching but don't document a stickiness
+	// header (unlike xAI's x-grok-conv-id) — generic x-session-affinity is
+	// the safe default until proven otherwise.
+	providers.ProviderMeta: {},
 }
 
 // TestSessionAffinityCoversEveryOpenAICompatProvider guards against a new
