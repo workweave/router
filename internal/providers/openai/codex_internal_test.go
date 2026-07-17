@@ -124,16 +124,9 @@ func TestProxy_NoCodexCredHitsOpenAI(t *testing.T) {
 	assert.Empty(t, gotAccount, "a non-subscription request must not send the Codex account-id header")
 }
 
-// TestProxy_ResponsesMaxEffortClampedWithoutCodexCred guards against a 400
-// ("Invalid value: 'max'. Supported values are: 'none', 'minimal', 'low',
-// 'medium', 'high', and 'xhigh'.") that killed a Codex "ultra"-effort turn on
-// a request that carries no Codex subscription credential. ProxyOpenAIResponses
-// forwards Codex's original Responses body verbatim (NativeOnly) for every
-// Codex turn, "max" included — that's fine when it lands on the Codex
-// backend (which understands "max"), but a router-keyed/BYOK/deployment-key
-// request with no subscription credential dispatches to api.openai.com
-// instead, which rejects "max". Only the effort value is clamped; everything
-// else in the body must reach api.openai.com unchanged.
+// TestProxy_ResponsesMaxEffortClampedWithoutCodexCred guards against the
+// api.openai.com 400 on "max" effort: without a Codex credential the request
+// lands on api.openai.com (not the Codex backend), which rejects "max".
 func TestProxy_ResponsesMaxEffortClampedWithoutCodexCred(t *testing.T) {
 	var gotPath string
 	var gotBody []byte
@@ -167,9 +160,7 @@ func TestProxy_ResponsesMaxEffortClampedWithoutCodexCred(t *testing.T) {
 }
 
 // TestProxy_ResponsesMaxEffortUnchangedWithCodexCred confirms the clamp is
-// scoped to the non-Codex-backend branch: a real Codex subscription
-// credential understands "max" natively, so the body must reach the Codex
-// backend byte-for-byte, matching TestProxy_CodexSubscriptionDispatch.
+// scoped to the non-Codex-backend branch; the Codex backend accepts "max" natively.
 func TestProxy_ResponsesMaxEffortUnchangedWithCodexCred(t *testing.T) {
 	var gotBody []byte
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

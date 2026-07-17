@@ -40,19 +40,9 @@ const (
 	codexUserAgentValue   = "codex_cli_rs"
 )
 
-// maxEffortToXhigh clamps a Responses-API body's top-of-ladder "max" reasoning
-// effort to "xhigh" before it reaches api.openai.com. "max" is a Codex-backend
-// (chatgpt.com/backend-api/codex) reasoning level for the "ultra" UI setting;
-// the public Responses API tops out at "xhigh" and 400s on "max"
-// ("Invalid value: 'max'. Supported values are: 'none', 'minimal', 'low',
-// 'medium', 'high', and 'xhigh'."). ProxyOpenAIResponses forwards Codex's
-// original Responses body verbatim for any NativeOnly request (custom tools,
-// reasoning-item replay) — which covers every Codex turn — but only rewrites
-// `model` before dispatch; a turn without a real ChatGPT subscription
-// credential (BYOK, deployment key, router-keyed prepaid) lands on
-// api.openai.com with the client's untouched effort value. Scoped to the
-// non-Codex-backend branch only: the Codex backend itself understands "max"
-// natively and must see it unmodified.
+// maxEffortToXhigh clamps reasoning.effort from "max" to "xhigh" in a
+// Responses-API body. "max" is valid only on the Codex backend; the public
+// api.openai.com Responses API tops out at "xhigh" and 400s on "max".
 func maxEffortToXhigh(body []byte) []byte {
 	if gjson.GetBytes(body, "reasoning.effort").String() != "max" {
 		return body
