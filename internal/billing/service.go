@@ -176,9 +176,8 @@ type DebitInferenceParams struct {
 	// APIKeyID attributes the debit to the authenticating key for
 	// spend-cap tracking; empty leaves per-key spend untouched.
 	APIKeyID string
-	// RouterUserID attributes the debit to the resolved engineer identity
-	// for monthly spend-limit tracking; empty leaves per-user spend
-	// untouched.
+	// RouterUserID attributes the debit to the resolved engineer identity for
+	// monthly spend-limit tracking; empty leaves per-user spend untouched.
 	RouterUserID string
 }
 
