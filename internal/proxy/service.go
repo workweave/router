@@ -3199,6 +3199,15 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	if res.SessionKey == zeroKey {
 		return
 	}
+	hasUsage := in != 0 || out != 0 || cacheCreation != 0 || cacheRead != 0
+	historyProvider := servedProvider
+	if !hasUsage {
+		// A failed turn has no usage writeback; preserve the prior provider to
+		// avoid an invalid model/provider pair on the next HMM stay.
+		if prior := s.loadHMMHistory(context.Background(), res.SessionKey, res.PinRole); prior.Provider != "" {
+			historyProvider = prior.Provider
+		}
+	}
 	role := hmmHistoryRole(res.PinRole)
 	// The upsert only refreshes the row's TTL/turn_count/provider (ON CONFLICT
 	// leaves the usage columns untouched), so it is always safe to run.
@@ -3206,14 +3215,14 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		SessionKey:     res.SessionKey,
 		Role:           role,
 		InstallationID: res.InstallationID,
-		Provider:       servedProvider,
+		Provider:       historyProvider,
 		Reason:         hmmHistoryStoredReason(res),
 		TurnCount:      1,
 		PinnedUntil:    pinExpiry(hmmHistoryReason),
 	})
 	// Zero tokens means a failed/empty upstream turn — don't clobber prior
 	// usage counters; the TTL-refreshing upsert above already ran.
-	if in == 0 && out == 0 && cacheCreation == 0 && cacheRead == 0 {
+	if !hasUsage {
 		return
 	}
 	now := time.Now()

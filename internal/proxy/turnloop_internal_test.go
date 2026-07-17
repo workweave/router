@@ -255,6 +255,101 @@ func TestRecordHMMTurnHistory_ZeroUsageRefreshesTTLButSkipsUsageWriteback(t *tes
 	assert.Equal(t, 0, store.usageHits)
 }
 
+func TestRecordHMMTurnHistory_ZeroUsagePreservesPriorProvider(t *testing.T) {
+	store := newStubPinStore()
+	store.getFound = true
+	store.getPin = sessionpin.Pin{Provider: providers.ProviderMakora}
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderMakora: nil, providers.ProviderOpenAI: nil},
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+
+	res := turnLoopResult{
+		InstallationID: uuid.New(),
+		Decision: router.Decision{
+			Provider: providers.ProviderOpenAI,
+			Model:    "gpt-5.5",
+			Reason:   "hmm_policy(label=high)",
+			Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM), RouteID: "route-1"},
+		},
+		SessionKey: sessionKey,
+		PinRole:    sessionpin.DefaultRole,
+	}
+
+	svc.recordTurnUsage(res, res.Decision.Provider, res.Decision.Model, 0, 0, 0, 0)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.upserts, 1)
+	assert.Equal(t, providers.ProviderMakora, store.upserts[0].Provider,
+		"a failed turn must not replace the provider paired with the last successful HMM model")
+}
+
+func TestNormalizeHMMStayPin_RepairsMismatchedProvider(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderMakora: nil, providers.ProviderOpenAI: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
+	)
+	pin := sessionpin.Pin{
+		Provider:        providers.ProviderOpenAI,
+		LastServedModel: "deepseek/deepseek-v4-flash",
+		LastTurnEndedAt: time.Now(),
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+
+	normalized, ok := svc.normalizeHMMStayPin(router.Request{}, pin)
+	require.True(t, ok)
+	assert.Equal(t, "deepseek/deepseek-v4-flash", normalized.Model)
+	assert.Equal(t, providers.ProviderMakora, normalized.Provider,
+		"a sticky HMM pin must resolve the provider from its retained model")
+}
+
+func TestNormalizeHMMStayPin_ReResolvesDisabledProvider(t *testing.T) {
+	svc := NewService(
+		nil,
+		map[string]providers.Client{providers.ProviderMakora: nil, providers.ProviderOpenAI: nil},
+		nil,
+		false,
+		nil,
+		nil,
+		false,
+		providers.ProviderAnthropic, "claude-haiku-4-5",
+		nil,
+	)
+	pin := sessionpin.Pin{
+		Provider:        providers.ProviderOpenAI,
+		LastServedModel: "deepseek/deepseek-v4-flash",
+		LastTurnEndedAt: time.Now(),
+		PinnedUntil:     time.Now().Add(time.Hour),
+	}
+
+	normalized, ok := svc.normalizeHMMStayPin(router.Request{
+		EnabledProviders: map[string]struct{}{providers.ProviderMakora: {}},
+	}, pin)
+	require.True(t, ok)
+	assert.Equal(t, providers.ProviderMakora, normalized.Provider,
+		"a sticky HMM pin must re-resolve a disabled provider for its retained model")
+}
+
 func TestRecordTurnUsage_HMMEVStayWritesHistoryOnly(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
