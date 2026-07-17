@@ -19,14 +19,20 @@ SELECT (
       AND table_name IN (
         'organization_credit_balance',
         'organization_credit_ledger',
-        'organization_billing_overrides'
+        'organization_billing_overrides',
+        'model_router_user_monthly_spend',
+        'organization_monthly_spend',
+        'organization_spend_limits',
+        'model_router_user_spend_limits'
       )
-) = 3 AS billing_tables_exist
+) = 7 AS billing_tables_exist
 `
 
-// Returns true if the three billing tables exist in the router schema. Used
-// by the router boot-time health check so a missing-migration state
-// disables billing rather than 500ing on every request.
+// Returns true if every table the billing debit path touches exists in the
+// router schema. Used by the router boot-time health check so a
+// missing-migration state disables billing rather than 500ing on every
+// request. Includes the monthly-spend counter and limit tables because
+// DebitOrgCredits writes the counters in the same statement as the debit.
 //
 //	SELECT (
 //	    SELECT COUNT(*) FROM information_schema.tables
@@ -34,9 +40,13 @@ SELECT (
 //	      AND table_name IN (
 //	        'organization_credit_balance',
 //	        'organization_credit_ledger',
-//	        'organization_billing_overrides'
+//	        'organization_billing_overrides',
+//	        'model_router_user_monthly_spend',
+//	        'organization_monthly_spend',
+//	        'organization_spend_limits',
+//	        'model_router_user_spend_limits'
 //	      )
-//	) = 3 AS billing_tables_exist
+//	) = 7 AS billing_tables_exist
 func (q *Queries) CheckBillingTablesExist(ctx context.Context) (bool, error) {
 	row := q.db.QueryRow(ctx, checkBillingTablesExist)
 	var billing_tables_exist bool

@@ -3024,6 +3024,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					Pricing:         sumPricing,
 					HasOverride:     billing.HasOverrideFromContext(ctx),
 					APIKeyID:        apiKeyID,
+					RouterUserID:    auth.UserIDFrom(ctx),
 				})
 			}
 		}
