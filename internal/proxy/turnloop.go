@@ -904,20 +904,24 @@ func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (ses
 		return sessionpin.Pin{}, false
 	}
 	p.Model = model
-	if p.Provider != "" {
-		if req.EnabledProviders == nil {
-			return p, true
-		}
-		if _, ok := req.EnabledProviders[p.Provider]; ok {
-			return p, true
-		}
-		return sessionpin.Pin{}, false
-	}
 	providerSet := req.EnabledProviders
 	if providerSet == nil {
 		providerSet = make(map[string]struct{}, len(s.providers))
 		for provider := range s.providers {
 			providerSet[provider] = struct{}{}
+		}
+	}
+	// The history row stores the provider separately from LastServedModel.
+	// A failed turn refreshes its TTL but deliberately preserves the prior
+	// successful model, so only retain the stored provider when it is a valid
+	// binding for that model. Otherwise re-resolve the model against this
+	// request's available providers rather than dispatching an invalid pair.
+	if p.Provider != "" {
+		if _, enabled := providerSet[p.Provider]; !enabled {
+			return sessionpin.Pin{}, false
+		}
+		if _, valid := catalog.ResolveBinding(model, map[string]struct{}{p.Provider: {}}); valid {
+			return p, true
 		}
 	}
 	binding, ok := catalog.ResolveBinding(model, providerSet)
