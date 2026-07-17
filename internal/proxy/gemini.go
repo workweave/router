@@ -173,6 +173,10 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Capabilities:       router.Lookup(decision.Model),
 		IncludeStreamUsage: s.usageRequired(),
 	}
+	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+		opts.ForceEffort = knobs.ForceEffort
+		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	}
 	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
 
 	prep, emitErr := env.PrepareGemini(r.Header, opts)

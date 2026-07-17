@@ -53,6 +53,14 @@ func (e *RequestEnvelope) PrepareGemini(_ http.Header, opts EmitOptions) (provid
 		if err != nil {
 			return providers.PreparedRequest{}, fmt.Errorf("sanitize gemini tools: %w", err)
 		}
+		if forced := resolveReasoningEffortFor(opts); forced != "" {
+			if raw := thinkingConfigRaw(forced, opts.TargetModel); raw != "" {
+				body, err = sjson.SetRawBytes(body, "generationConfig.thinkingConfig", []byte(raw))
+				if err != nil {
+					return providers.PreparedRequest{}, fmt.Errorf("set forced thinkingConfig: %w", err)
+				}
+			}
+		}
 		headers := make(http.Header)
 		if e.Stream() {
 			headers.Set(GeminiStreamHintHeader, "true")
@@ -1198,6 +1206,8 @@ func thinkingConfigRaw(effort, model string) string {
 		switch effort {
 		case "low", "medium", "high":
 			level = effort
+		case "max", "xhigh":
+			level = "high"
 		default:
 			// 3.x can't disable thinking — omit config rather than send an invalid value.
 			return ""
@@ -1218,7 +1228,7 @@ func thinkingConfigRaw(effort, model string) string {
 		budget = 1024
 	case "medium":
 		budget = 8192
-	case "high":
+	case "high", "max", "xhigh":
 		budget = 24576
 	default:
 		return ""

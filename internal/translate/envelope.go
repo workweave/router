@@ -53,7 +53,10 @@ type EmitOptions struct {
 	// Set by the proxy's escalate-on-failure policy: gpt-5.x starts "low", goes
 	// "high" after a failed/no-progress turn; gemini stays "low" (effort-immune).
 	ForceReasoningEffort string
-	// EnableExtendedContext injects the context-1m-2025-08-07 beta so
+	// ForceEffort, when non-empty, is the user-requested effort level
+	// (x-weave-effort header / :level suffix). Wins over ForceReasoningEffort;
+	// per-model caps applied by ResolveForceEffort.
+	ForceEffort string
 	// CapExtendedContext targets (Opus 4.6+, Sonnet 4.6) get a 1M window
 	// instead of 200K, avoiding a 400 "prompt is too long" on large requests.
 	// No-op below 200K input. deriveAnthropicHeaders gates on CapExtendedContext.
@@ -354,6 +357,10 @@ type EmitOverrides struct {
 	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
 	RewriteThinkingAdaptive bool
 	OutputConfigEffort      string
+	// ForceOutputConfigEffort, when set, overrides any inbound output_config.effort
+	// and the heuristic OutputConfigEffort — user knob beats request-derived default.
+	// Value is already cap-applied (xhigh→max) by resolveForceEffort upstream.
+	ForceOutputConfigEffort string
 	// ClampEffortXhighTo downgrades a caller-supplied "xhigh" effort (`effort`
 	// and `output_config.effort`) to this value. Set when the target lacks
 	// xhigh (router.CapXhighEffort) so a mid-session re-route doesn't forward
@@ -461,6 +468,19 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("clamp %s: %w", key, err)
 			}
+		}
+	}
+
+	// ForceOutputConfigEffort wins over any request-derived or inbound
+	// effort; write both sibling fields so either form is overridden.
+	if ov.ForceOutputConfigEffort != "" {
+		out, err = sjson.SetBytes(out, "output_config.effort", ov.ForceOutputConfigEffort)
+		if err != nil {
+			return nil, fmt.Errorf("set output_config.effort (forced): %w", err)
+		}
+		out, err = sjson.SetBytes(out, "effort", ov.ForceOutputConfigEffort)
+		if err != nil {
+			return nil, fmt.Errorf("set effort (forced): %w", err)
 		}
 	}
 
@@ -941,10 +961,63 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 // Anthropic adaptive effort levels referenced by emit logic. Every adaptive
 // model accepts low/medium/high/max; xhigh requires router.CapXhighEffort.
 const (
-	effortLow   = "low"
-	effortMax   = "max"
-	effortXhigh = "xhigh"
+	effortLow    = "low"
+	effortMedium = "medium"
+	effortHigh   = "high"
+	effortMax    = "max"
+	effortXhigh  = "xhigh"
 )
+
+// CanonicalizeEffort maps user-facing aliases (fast/minimal/ultra) to canonical
+// wire strings (low/medium/high/max/xhigh). Unknown values pass through so
+// IsValidEffort can reject typos at the boundary.
+func CanonicalizeEffort(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "fast", "low", "minimal", "min":
+		return effortLow
+	case "medium", "med":
+		return effortMedium
+	case "high":
+		return effortHigh
+	case "max":
+		return effortMax
+	case "ultra", "xhigh":
+		return effortXhigh
+	default:
+		return level
+	}
+}
+
+// IsValidEffort reports whether the canonicalized level is one the router
+// accepts as wire output. Returns false for typos so middleware can 400
+// rather than forward garbage to a provider.
+func IsValidEffort(level string) bool {
+	switch CanonicalizeEffort(level) {
+	case effortLow, effortMedium, effortHigh, effortMax, effortXhigh:
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolveForceEffort canonicalizes level and applies the per-model cap
+// (xhigh → max on non-CapXhighEffort). Empty input → "".
+func ResolveForceEffort(caps router.ModelSpec, level string) string {
+	if level == "" {
+		return ""
+	}
+	canonical := CanonicalizeEffort(level)
+	if canonical == effortXhigh && !caps.Supports(router.CapXhighEffort) {
+		return effortMax
+	}
+	return canonical
+}
+
+// resolveForceEffort is the package-private variant of ResolveForceEffort;
+// exists so call sites inside EmitOptions don't repeat caps + level extraction.
+func resolveForceEffort(opts EmitOptions) string {
+	return ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+}
 
 // effortForBudget maps legacy thinking.budget_tokens onto an adaptive
 // output_config.effort tier per Anthropic's guidance (≤4k low, ≤16k medium,
@@ -968,6 +1041,13 @@ func resolveAnthropicOverrides(body []byte, opts EmitOptions) EmitOverrides {
 		SanitizeToolUseIDs:           true,
 		StripThoughtSignature:        true,
 		SanitizeAnthropicToolSchemas: true,
+	}
+
+	// User-forced effort wins over inbound heuristic; no-op on non-adaptive targets.
+	if forced := resolveForceEffort(opts); forced != "" && opts.Capabilities.Supports(router.CapAdaptiveThinking) {
+		ov.RewriteThinkingAdaptive = true
+		ov.OutputConfigEffort = forced
+		ov.ForceOutputConfigEffort = forced
 	}
 
 	thinkingResult := gjson.GetBytes(body, "thinking")

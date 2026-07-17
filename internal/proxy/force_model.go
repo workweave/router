@@ -11,6 +11,7 @@ import (
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
@@ -98,25 +99,26 @@ var forceModelAliases = map[string]string{
 	"mistral":      "mistralai/mistral-small-2603",
 }
 
-// resolveForceModel maps a user-typed model identifier to its canonical
-// catalog ID and primary provider. The catalog is the source of truth;
-// naming heuristics are only a best-effort provider guess for inputs not in
-// it. Resolution order: alias -> exact catalog.ByID match -> suffix match
-// (so bare names like `qwen3-235b-a22b-2507` resolve to their real binding,
-// e.g. `qwen/qwen3-235b-a22b-2507`, instead of misclassifying as Anthropic)
-// -> naming heuristic.
-//
-// `known` is true only for catalog matches. False means there's no catalog
-// entry to confirm this is a real, servable model — callers must reject the
-// command rather than pin it; the heuristic provider is still returned for
-// logging.
+// resolveForceModel is the legacy two-return surface. New pin-and-effort
+// callers use resolveForceModelWithEffort.
 func resolveForceModel(model string) (canonicalID, provider string, known bool) {
+	canon, prov, kn, _ := resolveForceModelWithEffort(model)
+	return canon, prov, kn
+}
+
+// resolveForceModelWithEffort is like resolveForceModel but also strips a
+// `:level` suffix. `known` is true only for catalog matches; known=false +
+// effort!="" lets callers surface "model not found" without losing the effort.
+func resolveForceModelWithEffort(model string) (canonicalID, provider string, known bool, effort string) {
+	effortLevel, stripped := stripEffortSuffix(model)
+	model = stripped
 	model = strings.ToLower(strings.TrimSpace(model))
+	effort = effortLevel
 	if alias, ok := forceModelAliases[model]; ok {
 		model = alias
 	}
 	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 {
-		return m.ID, m.Providers[0].Provider, true
+		return m.ID, m.Providers[0].Provider, true, effort
 	}
 	if !strings.Contains(model, "/") {
 		suffix := "/" + model
@@ -129,22 +131,49 @@ func resolveForceModel(model string) (canonicalID, provider string, known bool) 
 			}
 		}
 		if matches == 1 && len(matched.Providers) > 0 {
-			return matched.ID, matched.Providers[0].Provider, true
+			return matched.ID, matched.Providers[0].Provider, true, effort
 		}
 	}
 	switch {
 	case strings.HasPrefix(model, "claude-"):
-		return model, providers.ProviderAnthropic, false
+		return model, providers.ProviderAnthropic, false, effort
 	case strings.HasPrefix(model, "gpt-"),
 		model == "o1", model == "o3", model == "o1-pro", model == "o3-pro",
 		strings.HasPrefix(model, "o1-"), strings.HasPrefix(model, "o3-"), strings.HasPrefix(model, "o4-"):
-		return model, providers.ProviderOpenAI, false
+		return model, providers.ProviderOpenAI, false, effort
 	case strings.HasPrefix(model, "gemini-"):
-		return model, providers.ProviderGoogle, false
+		return model, providers.ProviderGoogle, false, effort
 	case strings.Contains(model, "/"):
-		return model, providers.ProviderOpenRouter, false
+		return model, providers.ProviderOpenRouter, false, effort
 	default:
-		return model, providers.ProviderAnthropic, false
+		return model, providers.ProviderAnthropic, false, effort
+	}
+}
+
+// stripEffortSuffix splits a `:level` suffix off model, canonicalizes it via
+// CanonicalizeEffort, and returns ("", model) when no recognized suffix found.
+func stripEffortSuffix(model string) (effort string, modelOut string) {
+	const sep = ":"
+	idx := strings.LastIndex(model, sep)
+	if idx < 0 || idx == len(model)-1 {
+		return "", model
+	}
+	tail := strings.TrimSpace(model[idx+1:])
+	if !looksLikeEffortAlias(tail) {
+		return "", model
+	}
+	return translate.CanonicalizeEffort(tail), model[:idx]
+}
+
+// looksLikeEffortAlias guards against future catalog IDs that contain `:`,
+// ensuring the colon is only treated as a suffix separator for known levels.
+func looksLikeEffortAlias(tail string) bool {
+	switch strings.ToLower(strings.TrimSpace(tail)) {
+	case "fast", "low", "medium", "med", "high", "max", "xhigh",
+		"ultra", "minimal", "min":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -190,6 +219,9 @@ func (s *Service) setForceModelPin(
 // writing the same session pin the /force-model command writes. It's
 // (re)written on every request carrying the header. Unrecognized models are
 // ignored (routing proceeds automatically) rather than failing the request.
+//
+// A `:level` suffix is stashed on context as router.Overrides.ForceEffort
+// so pin + effort land in one header.
 func (s *Service) applyForceModelHeader(
 	ctx context.Context,
 	r *http.Request,
@@ -202,7 +234,22 @@ func (s *Service) applyForceModelHeader(
 		return ""
 	}
 	log := observability.FromContext(ctx)
-	canonicalModel, provider, known := resolveForceModel(raw)
+	canonicalModel, provider, known, effortLevel := resolveForceModelWithEffort(raw)
+	if effortLevel != "" {
+		// Merge with any existing knobs so ForceEffort doesn't drop Alpha/QualityBias.
+		merged := router.Overrides{ForceEffort: effortLevel}
+		if existing := router.RoutingKnobsFromContext(r.Context()); existing != nil {
+			merged.Alpha = existing.Alpha
+			merged.QualityBias = existing.QualityBias
+			merged.SpeedWeight = existing.SpeedWeight
+			merged.OutputCostRatio = existing.OutputCostRatio
+			merged.ExpectedOutputTokens = existing.ExpectedOutputTokens
+			merged.PerModelVerbosity = existing.PerModelVerbosity
+		}
+		// Mutate *r so the caller's downstream routingKnobsForRequest
+		// (which reads ctx from r.Context()) discovers the knob.
+		*r = *r.WithContext(router.WithRoutingKnobs(r.Context(), &merged))
+	}
 	if !known {
 		log.Info("x-weave-force-model: ignoring unrecognized model; routing automatically",
 			"input_model", raw,
@@ -222,6 +269,7 @@ func (s *Service) applyForceModelHeader(
 		"input_model", raw,
 		"canonical_model", canonicalModel,
 		"provider", provider,
+		"effort", effortLevel,
 		"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		"role", role,
 	)

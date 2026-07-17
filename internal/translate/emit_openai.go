@@ -19,6 +19,25 @@ import (
 // call_id) — longer ids get a 400 ("string too long").
 const maxToolCallIDLen = 64
 
+// resolveReasoningEffortFor returns the effort to write on chat/completions:
+// ForceEffort wins over ForceReasoningEffort; both empty → "".
+func resolveReasoningEffortFor(opts EmitOptions) string {
+	if opts.ForceEffort != "" {
+		return ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	}
+	return opts.ForceReasoningEffort
+}
+
+// reasoningEffortAcceptedOnChatCompletions reports whether the target accepts
+// reasoning_effort on /v1/chat/completions. gpt-5.x rejects it (routed through
+// Responses API); other CapReasoning models (OpenRouter OSS) accept it freely.
+func reasoningEffortAcceptedOnChatCompletions(opts EmitOptions) bool {
+	if strings.HasPrefix(opts.TargetModel, "gpt-5") {
+		return false
+	}
+	return true
+}
+
 // clampOpenAIToolCallID makes a tool-call id safe for the OpenAI wire format:
 // strips any smuggled Gemini thoughtSignature, then hashes ids still over 64
 // chars so a tool_use block and its tool_result stay paired on the same id.
@@ -166,6 +185,13 @@ func (e *RequestEnvelope) buildOpenAIFromOpenAI(opts EmitOptions) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	// Write reasoning_effort for CapReasoning targets that accept it on chat/completions.
+	if forced := resolveReasoningEffortFor(opts); forced != "" && opts.Capabilities.Supports(router.CapReasoning) && reasoningEffortAcceptedOnChatCompletions(opts) {
+		body, err = sjson.SetBytes(body, "reasoning_effort", forced)
+		if err != nil {
+			return nil, fmt.Errorf("set reasoning_effort: %w", err)
+		}
+	}
 	if targetIsOpenRouter(opts) {
 		if hint := openRouterProviderHint(opts.TargetModel); hint != nil {
 			body, err = sjson.SetBytes(body, "provider", hint)
@@ -273,6 +299,12 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 
 	// Max tokens
 	writeOpenAIMaxTokensFromAnthropic(jw, body, opts)
+
+	// Write reasoning_effort for CapReasoning targets that accept it on chat/completions.
+	if forced := resolveReasoningEffortFor(opts); forced != "" && opts.Capabilities.Supports(router.CapReasoning) && reasoningEffortAcceptedOnChatCompletions(opts) {
+		jw.Key("reasoning_effort")
+		jw.Str(forced)
+	}
 
 	// Stream usage option
 	if opts.IncludeStreamUsage && gjson.GetBytes(body, "stream").Bool() {
