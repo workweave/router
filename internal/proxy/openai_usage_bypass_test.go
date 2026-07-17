@@ -24,8 +24,7 @@ func oaiBypassBody() []byte {
 	return []byte(`{"model":"` + bypassRequestedMdl + `","messages":[{"role":"user","content":"hi"}]}`)
 }
 
-// TestProxyOpenAI_UsageBypass_BelowThreshold_SkipsScorer: gate on + headroom
-// must skip the scorer and serve the requested model on the OpenAI wire.
+// TestProxyOpenAI_UsageBypass_BelowThreshold_SkipsScorer: gate on + headroom skips scorer on OpenAI wire.
 func TestProxyOpenAI_UsageBypass_BelowThreshold_SkipsScorer(t *testing.T) {
 	svc, fr, p := bypassFixture(t, 0.20)
 	rec := httptest.NewRecorder()
@@ -41,9 +40,7 @@ func TestProxyOpenAI_UsageBypass_BelowThreshold_SkipsScorer(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"object":"chat.completion"`)
 }
 
-// TestProxyOpenAI_UsageBypass_WeeklyLimit_FallsBackToRoutedDispatch: a buffered
-// Anthropic 429 on the bypass attempt must not reach the client — clear bypass
-// and serve via routeFor (Messages parity).
+// TestProxyOpenAI_UsageBypass_WeeklyLimit_FallsBackToRoutedDispatch: bypass 429 must reroute via routeFor.
 func TestProxyOpenAI_UsageBypass_WeeklyLimit_FallsBackToRoutedDispatch(t *testing.T) {
 	bypassResp := &providers.UpstreamErrorResponse{
 		Status: http.StatusTooManyRequests,
@@ -84,8 +81,7 @@ func TestProxyOpenAI_UsageBypass_WeeklyLimit_FallsBackToRoutedDispatch(t *testin
 	assert.Contains(t, rec.Body.String(), `"object":"chat.completion"`)
 }
 
-// TestSubscriptionOnly_OpenAI_BypassRetryable_Refuses402: subscription-only
-// must refuse a retryable bypass failure instead of paid reroute.
+// TestSubscriptionOnly_OpenAI_BypassRetryable_Refuses402: subscription-only refuses retryable bypass failure.
 func TestSubscriptionOnly_OpenAI_BypassRetryable_Refuses402(t *testing.T) {
 	bypassResp := &providers.UpstreamErrorResponse{
 		Status: http.StatusTooManyRequests,

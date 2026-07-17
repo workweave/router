@@ -4186,11 +4186,42 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)
-	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
-		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
+		log.Error("Routing failed for OpenAI request", "err", err, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return err
 	}
+
+	// Anthropic UsageBypass consumer — same contract as ProxyMessages.
+	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
+		err := s.bypassAnthropicOpenAI(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		if !errors.Is(err, errBypassRetryable) {
+			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, routeRequest)
+			return err
+		}
+		if billing.SubscriptionOnlyFromContext(ctx) {
+			log.Info("Subscription-only OpenAI bypass hit retryable error; refusing instead of paid reroute",
+				"request_id", requestID, "external_id", externalID)
+			return ErrCreditsExhaustedSubscriptionUnavailable
+		}
+		routeRequest.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
+		if s.pinStore != nil {
+			role := roleForTier(catalog.TierFor(feats.Model))
+			pin, _ := s.loadPin(ctx, sessionKey, role)
+			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role)
+			routeRes.SessionKey = sessionKey
+			routeRes.PriorServedModel, routeRes.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
+		}
+		routeRes.UsageBypass = false
+		decision, rerouteErr := s.routeFor(ctx, routeRequest)
+		if rerouteErr != nil {
+			log.Error("Reroute after OpenAI usage-bypass failure failed", "err", rerouteErr)
+			return rerouteErr
+		}
+		routeRes.Decision = decision
+		routeRes.Fresh = decision
+	}
+
+	routeMs := time.Since(routeStart).Milliseconds()
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	s.firePolicyShadowForServingDecision(ctx, decision, routeRequest)

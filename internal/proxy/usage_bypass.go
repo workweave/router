@@ -367,3 +367,124 @@ func (s *Service) bypassToAnthropic(
 	)
 	return proxyErr
 }
+
+// bypassAnthropicOpenAI is OpenAI-wire bypassToAnthropic: Anthropic upstream, OpenAI response, skip billing.
+func (s *Service) bypassAnthropicOpenAI(
+	ctx context.Context,
+	env *translate.RequestEnvelope,
+	feats translate.RoutingFeatures,
+	modelSwitched bool,
+	requestStart time.Time,
+	requestID, externalID string,
+	r *http.Request,
+	w http.ResponseWriter,
+) error {
+	log := observability.FromContext(ctx)
+	decision := router.Decision{
+		Provider: providers.ProviderAnthropic,
+		Model:    feats.Model,
+		Reason:   "usage_bypass",
+	}
+	w.Header().Set(HeaderRouterDecision, decision.Reason)
+	w.Header().Set(HeaderRouterProvider, decision.Provider)
+	w.Header().Set(HeaderRouterModel, decision.Model)
+
+	p, provErr := s.provider(providers.ProviderAnthropic)
+	if provErr != nil {
+		return provErr
+	}
+
+	ctx = resolveAndInjectCredentials(ctx, decision.Provider, r.Header)
+
+	outputReserve := contextWindowOutputReserve
+	if feats.MaxTokens > outputReserve {
+		outputReserve = feats.MaxTokens
+	}
+	opts := translate.EmitOptions{
+		TargetModel:           decision.Model,
+		TargetProvider:        decision.Provider,
+		Capabilities:          router.Lookup(decision.Model),
+		IncludeStreamUsage:    s.usageRequired(),
+		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
+		ModelSwitched:         modelSwitched,
+	}
+	prep, emitErr := env.PrepareAnthropic(r.Header, opts)
+	if emitErr != nil {
+		log.Error("Failed to emit Anthropic body on OpenAI usage-bypass path", "err", emitErr)
+		return fmt.Errorf("emit bypass body: %w", emitErr)
+	}
+
+	sink := http.ResponseWriter(w)
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		mw := translate.NewOpenAIRoutingMarkerWriter(w, decision.Model, subscriptionOnlyWarningMarker)
+		if err := mw.Prelude(env.Stream()); err != nil {
+			log.Error("OpenAI usage-bypass routing-marker prelude failed", "err", err)
+		}
+		sink = mw
+	}
+
+	var extractor *otel.UsageExtractor
+	var usageSink otel.UsageSink
+	if s.usageRequired() {
+		extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
+		usageSink = extractor
+	}
+	translator := translate.NewSSETranslator(sink, decision.Model, usageSink)
+
+	proxyStart := time.Now()
+	proxyErr := p.Proxy(ctx, decision, prep, translator, r)
+	if providers.IsRetryable(proxyErr) {
+		return errBypassRetryable
+	}
+	proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
+
+	var upstreamErr *providers.UpstreamErrorResponse
+	if errors.As(proxyErr, &upstreamErr) {
+		flushBufferedIfPresent(w, proxyErr)
+		proxyErr = nil
+	}
+
+	in, out := extractor.Tokens()
+	cacheCreation, cacheRead := extractor.CacheTokens()
+	pricing, _ := catalog.PriceFor(decision.Provider, decision.Model)
+	inputCost := catalog.EffectiveInputCost(in, cacheCreation, cacheRead, pricing.InputUSDPer1M, pricing, decision.Provider)
+	outputCost := catalog.EffectiveOutputCost(out, pricing.OutputUSDPer1M)
+
+	clientID := ClientIdentityFrom(ctx)
+	otel.Record(ctx, otel.Span{
+		Name:  "router.usage_bypass",
+		Start: requestStart,
+		End:   time.Now(),
+		Attrs: otel.NewAttrBuilder(18).
+			String("request_id", requestID).
+			String("external_id", externalID).
+			String("router_user_id", auth.UserIDFrom(ctx)).
+			String("client.app", clientID.ClientApp).
+			String("client.session_id", clientID.SessionID).
+			String("requested.model", decision.Model).
+			String("decision.model", decision.Model).
+			String("decision.provider", decision.Provider).
+			String("decision.reason", decision.Reason).
+			Bool("cost.subscription_served", servedOnSubscription(ctx)).
+			Int64("usage.input_tokens", int64(in)).
+			Int64("usage.output_tokens", int64(out)).
+			Int64("usage.cache_creation_input_tokens", int64(cacheCreation)).
+			Int64("usage.cache_read_input_tokens", int64(cacheRead)).
+			Float64("cost.requested_input_usd", inputCost).
+			Float64("cost.requested_output_usd", outputCost).
+			Float64("cost.actual_input_usd", inputCost).
+			Float64("cost.actual_output_usd", outputCost).
+			Build(),
+	})
+	otel.Flush(ctx)
+	log.Info("ProxyOpenAIChatCompletion usage-bypass complete",
+		"request_id", requestID,
+		"external_id", externalID,
+		"requested_model", feats.Model,
+		"decision_model", decision.Model,
+		"proxy_ms", time.Since(proxyStart).Milliseconds(),
+		"total_ms", time.Since(requestStart).Milliseconds(),
+		"proxy_err", proxyErr,
+	)
+	return proxyErr
+}
