@@ -10,14 +10,16 @@ import (
 )
 
 // unifiedLimitCapture is a request-scoped holder for the raw
-// anthropic-ratelimit-unified-* header set observed on THIS request's own
-// subscription-served upstream call. It exists purely as Phase 0
-// instrumentation for the Claude Code cost-observing-proxy design
-// (docs/internal/claude-code-cost-proxy-design.md) — verifying the header
-// vocabulary (unified-status, overage-status, overage-disabled-reason,
-// representative-claim) against real subscription traffic before any cost
-// math depends on it. Nothing reads the captured value except the telemetry
-// row builder; it has no effect on routing, subsidy, or usage-bypass.
+// anthropic-ratelimit-unified-* header set. Phase 0 instrumentation only —
+// nothing reads it except the telemetry row builder; no effect on routing,
+// subsidy, or usage-bypass.
+//
+// Retry/failover semantics: the captured set describes the LAST
+// subscription-served attempt, which may not be the attempt that produced the
+// response — a 429'd subscription attempt whose retry serves on the
+// deployment key leaves the 429's headers here (that near-cap reading is
+// exactly what Phase 0 wants). Consumers disambiguate via the row's
+// failover_used and credential_source columns.
 type unifiedLimitCapture struct {
 	raw map[string]string
 }
@@ -25,19 +27,15 @@ type unifiedLimitCapture struct {
 type unifiedLimitCaptureKey struct{}
 
 // withUnifiedLimitCapture installs an empty capture holder on ctx. The holder
-// is a pointer, so the header observer (which runs on a copy of ctx derived
-// from this one) mutates the SAME holder this function's caller retrieves
-// later via UnifiedLimitHeadersFrom — no channel or extra plumbing needed,
-// mirroring how CredentialsFromContext/clearCredentials share request state.
+// is a pointer, so the header observer mutates the same struct the caller
+// reads later via UnifiedLimitHeadersFrom — no extra plumbing needed.
 func withUnifiedLimitCapture(ctx context.Context) context.Context {
 	return context.WithValue(ctx, unifiedLimitCaptureKey{}, &unifiedLimitCapture{})
 }
 
 // captureUnifiedLimitHeaders records the raw anthropic-ratelimit-unified-*
-// header set on ctx's capture holder, if the resolved credential for this
-// upstream call was a subscription (OAuth) credential and the request carries
-// a capture holder. Anthropic-only: Codex/OpenAI headers are a different
-// family (design doc §3) and out of scope for this instrumentation.
+// headers on ctx's holder when the resolved credential is OAuth (subscription).
+// Skipped for BYOK/deployment calls — those headers describe a different account.
 func captureUnifiedLimitHeaders(ctx context.Context, h http.Header) {
 	c, ok := ctx.Value(unifiedLimitCaptureKey{}).(*unifiedLimitCapture)
 	if !ok || c == nil {

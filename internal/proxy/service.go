@@ -2166,7 +2166,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// On a retryable 429 the bypass falls through to re-routing; rate-limit
 	// headers prime the observer so the retry discounts Anthropic.
 	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
-		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, routeRes.TurnType, r, w)
 		if !errors.Is(err, errBypassRetryable) {
 			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err

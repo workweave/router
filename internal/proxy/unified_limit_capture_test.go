@@ -13,10 +13,7 @@ import (
 )
 
 func TestUnifiedLimitHeadersFrom_NoCaptureInstalled(t *testing.T) {
-	// A context that never went through withUnifiedLimitCapture must report
-	// nothing rather than panic — callers (unifiedLimitHeadersJSON) rely on
-	// this to leave the telemetry column NULL on any code path that doesn't
-	// route through ProxyMessages' capture wiring.
+	// No capture holder installed → must return nil, not panic.
 	assert.Nil(t, UnifiedLimitHeadersFrom(context.Background()))
 }
 
@@ -105,11 +102,8 @@ func TestUnifiedLimitHeadersJSON(t *testing.T) {
 	})
 }
 
-// End-to-end through the shared observer composition: a Claude Code
-// subscription request with NO subscription-aware routing configured
-// (s.usageObserver == nil) must still capture the raw unified headers. This is
-// the scenario Phase 0 dogfooding actually runs under before the subsidy
-// feature and this instrumentation are necessarily enabled together.
+// Capture must work when s.usageObserver is nil — the Phase 0 dogfooding
+// scenario before subsidy-aware routing is enabled.
 func TestWithUsageObserver_CapturesRawHeadersEvenWithoutSubsidyObserver(t *testing.T) {
 	s := &Service{} // usageObserver is nil: subsidy feature not configured
 
@@ -132,12 +126,8 @@ func TestWithUsageObserver_CapturesRawHeadersEvenWithoutSubsidyObserver(t *testi
 	assert.Equal(t, "org_level_disabled", got["anthropic-ratelimit-unified-overage-disabled-reason"])
 }
 
-// withUsageObserver must remain a true no-op (return ctx unchanged) when there
-// is genuinely nothing to do: no subsidy observer configured AND no Anthropic
-// subscription token detected on the request. This preserves the pre-existing
-// contract other tests (TestSubsidyFactors_DisabledForInstallation etc.) rely
-// on, and confirms Phase 0 instrumentation doesn't start capturing on every
-// request regardless of auth.
+// No-op contract: nothing captured when usageObserver is nil AND no subscription
+// token is present — Phase 0 must not capture on every request.
 func TestWithUsageObserver_NoopWhenNothingToObserve(t *testing.T) {
 	s := &Service{}
 	ctx := context.Background()

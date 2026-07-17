@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
 	"github.com/google/uuid"
@@ -165,7 +167,7 @@ func TestBypass_429_ReturnsErrBypassRetryable_NoBytesWritten(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 
 	assert.ErrorIs(t, err, errBypassRetryable, "a retryable 429 must signal fall-through to routed dispatch")
 	assert.Equal(t, 1, upstream.dispatches, "the bypass attempt must hit the upstream exactly once")
@@ -190,7 +192,7 @@ func TestBypass_NonRetryableError_StillFlushes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 
 	require.NoError(t, err, "a non-retryable 400 must flush and return nil — rerouting would mask a malformed request")
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "the 400 must be flushed to the client verbatim")
@@ -207,7 +209,7 @@ func TestBypass_NilError_ReturnsNil(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 	require.NoError(t, err)
 }
 
@@ -226,7 +228,7 @@ func TestBypass_TransportError_ReroutesViaScorer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 
 	assert.ErrorIs(t, err, errBypassRetryable, "a transport error must signal fall-through to routed dispatch")
 	assert.Equal(t, 1, upstream.dispatches, "the bypass attempt must hit the upstream exactly once")
@@ -249,7 +251,7 @@ func TestBypass_LocalPrepError_PropagatesToClient(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 
-	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 
 	require.Error(t, err, "provider-not-configured must surface as a real error")
 	assert.NotErrorIs(t, err, errBypassRetryable, "local prep errors must not trigger reroute — the client must see them")
@@ -414,7 +416,7 @@ func TestBypass_EmitsUsageAndCost(t *testing.T) {
 
 	buf := otel.NewBuffer(emitter)
 	ctx := buf.WithContext(context.Background())
-	err = svc.bypassToAnthropic(ctx, env, feats, false, time.Now(), "req-1", "ext-1", req, rec)
+	err = svc.bypassToAnthropic(ctx, env, feats, false, time.Now(), "req-1", "ext-1", turntype.MainLoop, req, rec)
 	require.NoError(t, err)
 	buf.Flush()
 
@@ -446,4 +448,109 @@ func TestBypass_EmitsUsageAndCost(t *testing.T) {
 	assert.InDelta(t, wantIn, spanFloat(t, sp, "cost.actual_input_usd"), 1e-9)
 	assert.InDelta(t, wantOut, spanFloat(t, sp, "cost.requested_output_usd"), 1e-9)
 	assert.InDelta(t, wantIn, spanFloat(t, sp, "cost.requested_input_usd"), 1e-9)
+}
+
+// bypassCaptureTelemetry records InsertTelemetryParams rows for assertions.
+// Only InsertRequestTelemetry matters; the read methods satisfy the interface.
+type bypassCaptureTelemetry struct {
+	panicTelemetryRepo // inherit no-op reads
+	mu                 sync.Mutex
+	rows               []InsertTelemetryParams
+	notify             chan struct{}
+}
+
+func newBypassCaptureTelemetry() *bypassCaptureTelemetry {
+	return &bypassCaptureTelemetry{notify: make(chan struct{}, 4)}
+}
+
+func (c *bypassCaptureTelemetry) InsertRequestTelemetry(_ context.Context, p InsertTelemetryParams) error {
+	c.mu.Lock()
+	c.rows = append(c.rows, p)
+	c.mu.Unlock()
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// TestBypass_PersistsTelemetryRowWithUnifiedHeaders: a usage-bypass turn —
+// the primary subscription pass-through path — must write a router.upstream
+// telemetry row carrying the captured anthropic-ratelimit-unified-* headers.
+// Before this, bypass turns returned ahead of every fireTelemetry site, so
+// exactly the turns Phase 0 needs (subscription-served) were invisible.
+func TestBypass_PersistsTelemetryRowWithUnifiedHeaders(t *testing.T) {
+	upstream := &bypassFakeProvider{respBody: "{}"}
+	svc := newBypassService(upstream)
+	sink := newBypassCaptureTelemetry()
+	svc.telemetry = sink
+
+	env := bypassAnthropicEnvelope(t)
+	feats := env.RoutingFeatures(false)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	// Subscription bearer on the inbound request: resolveAndInjectCredentials
+	// inside bypassToAnthropic resolves it, so the header observer treats the
+	// upstream call as subscription-served.
+	req.Header.Set("Authorization", "Bearer sk-ant-oat01-live")
+
+	installationID := uuid.New()
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, installationID.String())
+	// Same wiring ProxyMessages does before the bypass branch: install the
+	// capture holder + observer, then simulate the provider reporting headers.
+	ctx = svc.withUsageObserver(ctx, req.Header)
+	upstreamHeaders := http.Header{}
+	upstreamHeaders.Set("anthropic-ratelimit-unified-status", "allowed")
+	upstreamHeaders.Set("anthropic-ratelimit-unified-overage-status", "rejected")
+	credCtx := context.WithValue(ctx, CredentialsContextKey{}, &Credentials{
+		APIKey: []byte("sk-ant-oat01-live"), Source: credSourceSubscription, OAuth: true,
+	})
+	providers.ObserveUpstreamHeaders(credCtx, upstreamHeaders)
+
+	err := svc.bypassToAnthropic(ctx, env, feats, false, time.Now(), "req-tel-1", "ext-1", turntype.MainLoop, req, rec)
+	require.NoError(t, err)
+
+	select {
+	case <-sink.notify:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bypass turn never persisted a telemetry row")
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.rows, 1)
+	row := sink.rows[0]
+	assert.Equal(t, installationID.String(), row.InstallationID)
+	assert.Equal(t, "router.upstream", row.SpanType, "bypass rows must land in the same span the dashboard queries filter on")
+	assert.Equal(t, "usage_bypass", row.DecisionReason)
+	assert.Equal(t, string(turntype.MainLoop), row.TurnType)
+	require.NotNil(t, row.UnifiedLimitHeaders, "captured unified headers must reach the telemetry row")
+	var headers map[string]string
+	require.NoError(t, json.Unmarshal(row.UnifiedLimitHeaders, &headers))
+	assert.Equal(t, "allowed", headers["anthropic-ratelimit-unified-status"])
+	assert.Equal(t, "rejected", headers["anthropic-ratelimit-unified-overage-status"])
+}
+
+// TestBypass_NoTelemetryRowWithoutInstallation: bypass turns without an
+// authenticated installation (should not happen in practice — the auth
+// middleware always sets it) must not fabricate a row with a zero UUID.
+func TestBypass_NoTelemetryRowWithoutInstallation(t *testing.T) {
+	upstream := &bypassFakeProvider{respBody: "{}"}
+	svc := newBypassService(upstream)
+	sink := newBypassCaptureTelemetry()
+	svc.telemetry = sink
+
+	env := bypassAnthropicEnvelope(t)
+	feats := env.RoutingFeatures(false)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+
+	err := svc.bypassToAnthropic(context.Background(), env, feats, false, time.Now(), "req-tel-2", "ext-1", turntype.MainLoop, req, rec)
+	require.NoError(t, err)
+
+	select {
+	case <-sink.notify:
+		t.Fatal("no installation on ctx -> no telemetry row expected")
+	case <-time.After(200 * time.Millisecond):
+	}
 }

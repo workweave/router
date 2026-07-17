@@ -9,6 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
+
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
@@ -16,6 +18,7 @@ import (
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 )
 
@@ -238,6 +241,7 @@ func (s *Service) bypassToAnthropic(
 	modelSwitched bool,
 	requestStart time.Time,
 	requestID, externalID string,
+	turnType turntype.TurnType,
 	r *http.Request,
 	w http.ResponseWriter,
 ) error {
@@ -356,6 +360,52 @@ func (s *Service) bypassToAnthropic(
 			Build(),
 	})
 	otel.Flush(ctx)
+
+	// Persist a router.upstream telemetry row for the bypass turn. Without
+	// this, subscription pass-through turns — the primary Claude Code
+	// subscription path — are invisible to the telemetry table, which is
+	// exactly where the Phase 0 unified_limit_headers instrumentation needs
+	// them (a bypass turn is by definition subscription-served). The routed
+	// path's row carries routing-brain fields this lane doesn't have; they
+	// stay NULL here, and decision_reason="usage_bypass" marks the lane.
+	if installationID := installationIDFromContext(ctx); installationID != uuid.Nil {
+		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID.String(),
+			APIKeyID:               apiKeyIDFromContext(ctx),
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			InputTokens:            int32(in),
+			OutputTokens:           int32(out),
+			RequestedInputCostUSD:  inputCost,
+			RequestedOutputCostUSD: outputCost,
+			ActualInputCostUSD:     inputCost,
+			ActualOutputCostUSD:    outputCost,
+			UpstreamLatencyMs:      time.Since(proxyStart).Milliseconds(),
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			CaptureMode:            s.captureMode.String(),
+			TurnType:               string(turnType),
+			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
+			CacheReadTokens:        cacheTokenPtr(cacheRead),
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
+			RouterUserID:           auth.UserIDFrom(ctx),
+			ClientApp:              clientID.ClientApp,
+			CredentialKeyPrefix:    credentialKeyPrefix,
+			CredentialKeySuffix:    credentialKeySuffix,
+			CredentialSource:       credSource,
+			UnifiedLimitHeaders:    unifiedLimitHeadersJSON(ctx),
+		})
+	}
+
 	log.Info("ProxyMessages usage-bypass complete",
 		"request_id", requestID,
 		"external_id", externalID,

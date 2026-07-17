@@ -123,11 +123,8 @@ type InsertTelemetryParams struct {
 	CredentialSource    string
 
 	// UnifiedLimitHeaders is the verbatim anthropic-ratelimit-unified-* header
-	// set observed on this turn, pre-marshaled JSON (nil if none observed).
-	// Claude Code cost-observing-proxy Phase 0 instrumentation (see
-	// docs/internal/claude-code-cost-proxy-design.md in the WorkWeave
-	// monorepo) — captured to verify the header vocabulary against real
-	// traffic before any cost math depends on it. Nothing reads this yet.
+	// set, pre-marshaled JSON. Phase 0 instrumentation — nil on non-subscription
+	// turns. Nothing reads this yet.
 	UnifiedLimitHeaders []byte
 }
 

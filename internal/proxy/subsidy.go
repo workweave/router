@@ -154,18 +154,11 @@ func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Heade
 }
 
 // withUsageObserver installs a context header observer that records the present
-// subscription's rate-limit headroom from upstream response headers, AND
-// (independently — see below) captures the raw anthropic-ratelimit-unified-*
-// header set for the Claude Code cost-observing-proxy Phase 0 instrumentation
-// (docs/internal/claude-code-cost-proxy-design.md). No-op (returns ctx) when
-// neither has anything to do: the subsidy feature is off/no subscription
-// present AND no Anthropic subscription token was detected.
-//
-// providers.WithUpstreamHeaderObserver only holds one observer per context, so
-// both concerns are composed into a single callback here rather than installed
-// separately. The raw-header capture is wrapped in its own recover so a bug in
-// brand-new Phase 0 code can never take down the production subsidy/
-// usage-bypass observer it now shares a call site with.
+// subscription's rate-limit headroom and captures raw unified-limit headers for
+// Phase 0 telemetry. Both concerns share one observer slot
+// (providers.WithUpstreamHeaderObserver holds only one per ctx); the capture is
+// wrapped in recover so a Phase 0 bug can never take down the subsidy observer.
+// No-op when usageObserver is nil AND no Anthropic subscription token is present.
 func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) context.Context {
 	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
 	if s.usageObserver == nil && anthroTok == "" {
