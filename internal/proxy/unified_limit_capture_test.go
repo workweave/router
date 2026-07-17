@@ -40,9 +40,7 @@ func TestCaptureUnifiedLimitHeaders_RecordsOnSubscriptionCredential(t *testing.T
 }
 
 func TestCaptureUnifiedLimitHeaders_SkipsNonOAuthCredential(t *testing.T) {
-	// A BYOK/deployment-key call (e.g. the handover summarizer after
-	// clearCredentials) must not be recorded — those headers describe a
-	// different account's quota, not the request's own subscription.
+	// BYOK/deployment-key call must not be recorded — headers describe a different account's quota.
 	ctx := withUnifiedLimitCapture(context.Background())
 	ctx = context.WithValue(ctx, CredentialsContextKey{}, &Credentials{
 		APIKey: []byte("sk-ant-api-deployment"), Source: credSourceBYOK, OAuth: false,
@@ -65,9 +63,7 @@ func TestCaptureUnifiedLimitHeaders_NoCredentialsResolved(t *testing.T) {
 }
 
 func TestCaptureUnifiedLimitHeaders_NoUnifiedHeadersPresent(t *testing.T) {
-	// A subscription-served response with no unified headers at all (e.g. an
-	// endpoint other than /v1/messages) must leave the capture empty rather
-	// than recording an empty-but-non-nil map.
+	// Subscription response with no unified headers must leave capture nil, not empty-but-non-nil.
 	ctx := withUnifiedLimitCapture(context.Background())
 	ctx = context.WithValue(ctx, CredentialsContextKey{}, &Credentials{
 		APIKey: []byte("sk-ant-oat01-live"), Source: credSourceSubscription, OAuth: true,

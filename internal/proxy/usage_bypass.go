@@ -361,13 +361,9 @@ func (s *Service) bypassToAnthropic(
 	})
 	otel.Flush(ctx)
 
-	// Persist a router.upstream telemetry row for the bypass turn. Without
-	// this, subscription pass-through turns — the primary Claude Code
-	// subscription path — are invisible to the telemetry table, which is
-	// exactly where the Phase 0 unified_limit_headers instrumentation needs
-	// them (a bypass turn is by definition subscription-served). The routed
-	// path's row carries routing-brain fields this lane doesn't have; they
-	// stay NULL here, and decision_reason="usage_bypass" marks the lane.
+	// Persist a router.upstream telemetry row so bypass turns appear in the
+	// telemetry table. Routing-brain fields stay NULL; decision_reason="usage_bypass"
+	// marks the lane. Required for Phase 0 unified_limit_headers capture.
 	if installationID := installationIDFromContext(ctx); installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		s.fireTelemetry(InsertTelemetryParams{

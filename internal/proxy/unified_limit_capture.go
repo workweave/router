@@ -14,12 +14,9 @@ import (
 // nothing reads it except the telemetry row builder; no effect on routing,
 // subsidy, or usage-bypass.
 //
-// Retry/failover semantics: the captured set describes the LAST
-// subscription-served attempt, which may not be the attempt that produced the
-// response — a 429'd subscription attempt whose retry serves on the
-// deployment key leaves the 429's headers here (that near-cap reading is
-// exactly what Phase 0 wants). Consumers disambiguate via the row's
-// failover_used and credential_source columns.
+// Retry/failover: captures the LAST subscription-served attempt's headers —
+// a 429'd subscription retry that falls over to the deployment key leaves the
+// near-cap reading here. Consumers disambiguate via failover_used + credential_source.
 type unifiedLimitCapture struct {
 	raw map[string]string
 }
@@ -63,10 +60,9 @@ func UnifiedLimitHeadersFrom(ctx context.Context) map[string]string {
 	return c.raw
 }
 
-// unifiedLimitHeadersJSON marshals the raw header map captured for this
-// request into the pre-marshaled []byte form InsertTelemetryParams expects for
-// jsonb columns (nil when nothing was captured, so the column stays NULL
-// rather than storing an empty object).
+// unifiedLimitHeadersJSON marshals the captured unified-header map to []byte
+// for InsertTelemetryParams. Returns nil (not empty JSON object) when nothing
+// was captured, so the column stays NULL.
 func unifiedLimitHeadersJSON(ctx context.Context) []byte {
 	raw := UnifiedLimitHeadersFrom(ctx)
 	if len(raw) == 0 {

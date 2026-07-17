@@ -3000,9 +3000,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
-			// Phase 0 instrumentation for the Claude Code cost-observing-proxy
-			// design — see unified_limit_capture.go. Anthropic-only; the
-			// OpenAI/Codex path below has no unified-header family to capture.
+			// Phase 0 instrumentation — Anthropic only; see unified_limit_capture.go.
 			UnifiedLimitHeaders: unifiedLimitHeadersJSON(ctx),
 		})
 	}
