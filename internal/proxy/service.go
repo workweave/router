@@ -4541,9 +4541,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		return fmt.Errorf("%w: %s (no translation path defined)", ErrProviderNotConfigured, decision.Provider)
 	}
 
-	// openaiAnthropicAttempt builds the OpenAI-wire → Anthropic upstream closure
-	// used by baseline failover (and subscription-credit retry). Mirrors the
-	// FamilyAnthropic primary attempt, rebuilt per retry with a fresh prep.
+	// openaiAnthropicAttempt rebuilds the OpenAI→Anthropic dispatch closure for failover retries.
 	openaiAnthropicAttempt := func(prep providers.PreparedRequest, markerText string) dispatchAttempt {
 		return func(actx context.Context, d router.Decision, p providers.Client) error {
 			var usageSink otel.UsageSink
@@ -4655,10 +4653,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		flushBufferedIfPresent(contentSink, proxyErr)
 	}
 
-	// Subscription-credit failover: suppress the OAuth token and retry the SAME
-	// model once on the Weave/BYOK key when a subscription-served Anthropic turn
-	// hit a transient fault (429/timeout) or an OAuth rejection (401/403),
-	// pre-commit. Skipped when baseline failover already ran (non-Anthropic).
+	// Subscription-credit failover: drop OAuth and retry once on Weave/BYOK (429/timeout or OAuth 401/403), pre-commit.
 	subscriptionFailoverUsed := false
 	subscriptionRetryRan := false
 	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&
@@ -4716,9 +4711,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	decision.Provider = finalProvider
 
-	// Re-resolve credentials for the binding that actually served — each
-	// failover attempt gets its own context. Carry suppression forward only
-	// when the Weave retry actually succeeded.
+	// Re-resolve credentials for the served binding; keep suppression only if Weave retry succeeded.
 	if subscriptionFailoverUsed {
 		ctx = withSuppressedClaudeSubscription(ctx)
 	}

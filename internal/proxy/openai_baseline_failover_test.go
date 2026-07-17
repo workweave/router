@@ -21,13 +21,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// anthropicMessageJSON is a minimal non-streaming Anthropic Messages body the
-// OpenAI→Anthropic translator can turn into a chat.completion response.
+// anthropicMessageJSON is a minimal Anthropic Messages body for OpenAI→Anthropic translation.
 const anthropicMessageJSON = `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":1}}`
 
-// TestProxyOpenAI_OSSOutageFailsOverToBaselineAnthropic mirrors
-// TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic on the OpenAI wire:
-// cost-routed OSS bindings all fail, then the requested Anthropic model serves.
+// TestProxyOpenAI_OSSOutageFailsOverToBaselineAnthropic: OSS outage → Anthropic baseline on the OpenAI wire.
 func TestProxyOpenAI_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	var (
 		mu                     sync.Mutex
@@ -104,8 +101,7 @@ func TestProxyOpenAI_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
 }
 
-// TestProxyOpenAI_ForcedModelUnavailableDoesNotSubstituteAnthropic ensures a
-// forced-model OpenAI request hard-fails instead of silently substituting Anthropic.
+// TestProxyOpenAI_ForcedModelUnavailableDoesNotSubstituteAnthropic: forced-model must not substitute Anthropic.
 func TestProxyOpenAI_ForcedModelUnavailableDoesNotSubstituteAnthropic(t *testing.T) {
 	var anthropicCount int
 	var googleCount int
@@ -139,8 +135,7 @@ func TestProxyOpenAI_ForcedModelUnavailableDoesNotSubstituteAnthropic(t *testing
 	assert.Equal(t, 0, googleCount, "unwired forced provider must not be dispatched")
 }
 
-// TestProxyOpenAI_OSSOutageNoBaselineWhenRequestedModelIsOSS: when the caller
-// requested the OSS model directly, exhaustion surfaces the upstream error.
+// TestProxyOpenAI_OSSOutageNoBaselineWhenRequestedModelIsOSS: no baseline when the caller requested OSS.
 func TestProxyOpenAI_OSSOutageNoBaselineWhenRequestedModelIsOSS(t *testing.T) {
 	var anthropicCount int
 	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,8 +174,7 @@ func TestProxyOpenAI_OSSOutageNoBaselineWhenRequestedModelIsOSS(t *testing.T) {
 	assert.Equal(t, 0, anthropicCount, "baseline failover must not fire when the caller requested the OSS model")
 }
 
-// TestProxyOpenAI_OSSOutageNoBaselineWhenAnthropicExcluded: when Anthropic is
-// excluded, baseline failover must not retry against it.
+// TestProxyOpenAI_OSSOutageNoBaselineWhenAnthropicExcluded: no baseline when Anthropic is excluded.
 func TestProxyOpenAI_OSSOutageNoBaselineWhenAnthropicExcluded(t *testing.T) {
 	var anthropicCount int
 	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

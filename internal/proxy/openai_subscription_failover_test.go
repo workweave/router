@@ -25,8 +25,7 @@ const (
 	oaiSubFailoverOK    = `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-haiku-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
 )
 
-// oauthRejectThenDeployOK returns a buffered error while an OAuth subscription
-// credential is present, then succeeds with no credential (deploy-key path).
+// oauthRejectThenDeployOK fails under OAuth subscription creds, then succeeds on the deploy-key path.
 type oauthRejectThenDeployOK struct {
 	mu      sync.Mutex
 	onOAuth error
@@ -70,8 +69,7 @@ func (p *oauthRejectThenDeployOK) Passthrough(context.Context, providers.Prepare
 func oaiSubSlackObs(t *testing.T) *usage.Observer {
 	t.Helper()
 	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
-	// Slack (not exhausted): preemptive suppress must not fire; only the
-	// reactive subscription-credit retry can recover.
+	// Slack: preemptive suppress must not fire; only reactive subscription retry recovers.
 	obs.Record(obs.Key([]byte(oaiSubFailoverToken)), usage.Snapshot{
 		Primary: usage.Window{UsedPercent: 0.50, WindowMinutes: 300},
 	})
@@ -94,9 +92,7 @@ func oaiSubFailoverSvc(t *testing.T, p providers.Client) *proxy.Service {
 		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
 }
 
-// TestProxyOpenAI_SubscriptionRetry_Live429FailsOverToDeployKey: a live 429 on
-// the Claude OAuth token (observer still has slack) must suppress the
-// subscription and retry once on the Weave/BYOK key — Messages parity.
+// TestProxyOpenAI_SubscriptionRetry_Live429FailsOverToDeployKey: live 429 on OAuth → Weave/BYOK retry.
 func TestProxyOpenAI_SubscriptionRetry_Live429FailsOverToDeployKey(t *testing.T) {
 	reject := &providers.UpstreamErrorResponse{
 		Status: http.StatusTooManyRequests,
@@ -120,8 +116,7 @@ func TestProxyOpenAI_SubscriptionRetry_Live429FailsOverToDeployKey(t *testing.T)
 	assert.Contains(t, rec.Body.String(), `"object":"chat.completion"`)
 }
 
-// TestProxyOpenAI_SubscriptionRetry_OAuth401FailsOverToDeployKey covers the
-// authentication_error arm of anthropicOAuthCredentialRejected.
+// TestProxyOpenAI_SubscriptionRetry_OAuth401FailsOverToDeployKey: OAuth authentication_error → deploy key.
 func TestProxyOpenAI_SubscriptionRetry_OAuth401FailsOverToDeployKey(t *testing.T) {
 	reject := &providers.UpstreamErrorResponse{
 		Status: http.StatusUnauthorized,
@@ -144,8 +139,7 @@ func TestProxyOpenAI_SubscriptionRetry_OAuth401FailsOverToDeployKey(t *testing.T
 	assert.True(t, last.nilCreds || !last.oauth)
 }
 
-// TestProxyOpenAI_SubscriptionRetry_OAuth403FailsOverToDeployKey covers the
-// permission_error arm of anthropicOAuthCredentialRejected.
+// TestProxyOpenAI_SubscriptionRetry_OAuth403FailsOverToDeployKey: OAuth permission_error → deploy key.
 func TestProxyOpenAI_SubscriptionRetry_OAuth403FailsOverToDeployKey(t *testing.T) {
 	reject := &providers.UpstreamErrorResponse{
 		Status: http.StatusForbidden,
