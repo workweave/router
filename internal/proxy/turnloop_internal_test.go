@@ -108,6 +108,39 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
+func TestRecordTurnUsage_ForwardsPriorServedModel(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+
+	res := turnLoopResult{
+		Decision:         router.Decision{Provider: "anthropic", Model: "claude-opus-4-7"},
+		SessionKey:       sessionKey,
+		PinRole:          sessionpin.DefaultRole,
+		PriorServedModel: "claude-sonnet-5",
+	}
+	svc.recordTurnUsage(res, res.Decision.Provider, res.Decision.Model, 1200, 80, 200, 900)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "claude-sonnet-5", store.lastUsage.PriorServedModel,
+		"recordTurnUsage must forward PriorServedModel so the SQL latch can set has_ever_switched on a fresh pin row")
+}
+
 func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
