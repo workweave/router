@@ -118,9 +118,8 @@ func (r *BillingRepo) GetUserMonthlySpendAndLimit(ctx context.Context, organizat
 	return row.SpentUsdMicros, limit, nil
 }
 
-// GetOrgMonthlySpendAndLimit reads the org's current UTC-month spend and its
-// configured monthly cap. Scalar subqueries always return a row, so a missing
-// config or spend row surfaces as nil limit / zero spend, not an error.
+// GetOrgMonthlySpendAndLimit reads the org's current UTC-month spend and cap.
+// Scalar subqueries guarantee a row; missing config/spend -> nil limit / zero spend, not an error.
 func (r *BillingRepo) GetOrgMonthlySpendAndLimit(ctx context.Context, organizationID string) (int64, *int64, error) {
 	q := sqlc.New(r.tx)
 	row, err := q.GetOrgMonthlySpendAndLimit(ctx, organizationID)
