@@ -107,10 +107,8 @@ func resolveForceModel(model string) (canonicalID, provider string, known bool) 
 }
 
 // resolveForceModelWithEffort is like resolveForceModel but also strips a
-// `:level` suffix and returns it as effort. Resolution order: alias →
-// catalog.ByID → suffix-match → provider heuristic. `known` is true only for
-// catalog matches; known=false + effort!="" lets callers surface "model not
-// found" without swallowing the effort half.
+// `:level` suffix. `known` is true only for catalog matches; known=false +
+// effort!="" lets callers surface "model not found" without losing the effort.
 func resolveForceModelWithEffort(model string) (canonicalID, provider string, known bool, effort string) {
 	effortLevel, stripped := stripEffortSuffix(model)
 	model = stripped

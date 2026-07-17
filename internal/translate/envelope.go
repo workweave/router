@@ -968,10 +968,9 @@ const (
 	effortXhigh  = "xhigh"
 )
 
-// CanonicalizeEffort maps user-facing values (incl. the force-model alias
-// forms "fast","minimal","ultra") to the canonical wire-format strings
-// ("low","medium","high","xhigh"). Unknown values pass through unchanged so
-// the model-specific cap check can reject them with a format-aware 400.
+// CanonicalizeEffort maps user-facing aliases (fast/minimal/ultra) to canonical
+// wire strings (low/medium/high/max/xhigh). Unknown values pass through so
+// IsValidEffort can reject typos at the boundary.
 func CanonicalizeEffort(level string) string {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "fast", "low", "minimal", "min":
