@@ -1720,8 +1720,8 @@ install_slash_commands() {
   installed="force-model, unforce-model, router-feedback, fm, ufm, rf"
   cmds="force-model unforce-model router-feedback fm ufm rf"
   if [ "$target" = "claude" ]; then
-    cmds="$cmds router-off router-on router-status"
-    installed="$installed, router-off, router-on, router-status"
+    cmds="$cmds router-off router-on router-status router-session"
+    installed="$installed, router-off, router-on, router-status, router-session"
   fi
 
   # Bake the same scope selector the toggle needs to find this install: --dir

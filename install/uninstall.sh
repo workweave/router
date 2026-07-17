@@ -531,7 +531,7 @@ done
 commands_dir="$(dirname "$settings_file")/commands"
 if [ -d "$commands_dir" ]; then
   refuse_if_symlink "$commands_dir"
-  for cmd in force-model unforce-model router-feedback fm ufm rf router-off router-on router-status; do
+  for cmd in force-model unforce-model router-feedback fm ufm rf router-off router-on router-status router-session; do
     cmd_file="$commands_dir/$cmd.md"
     if [ -f "$cmd_file" ]; then
       refuse_if_symlink "$cmd_file"

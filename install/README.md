@@ -193,8 +193,10 @@ npx @workweave/router off --opencode --scope project   # project-scoped opencode
 ```
 
 Inside Claude Code you can also run the slash commands `/router-off`,
-`/router-on`, and `/router-status` (installed alongside `/force-model` (alias
-`/fm`), `/unforce-model` (alias `/ufm`), and `/router-feedback` (alias `/rf`)).
+`/router-on`, `/router-status`, and `/router-session` (which prints the
+session id the router keys this session on) — installed alongside
+`/force-model` (alias `/fm`), `/unforce-model` (alias `/ufm`), and
+`/router-feedback` (alias `/rf`).
 
 What each `off` does (and `on` reverses byte-for-byte):
 
