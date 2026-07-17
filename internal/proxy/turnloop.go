@@ -911,17 +911,13 @@ func (s *Service) normalizeHMMStayPin(req router.Request, p sessionpin.Pin) (ses
 			providerSet[provider] = struct{}{}
 		}
 	}
-	// The history row stores the provider separately from LastServedModel.
-	// A failed turn refreshes its TTL but deliberately preserves the prior
-	// successful model, so only retain the stored provider when it is a valid
-	// binding for that model. Otherwise re-resolve the model against this
-	// request's available providers rather than dispatching an invalid pair.
+	// A failed turn preserves the prior model but may leave an invalid provider
+	// binding; validate before reusing, or re-resolve against available providers.
 	if p.Provider != "" {
-		if _, enabled := providerSet[p.Provider]; !enabled {
-			return sessionpin.Pin{}, false
-		}
-		if _, valid := catalog.ResolveBinding(model, map[string]struct{}{p.Provider: {}}); valid {
-			return p, true
+		if _, enabled := providerSet[p.Provider]; enabled {
+			if _, valid := catalog.ResolveBinding(model, map[string]struct{}{p.Provider: {}}); valid {
+				return p, true
+			}
 		}
 	}
 	binding, ok := catalog.ResolveBinding(model, providerSet)

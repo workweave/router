@@ -3193,9 +3193,8 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	hasUsage := in != 0 || out != 0 || cacheCreation != 0 || cacheRead != 0
 	historyProvider := servedProvider
 	if !hasUsage {
-		// Keep the provider coupled to the last successful model. A failed
-		// turn has no usage writeback, so replacing only this field would make
-		// the history row an invalid model/provider pair on the next HMM stay.
+		// A failed turn has no usage writeback; preserve the prior provider to
+		// avoid an invalid model/provider pair on the next HMM stay.
 		if prior := s.loadHMMHistory(context.Background(), res.SessionKey, res.PinRole); prior.Provider != "" {
 			historyProvider = prior.Provider
 		}
