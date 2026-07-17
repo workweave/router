@@ -22,10 +22,9 @@ import (
 const anthropicToolsRequest = `{
   "model":"claude-opus-4-8","max_tokens":4096,
   "tools":[{"name":"Read","description":"read a file","input_schema":{
-    "type":"object",
-    "properties":{"file_path":{"type":"string"},"pages":{"type":"string"}},
-    "required":["file_path"],
-    "additionalProperties":false
+	"type":"object",
+	"properties":{"file_path":{"type":"string"},"pages":{"type":"string"}},
+	"required":["file_path"]
   }}],
   "messages":[{"role":"user","content":"read main.go"}]
 }`

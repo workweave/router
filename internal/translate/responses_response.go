@@ -26,6 +26,9 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolValidato
 		return nil, nil, fmt.Errorf("unmarshal responses response: invalid JSON")
 	}
 	root := gjson.ParseBytes(body)
+	if root.Get("status").String() == "incomplete" && root.Get("incomplete_details.reason").String() != "max_output_tokens" {
+		return nil, nil, fmt.Errorf("responses response incomplete: %s", root.Get("incomplete_details.reason").String())
+	}
 
 	id := root.Get("id").String()
 	if id == "" {
@@ -48,8 +51,7 @@ func responsesToAnthropicResponse(body []byte, requestModel string, toolValidato
 	stopReason := "end_turn"
 	if hasToolCall {
 		stopReason = "tool_use"
-	} else if root.Get("incomplete_details.reason").String() == "max_output_tokens" ||
-		root.Get("status").String() == "incomplete" {
+	} else if root.Get("incomplete_details.reason").String() == "max_output_tokens" {
 		stopReason = "max_tokens"
 	}
 

@@ -4,7 +4,21 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 )
+
+// TranslationCompatibilityMode parses ROUTER_TRANSLATION_COMPATIBILITY_MODE.
+// Callers must reject an invalid value at startup; the error must not silently
+// change request behavior at runtime.
+func TranslationCompatibilityMode() (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(GetOr("ROUTER_TRANSLATION_COMPATIBILITY_MODE", "shadow")))
+	switch mode {
+	case "off", "shadow", "enforce":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid ROUTER_TRANSLATION_COMPATIBILITY_MODE %q (expected off, shadow, or enforce)", mode)
+	}
+}
 
 // MustGet returns the env var value for key, panicking if it is unset or empty.
 func MustGet(key string) string {

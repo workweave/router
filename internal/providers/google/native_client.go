@@ -115,14 +115,28 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	}
 	defer resp.Body.Close()
 	t.StampUpstreamHeaders()
+	providers.ObserveUpstreamHeaders(ctx, resp.Header)
+
+	if resp.StatusCode >= 400 {
+		// Caller decides retry vs render; do not commit the downstream writer.
+		body, _, readErr := httputil.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
+		if len(body) > 0 {
+			t.StampUpstreamFirstByte()
+		}
+		if readErr == nil {
+			t.StampUpstreamEOF()
+		}
+		headers := http.Header{}
+		providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: headers}, resp)
+		return &providers.UpstreamErrorResponse{
+			Status:  resp.StatusCode,
+			Headers: headers,
+			Body:    body,
+		}
+	}
 
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
-
-	if resp.StatusCode >= 400 {
-		return httputil.WritePassthroughError(w, resp, t.StampUpstreamFirstByte, t.StampUpstreamEOF,
-			"Upstream Google returned error status", "routed_model", decision.Model, "streaming", stream)
-	}
 
 	// Output-progress watchdog: StreamBody's byte-idle watchdog resets on ANY
 	// upstream byte, so a stream that stays byte-alive (SSE keepalive comments or

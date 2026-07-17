@@ -39,6 +39,14 @@ func (w *GeminiRoutingMarkerWriter) Write(data []byte) (int, error) {
 	return w.Inner.Write(data)
 }
 
+// Prepare enables streaming marker injection without committing headers;
+// keeps retryable 429/empty-stream paths pre-commit.
+func (w *GeminiRoutingMarkerWriter) Prepare(streaming bool) {
+	if streaming && !w.markerEmitted {
+		w.Streaming = true
+	}
+}
+
 // Prelude commits headers and emits the routing marker immediately, before the
 // upstream provider has returned a single byte. See OpenAIRoutingMarkerWriter.Prelude.
 func (w *GeminiRoutingMarkerWriter) Prelude(streaming bool) error {

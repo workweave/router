@@ -1,6 +1,9 @@
 package router
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+)
 
 // ModelCapability identifies a feature that only a subset of models support.
 type ModelCapability string
@@ -19,6 +22,16 @@ const (
 // adapters strip all capability-gated fields when Supports reports false.
 type ModelSpec struct {
 	capabilities map[ModelCapability]struct{}
+	reasoning    ReasoningCapabilities
+}
+
+// ReasoningCapabilities declares the reasoning semantics a model can preserve.
+// Levels are ordered from least to most expensive for deterministic clamping.
+type ReasoningCapabilities struct {
+	Levels         []string
+	SupportsAuto   bool
+	SupportsBudget bool
+	AlwaysOn       bool
 }
 
 // Supports reports whether the model advertises cap.
@@ -33,6 +46,44 @@ func NewSpec(caps ...ModelCapability) ModelSpec {
 		s.capabilities[c] = struct{}{}
 	}
 	return s
+}
+
+// NewSpecWithReasoning creates a model spec with explicit reasoning support.
+func NewSpecWithReasoning(reasoning ReasoningCapabilities, caps ...ModelCapability) ModelSpec {
+	s := NewSpec(caps...)
+	s.reasoning = reasoning
+	return s
+}
+
+// Reasoning returns a copy of the model's declared reasoning capabilities.
+func (s ModelSpec) Reasoning() ReasoningCapabilities {
+	levels := append([]string(nil), s.reasoning.Levels...)
+	return ReasoningCapabilities{
+		Levels: levels, SupportsAuto: s.reasoning.SupportsAuto,
+		SupportsBudget: s.reasoning.SupportsBudget, AlwaysOn: s.reasoning.AlwaysOn,
+	}
+}
+
+// ValidateReasoningCapabilities verifies that catalog reasoning declarations
+// are internally coherent.
+func (s ModelSpec) ValidateReasoningCapabilities() error {
+	if len(s.reasoning.Levels) == 0 {
+		if s.reasoning.SupportsAuto || s.reasoning.SupportsBudget || s.reasoning.AlwaysOn {
+			return fmt.Errorf("reasoning modifiers require at least one supported level")
+		}
+		return nil
+	}
+	seen := make(map[string]struct{}, len(s.reasoning.Levels))
+	for _, level := range s.reasoning.Levels {
+		if level == "" {
+			return fmt.Errorf("reasoning level cannot be empty")
+		}
+		if _, exists := seen[level]; exists {
+			return fmt.Errorf("duplicate reasoning level %q", level)
+		}
+		seen[level] = struct{}{}
+	}
+	return nil
 }
 
 // dateSuffix matches Anthropic (-20251001) and OpenAI (-2024-08-06) trailing date stamps.
@@ -62,21 +113,22 @@ var (
 	// Opus/Sonnet 4.6+ only accept thinking.type=adaptive (legacy "enabled" 400s
 	// since output_config.effort rollout) and support 1M context via the
 	// context-1m-2025-08-07 beta; Haiku 4.5 and Sonnet 4.5 top out at 200K.
-	anthropicAdaptive = NewSpec(CapAdaptiveThinking, CapExtendedContext)
+	anthropicAdaptive = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high", "max"}, AlwaysOn: true}, CapAdaptiveThinking, CapExtendedContext)
 	// Opus 4.7+ (and fable) additionally accept effort level "xhigh"; the
 	// older adaptive models (opus-4-6, sonnet-4-6) top out at "max".
-	anthropicAdaptiveXhigh = NewSpec(CapAdaptiveThinking, CapExtendedContext, CapXhighEffort)
-	anthropicExtended      = NewSpec(CapExtendedThinking)
+	anthropicAdaptiveXhigh = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high", "max", "xhigh"}, AlwaysOn: true}, CapAdaptiveThinking, CapExtendedContext, CapXhighEffort)
+	anthropicExtended      = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high"}, SupportsBudget: true}, CapExtendedThinking)
 )
 
 var (
-	openaiReasoning = NewSpec(CapReasoning)
+	openaiReasoning = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high"}, SupportsBudget: true}, CapReasoning)
 	openaiBase      = NewSpec()
 )
 
 // Gemini's OpenAI-compatible endpoint does not honor reasoning_effort or
 // Anthropic thinking fields, so the base spec strips both.
-var googleBase = NewSpec()
+var googleBase = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high"}, SupportsBudget: true})
+var google3Base = NewSpecWithReasoning(ReasoningCapabilities{Levels: []string{"low", "medium", "high"}, AlwaysOn: true})
 
 var openAICompatBase = NewSpec()
 
@@ -148,11 +200,11 @@ var registry = map[string]ModelSpec{
 
 	// Gemini 3.x preview models use `-preview` suffix as canonical ID.
 	// gemini-3-pro-preview is deprecated 2026-03-09 in favor of 3.1.
-	"gemini-3-pro-preview":          googleBase,
-	"gemini-3.1-pro-preview":        googleBase,
-	"gemini-3-flash-preview":        googleBase,
-	"gemini-3.1-flash-lite-preview": googleBase,
-	"gemini-3.1-flash-live-preview": googleBase,
+	"gemini-3-pro-preview":          google3Base,
+	"gemini-3.1-pro-preview":        google3Base,
+	"gemini-3-flash-preview":        google3Base,
+	"gemini-3.1-flash-lite-preview": google3Base,
+	"gemini-3.1-flash-live-preview": google3Base,
 
 	"gemini-2.5-pro":        googleBase,
 	"gemini-2.5-flash":      googleBase,
@@ -164,4 +216,15 @@ var registry = map[string]ModelSpec{
 	"qwen/qwen3-30b-a3b-instruct-2507": openAICompatBase,
 	"qwen/qwen3-coder-next":            openAICompatBase,
 	"qwen/qwen3-next-80b-a3b-instruct": openAICompatBase,
+}
+
+// ValidateCatalogReasoningCapabilities validates every declared model at
+// startup composition time or in catalog tests.
+func ValidateCatalogReasoningCapabilities() error {
+	for model, spec := range registry {
+		if err := spec.ValidateReasoningCapabilities(); err != nil {
+			return fmt.Errorf("model %q: %w", model, err)
+		}
+	}
+	return nil
 }

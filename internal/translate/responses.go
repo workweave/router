@@ -12,10 +12,31 @@ import (
 	"sync/atomic"
 	"time"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
 )
+
+// ResponsesConversion is the typed ingress result for a Responses request.
+// OriginalBody remains byte-for-byte client input so native OpenAI-family
+// dispatch can preserve extensions that Chat Completions cannot represent.
+type ResponsesConversion struct {
+	Body         []byte
+	OriginalBody []byte
+	Stream       bool
+	Model        string
+	Requirements router.TranslationRequirements
+	Report       []ResponseTransform
+}
+
+// ResponseTransform reports an ingress conversion outcome with a stable code.
+// Details stay out of metric labels; callers may emit them in structured logs.
+type ResponseTransform struct {
+	Code   string
+	Action string
+	Path   string
+}
 
 // ResponsesToChatCompletions converts an OpenAI Responses API request into a
 // Chat Completions request so the existing proxy path can dispatch it
@@ -32,19 +53,44 @@ import (
 // alongside tools, both causing an upstream 400 mid-stream. Per-provider
 // reasoning is still driven downstream from the request's own signals.
 func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
-	if err := validateJSONObject(body); err != nil {
+	result, err := ConvertResponsesToChatCompletions(body)
+	if err != nil {
 		return nil, false, "", err
+	}
+	return result.Body, result.Stream, result.Model, nil
+}
+
+// ConvertResponsesToChatCompletions projects a Responses request into Chat
+// Completions for routing. Extensions that cannot be faithfully represented
+// are marked native-only so proxy can dispatch the original bytes losslessly.
+func ConvertResponsesToChatCompletions(body []byte) (ResponsesConversion, error) {
+	if err := validateJSONObject(body); err != nil {
+		return ResponsesConversion{}, err
 	}
 
 	root := gjson.ParseBytes(body)
+	result := ResponsesConversion{
+		OriginalBody: body,
+		Requirements: router.TranslationRequirements{
+			SourceFormat: router.WireFormatOpenAI,
+			Endpoint:     router.EndpointOpenAIResponses,
+		},
+	}
+	result.Requirements.Images = gjson.GetBytes(body, "input").Exists() && containsAnyKey(body, "image_url", "input_image")
+	result.Requirements.Audio, result.Requirements.Files = openAIMediaRequirements(body)
+	result.Requirements.CitationsOrSearch = containsAnyKey(body, "web_search", "web_search_preview", "file_search", "computer_use")
+	result.Requirements.StructuredOutput = root.Get("text.format").Exists() || root.Get("response_format").Exists()
 	out := map[string]any{}
 
 	model := root.Get("model").Str
+	result.Model = model
 	if model != "" {
 		out["model"] = model
 	}
 
 	stream := root.Get("stream").Bool()
+	result.Stream = stream
+	result.Requirements.UsageDetail = stream && root.Get("stream_options.include_usage").Bool()
 	out["stream"] = stream
 	if stream {
 		out["stream_options"] = map[string]any{"include_usage": true}
@@ -61,10 +107,22 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	input := root.Get("input")
 	switch {
 	case input.IsArray():
-		for _, item := range input.Array() {
+		for index, item := range input.Array() {
+			itemType := item.Get("type").Str
+			if itemType == "function_call" || itemType == "function_call_output" {
+				result.Requirements.FunctionTools = true
+			}
+			if itemType == "reasoning" {
+				result.Requirements.ReasoningReplay = true
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_reasoning_native_only", Action: "preserved", Path: "input." + strconv.Itoa(index)})
+				continue
+			}
 			msgs, err := responsesInputItemToMessages(item)
 			if err != nil {
-				return nil, false, "", err
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_unknown_input_native_only", Action: "preserved", Path: "input." + strconv.Itoa(index)})
+				continue
 			}
 			messages = append(messages, msgs...)
 		}
@@ -79,12 +137,16 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	hasTools := false
 	if tools := root.Get("tools"); tools.IsArray() {
 		converted := make([]map[string]any, 0, len(tools.Array()))
-		for _, t := range tools.Array() {
+		for index, t := range tools.Array() {
 			// Responses tools are flat: {type, name, description, parameters, strict}.
 			// Chat Completions nest under {type:"function", function:{...}}.
 			if t.Get("type").Str != "function" {
+				result.Requirements.CustomTools = true
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_non_function_tool_native_only", Action: "preserved", Path: "tools." + strconv.Itoa(index)})
 				continue
 			}
+			result.Requirements.FunctionTools = true
 			fn := map[string]any{}
 			if name := t.Get("name").Str; name != "" {
 				fn["name"] = name
@@ -136,14 +198,16 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 
 	bodyOut, err := json.Marshal(out)
 	if err != nil {
-		return nil, false, "", fmt.Errorf("marshal chat completions: %w", err)
+		return ResponsesConversion{}, fmt.Errorf("marshal chat completions: %w", err)
 	}
-	return bodyOut, stream, model, nil
+	result.Body = bodyOut
+	return result, nil
 }
 
 // responsesInputItemToMessages flattens a single Responses input item into one
 // or more Chat Completions messages. Returns ([], nil) for item types we don't
-// recognize so unknown future shapes don't fail the whole request.
+// recognize. Unknown shapes are rejected from the Chat projection; callers
+// may still retain them through a native Responses route.
 func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 	itemType := item.Get("type").Str
 	// Some Responses clients omit "type" and send a bare chat-style {role, content}.
@@ -199,11 +263,9 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 		return []map[string]any{out}, nil
 
 	case "reasoning":
-		// Drop reasoning items on the inbound path; assistant summaries aren't
-		// re-fed to chat-completions providers in a portable way.
-		return nil, nil
+		return nil, fmt.Errorf("responses reasoning item requires native Responses routing")
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unsupported Responses input item type %q", itemType)
 }
 
 // responsesBadgePattern matches the routing badge ResponsesWriter prepends to
@@ -287,6 +349,8 @@ type ResponsesWriter struct {
 	toolItems        map[int]*responsesToolItem
 	finishReason     string
 	usage            *responsesUsage
+	lifecycle        *StreamLifecycle
+	toolLedger       *ToolCallLedger
 }
 
 type responsesTextItem struct {
@@ -333,6 +397,8 @@ func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 		responseID:     newResponsesID("resp"),
 		createdAt:      time.Now().Unix(),
 		toolItems:      map[int]*responsesToolItem{},
+		lifecycle:      NewStreamLifecycle(),
+		toolLedger:     NewToolCallLedger(),
 	}
 }
 
@@ -423,6 +489,9 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 		return n, nil
 	}
 	if !t.headersEmitted {
+		if err := t.lifecycle.Start(); err != nil {
+			return n, err
+		}
 		if err := t.emitCreated(); err != nil {
 			return n, err
 		}
@@ -451,6 +520,9 @@ func (t *ResponsesWriter) Prelude(streaming bool) error {
 		t.httpHeadersSent = true
 	}
 	t.headersEmitted = true
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
 	return t.emitCreated()
 }
 
@@ -471,21 +543,18 @@ func (t *ResponsesWriter) Finalize() error {
 		return t.bw.Flush()
 	}
 	if t.streaming {
-		// Upstream may have produced zero chunks; still emit a clean completed envelope.
-		if !t.headersEmitted {
-			if err := t.emitCreated(); err != nil {
-				return err
-			}
-			t.headersEmitted = true
+		if err := t.processFinalSSETail(); err != nil {
+			return err
 		}
-		t.closeOpenItems()
-		if !t.completedEmitted {
-			if err := t.emitCompleted(); err != nil {
-				return err
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.State() == StreamStarted {
+				if emitErr := t.emitIncompleteFailure(); emitErr != nil {
+					return emitErr
+				}
 			}
-			t.completedEmitted = true
+			return err
 		}
-		return t.bw.Flush()
+		return nil
 	}
 
 	body := t.buf.Bytes()
@@ -517,6 +586,11 @@ func (t *ResponsesWriter) FinalizeError(_ error) error {
 	if t.passthrough || !t.streaming || !t.headersEmitted || t.completedEmitted {
 		return nil
 	}
+	if t.lifecycle.State() == StreamStarted {
+		if err := t.lifecycle.Fail(); err != nil {
+			return err
+		}
+	}
 	t.closeOpenItems()
 	if err := t.emitFailed(); err != nil {
 		return err
@@ -540,15 +614,30 @@ func (t *ResponsesWriter) processSSEBuffer() error {
 	}
 }
 
+func (t *ResponsesWriter) processFinalSSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateChunk(event)
+}
+
 func (t *ResponsesWriter) translateChunk(raw []byte) error {
 	_, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
 		return nil
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if !t.lifecycle.OutputStarted() {
+			return nil
+		}
 		t.closeOpenItems()
 		if t.completedEmitted {
 			return nil
+		}
+		if err := t.lifecycle.Terminal(); err != nil {
+			return err
 		}
 		t.completedEmitted = true
 		return t.emitCompleted()
@@ -593,6 +682,13 @@ func (t *ResponsesWriter) translateChunk(raw []byte) error {
 	if fr := choice.Get("finish_reason"); fr.Type == gjson.String && fr.Str != "" {
 		t.finishReason = fr.Str
 		t.closeOpenItems()
+		if !t.completedEmitted {
+			if err := t.lifecycle.Terminal(); err != nil {
+				return err
+			}
+			t.completedEmitted = true
+			return t.emitCompleted()
+		}
 	}
 	return nil
 }
@@ -613,6 +709,9 @@ func (t *ResponsesWriter) appendText(s string) error {
 		}
 		t.textItem.openedPart = true
 	}
+	if err := t.lifecycle.Output(t.textItem.outputIndex); err != nil {
+		return err
+	}
 
 	// Prepend the badge to the first text delta: Codex desktop drops
 	// reasoning-summary items from custom providers, so text is the only
@@ -632,6 +731,7 @@ func (t *ResponsesWriter) appendText(s string) error {
 }
 
 func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
+	entry := t.toolLedger.Upsert(idx, tc.Get("id").Str, tc.Get("function.name").Str)
 	item, ok := t.toolItems[idx]
 	if !ok {
 		item = &responsesToolItem{
@@ -639,14 +739,8 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 		}
 		t.toolItems[idx] = item
 		item.outputIndex = t.nextOutputIndex()
-		if id := tc.Get("id").Str; id != "" {
-			item.callID = strings.Clone(id)
-		} else {
-			item.callID = newResponsesID("call")
-		}
-		if name := tc.Get("function.name").Str; name != "" {
-			item.name = strings.Clone(name)
-		}
+		item.callID = entry.ExternalID
+		item.name = entry.Name
 		if err := t.emitFunctionCallItemAdded(item); err != nil {
 			return err
 		}
@@ -654,11 +748,13 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 	// Later chunks may carry name/id only on first delta; pick up any later
 	// arrivals defensively.
 	if item.name == "" {
-		if name := tc.Get("function.name").Str; name != "" {
-			item.name = strings.Clone(name)
-		}
+		item.name = entry.Name
+	}
+	if err := t.lifecycle.Output(item.outputIndex); err != nil {
+		return err
 	}
 	if args := tc.Get("function.arguments").Str; args != "" {
+		t.toolLedger.AppendArguments(idx, tc.Get("id").Str, tc.Get("function.name").Str, args)
 		item.arguments.WriteString(args)
 		return t.emitFunctionArgsDelta(item, args)
 	}
@@ -706,6 +802,20 @@ func (t *ResponsesWriter) closeOpenItems() {
 		_ = t.emitFunctionCallItemDone(item)
 		item.closed = true
 	}
+}
+
+// emitIncompleteFailure terminates a committed translated stream without
+// fabricating a response.completed event after upstream EOF.
+func (t *ResponsesWriter) emitIncompleteFailure() error {
+	if err := t.lifecycle.Fail(); err != nil {
+		return err
+	}
+	t.closeOpenItems()
+	if err := t.emitFailed(); err != nil {
+		return err
+	}
+	t.completedEmitted = true
+	return t.bw.Flush()
 }
 
 // ---------- event emitters ----------

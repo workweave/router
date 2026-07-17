@@ -23,11 +23,12 @@ func TestForceReasoningEffort_ResponsesOverride(t *testing.T) {
 		budget      int
 		forceEffort string
 		want        string
+		wantErr     bool
 	}{
-		{"force_low_over_high_budget", 31999, "low", "low"},
-		{"force_high_over_low_budget", 2048, "high", "high"},
-		{"empty_override_keeps_budget_low", 2048, "", "low"},
-		{"empty_override_keeps_budget_high", 31999, "", "high"},
+		{"force_low_over_high_budget", 31999, "low", "low", false},
+		{"force_high_over_low_budget", 2048, "high", "high", false},
+		{"empty_override_keeps_budget_low", 2048, "", "low", false},
+		{"empty_override_keeps_budget_high", 31999, "", "high", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,6 +40,10 @@ func TestForceReasoningEffort_ResponsesOverride(t *testing.T) {
 				Capabilities:         router.Lookup("gpt-5.5"),
 				ForceReasoningEffort: tc.forceEffort,
 			})
+			if tc.wantErr {
+				require.ErrorIs(t, err, translate.ErrReasoningIncompatible)
+				return
+			}
 			require.NoError(t, err)
 			var out map[string]any
 			require.NoError(t, json.Unmarshal(prep.Body, &out))

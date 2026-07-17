@@ -93,3 +93,23 @@ func TestClassifyDispatchError_NotImplementedDoesNotLog(t *testing.T) {
 	assert.Equal(t, http.StatusNotImplemented, cls.Status)
 	assert.Empty(t, cls.LogLevel)
 }
+
+func TestClassifyDispatchError_TranslationIntrinsicIncompatibilityIs400(t *testing.T) {
+	cls, ok := proxy.ClassifyDispatchError(proxy.ErrTranslationIntrinsicallyIncompatible)
+
+	require.True(t, ok)
+	assert.Equal(t, proxy.DispatchErrorTranslationIntrinsicallyIncompatible, cls.Kind)
+	assert.Equal(t, http.StatusBadRequest, cls.Status)
+	assert.True(t, cls.Kind.IsClientError())
+	assert.False(t, cls.RetryAfter)
+}
+
+func TestClassifyDispatchError_TranslationCompatibleProviderUnavailableIs503(t *testing.T) {
+	cls, ok := proxy.ClassifyDispatchError(proxy.ErrTranslationCompatibleProviderUnavailable)
+
+	require.True(t, ok)
+	assert.Equal(t, proxy.DispatchErrorTranslationProviderUnavailable, cls.Kind)
+	assert.Equal(t, http.StatusServiceUnavailable, cls.Status)
+	assert.False(t, cls.Kind.IsClientError())
+	assert.True(t, cls.RetryAfter)
+}

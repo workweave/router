@@ -94,6 +94,36 @@ func TestResponsesToChatCompletions_ToolsFlatToNested(t *testing.T) {
 	assert.True(t, tools[0].Get("function.parameters").IsObject())
 }
 
+func TestConvertResponsesToChatCompletions_CustomToolStaysNative(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5",
+		"input":"use the tool",
+		"tools":[{"type":"custom","name":"apply_patch","description":"opaque payload"}]
+	}`)
+
+	converted, err := translate.ConvertResponsesToChatCompletions(body)
+	require.NoError(t, err)
+	assert.True(t, converted.Requirements.NativeOnly)
+	assert.True(t, converted.Requirements.CustomTools)
+	assert.Equal(t, body, converted.OriginalBody, "native dispatch must retain unknown tool bytes verbatim")
+	assert.Len(t, converted.Report, 1)
+	assert.Equal(t, "responses_non_function_tool_native_only", converted.Report[0].Code)
+	assert.Empty(t, gjson.GetBytes(converted.Body, "tools").Array(), "routing projection must not pretend a custom tool is a function")
+}
+
+func TestConvertResponsesToChatCompletions_UnknownInputStaysNative(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5",
+		"input":[{"type":"computer_call","id":"comp_1","action":{"type":"click"}}]
+	}`)
+
+	converted, err := translate.ConvertResponsesToChatCompletions(body)
+	require.NoError(t, err)
+	assert.True(t, converted.Requirements.NativeOnly)
+	require.Len(t, converted.Report, 1)
+	assert.Equal(t, "responses_unknown_input_native_only", converted.Report[0].Code)
+}
+
 func TestResponsesToChatCompletions_ToolChoiceRequiresTools(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-5",

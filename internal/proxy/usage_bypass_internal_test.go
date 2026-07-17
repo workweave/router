@@ -13,10 +13,13 @@ import (
 
 	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
+	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
+	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/translate"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -71,6 +74,77 @@ func bypassAnthropicEnvelope(t *testing.T) *translate.RequestEnvelope {
 	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`))
 	require.NoError(t, err)
 	return env
+}
+
+func TestUsageBypassDecision_CodexSubscriptionPreservesRequestedModel(t *testing.T) {
+	const codexToken = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.signature"
+	threshold := 0.80
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(codexToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := &Service{usageObserver: obs}
+	ctx := context.WithValue(context.Background(), OpenAISubscriptionContextKey{}, codexToken)
+	ctx = context.WithValue(ctx, OpenAIAccountIDContextKey{}, "account-1")
+	ctx = context.WithValue(ctx, InstallationUsageBypassContextKey{}, UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+
+	decision, ok := svc.usageBypassDecision(ctx, http.Header{}, router.Request{
+		RequestedModel: "gpt-5.5",
+		EnabledProviders: map[string]struct{}{
+			providers.ProviderOpenAI: {},
+		},
+	})
+
+	require.True(t, ok)
+	assert.Equal(t, router.Decision{
+		Provider: providers.ProviderOpenAI,
+		Model:    "gpt-5.5",
+		Reason:   "usage_bypass",
+	}, decision)
+}
+
+func TestUsageBypass_PreservesSwitchHistory(t *testing.T) {
+	const token = "sk-ant-oat01-test-subscription-token"
+	threshold := 0.80
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(token)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	store := newStubPinStore()
+	store.getFound = true
+	store.getPin = sessionpin.Pin{
+		LastServedModel: "claude-haiku-4-5",
+		HasEverSwitched: true,
+	}
+	svc := NewService(nil, nil, nil, false, nil, store, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageObserver(obs)
+	ctx := context.WithValue(context.Background(), AnthropicSubscriptionContextKey{}, token)
+	ctx = context.WithValue(ctx, InstallationUsageBypassContextKey{}, UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+	env := bypassAnthropicEnvelope(t)
+	feats := env.RoutingFeatures(false)
+
+	res, err := svc.runTurnLoop(ctx, env, feats, "api-key", uuid.New(), "", http.Header{}, router.Request{
+		RequestedModel: feats.Model,
+		EnabledProviders: map[string]struct{}{
+			providers.ProviderAnthropic: {},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, res.UsageBypass)
+	assert.Equal(t, "claude-haiku-4-5", res.PriorServedModel)
+	assert.True(t, res.SessionEverSwitched)
+	assert.True(t, res.modelSwitched(), "bypass must retain switch history for Anthropic thinking-block stripping")
+	bucketKey, ok := noProgressBucketKey(res.SessionKey, uuid.Nil, res.PinRole)
+	require.True(t, ok)
+	_, tracked := svc.compaction.cache.Get(bucketKey)
+	assert.True(t, tracked, "bypass must retain compaction-trim tracking")
 }
 
 // TestBypass_429_ReturnsErrBypassRetryable_NoBytesWritten: when the Anthropic

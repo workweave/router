@@ -3,6 +3,60 @@ package router
 
 import "context"
 
+// WireFormat identifies the client-facing request representation. It is kept
+// independent from provider names so the router package remains an inner-ring
+// value-types package.
+type WireFormat string
+
+const (
+	WireFormatAnthropic WireFormat = "anthropic_messages"
+	WireFormatOpenAI    WireFormat = "openai"
+	WireFormatGemini    WireFormat = "gemini"
+)
+
+// TranslationEndpoint identifies the source endpoint contract within a wire
+// format. Different OpenAI endpoints carry different semantic unions.
+type TranslationEndpoint string
+
+const (
+	EndpointAnthropicMessages TranslationEndpoint = "messages"
+	EndpointOpenAIChat        TranslationEndpoint = "chat_completions"
+	EndpointOpenAIResponses   TranslationEndpoint = "responses"
+	EndpointGeminiGenerate    TranslationEndpoint = "generate_content"
+)
+
+// TranslationRequirements records semantics which must survive a route. It is
+// deliberately additive to the existing scoring hints: HasTools and HasImages
+// remain quality signals while these fields are compatibility constraints.
+type TranslationRequirements struct {
+	SourceFormat WireFormat
+	Endpoint     TranslationEndpoint
+
+	FunctionTools      bool
+	CustomTools        bool
+	ReasoningReplay    bool
+	ReasoningSignature bool
+	Images             bool
+	Audio              bool
+	Files              bool
+	CitationsOrSearch  bool
+	StructuredOutput   bool
+	PromptCacheControl bool
+	UsageDetail        bool
+
+	// NativeOnly requires the source wire family and endpoint to reach the
+	// upstream unchanged. It is used for currently unrepresentable unions,
+	// never as a quality preference.
+	NativeOnly bool
+}
+
+// IsZero reports whether the request has no compatibility contract.
+func (r TranslationRequirements) IsZero() bool {
+	return r.SourceFormat == "" && r.Endpoint == "" && !r.FunctionTools && !r.CustomTools &&
+		!r.ReasoningReplay && !r.ReasoningSignature && !r.Images && !r.Audio && !r.Files &&
+		!r.CitationsOrSearch && !r.StructuredOutput && !r.PromptCacheControl && !r.UsageDetail && !r.NativeOnly
+}
+
 type Overrides struct {
 	// Alpha is the raw per-cluster quality weight applied UNIFORMLY across every
 	// cluster (the eval/debug "sledgehammer" set via x-weave-routing-alpha), so
@@ -42,8 +96,12 @@ type Request struct {
 	HasTools  bool
 	// HasImages: scorer drops text-only models from the eligible pool; turn
 	// loop evicts a text-only session pin.
-	HasImages  bool
-	PromptText string
+	HasImages bool
+	// TranslationRequirements are hard semantic requirements inferred at
+	// ingress. Routing implementations must not turn their empty result into
+	// an incompatible fallback pool.
+	TranslationRequirements TranslationRequirements
+	PromptText              string
 	// ConversationMessages is provider-neutral visible history for sidecar
 	// routers that need multi-turn context.
 	ConversationMessages []ConversationMessage

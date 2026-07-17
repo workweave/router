@@ -63,8 +63,9 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
-		TargetModel:  "gpt-5.5",
-		Capabilities: router.Lookup("gpt-5.5"),
+		TargetModel:          "gpt-5.5",
+		Capabilities:         router.Lookup("gpt-5.5"),
+		ForceReasoningEffort: "high",
 	})
 	require.NoError(t, err)
 
@@ -219,7 +220,7 @@ func TestPrepareOpenAIResponses_ClampsGeminiThoughtSignatureCallID(t *testing.T)
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5"), ForceReasoningEffort: "high"})
 	require.NoError(t, err)
 
 	var out map[string]any
@@ -258,7 +259,7 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoning(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5"), ForceReasoningEffort: "high"})
 	require.NoError(t, err)
 
 	var out map[string]any
@@ -295,9 +296,10 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoningAfterModelSwitch(t *testin
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
 	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
-		TargetModel:   "gpt-5.5",
-		Capabilities:  router.Lookup("gpt-5.5"),
-		ModelSwitched: true,
+		TargetModel:          "gpt-5.5",
+		Capabilities:         router.Lookup("gpt-5.5"),
+		ModelSwitched:        true,
+		ForceReasoningEffort: "high",
 	})
 	require.NoError(t, err)
 
@@ -313,15 +315,13 @@ func TestPrepareOpenAIResponses_ReplaysSignedReasoningAfterModelSwitch(t *testin
 	assert.Equal(t, "toolu_1", toolCall["call_id"])
 }
 
-// budget→effort ladder.
+// Explicit levels retain their client-selected value; GPT-5 no longer promotes
+// medium to high during translation.
 func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
-	// gpt-5.x has a measured "medium" dead-zone on hard agentic coding, so the
-	// medium band (budget ≤16384) is promoted to high; small budgets stay low.
 	for _, tc := range []struct {
-		budget int
-		want   string
-	}{{2048, "low"}, {8192, "high"}, {16384, "high"}, {31999, "high"}} {
-		body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":` + itoa(tc.budget) + `}}`)
+		level string
+	}{{"low"}, {"medium"}, {"high"}} {
+		body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"` + tc.level + `"}`)
 		env, err := translate.ParseAnthropic(body)
 		require.NoError(t, err)
 		prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
@@ -329,8 +329,8 @@ func TestPrepareOpenAIResponses_EffortLadder(t *testing.T) {
 		var out map[string]any
 		require.NoError(t, json.Unmarshal(prep.Body, &out))
 		reasoning, _ := out["reasoning"].(map[string]any)
-		require.NotNil(t, reasoning, "budget %d", tc.budget)
-		assert.Equal(t, tc.want, reasoning["effort"], "budget %d", tc.budget)
+		require.NotNil(t, reasoning, "level %s", tc.level)
+		assert.Equal(t, tc.level, reasoning["effort"])
 	}
 }
 
@@ -393,6 +393,9 @@ func TestResponsesToAnthropicResponse_StopReasons(t *testing.T) {
 	out, err = translate.ResponsesToAnthropicResponse(et, "gpt-5.5")
 	require.NoError(t, err)
 	assert.Equal(t, "end_turn", gjsonStopReason(out))
+	filtered := []byte(`{"id":"r","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`)
+	_, err = translate.ResponsesToAnthropicResponse(filtered, "gpt-5.5")
+	require.Error(t, err)
 }
 
 // gemini-3.x uses string `thinkingLevel`, not the legacy numeric `thinkingBudget`
@@ -401,17 +404,8 @@ func TestPrepareGemini_ThinkingBudgetToThinkingConfig(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":31999}}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(nil, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview", Capabilities: router.Lookup("gemini-3.1-pro-preview")})
-	require.NoError(t, err)
-	var out map[string]any
-	require.NoError(t, json.Unmarshal(prep.Body, &out))
-	gen, ok := out["generationConfig"].(map[string]any)
-	require.True(t, ok, "generationConfig present")
-	tc, ok := gen["thinkingConfig"].(map[string]any)
-	require.True(t, ok, "thinkingConfig set from thinking budget")
-	assert.Equal(t, "high", tc["thinkingLevel"], "high budget -> gemini-3.x thinkingLevel high")
-	_, hasBudget := tc["thinkingBudget"]
-	assert.False(t, hasBudget, "gemini-3.x must NOT send the legacy thinkingBudget")
+	_, err = env.PrepareGemini(nil, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview", Capabilities: router.Lookup("gemini-3.1-pro-preview")})
+	require.ErrorIs(t, err, translate.ErrReasoningIncompatible)
 }
 
 // gemini-2.5 (legacy) keeps the numeric thinkingBudget — thinkingLevel is 3.x only.
@@ -426,7 +420,7 @@ func TestPrepareGemini_ThinkingBudget_Legacy25(t *testing.T) {
 	gen, _ := out["generationConfig"].(map[string]any)
 	tc, ok := gen["thinkingConfig"].(map[string]any)
 	require.True(t, ok, "thinkingConfig set from thinking budget")
-	assert.EqualValues(t, 24576, tc["thinkingBudget"], "high budget -> gemini-2.5 thinkingBudget 24576")
+	assert.EqualValues(t, 31999, tc["thinkingBudget"], "budget must be preserved exactly")
 	_, hasLevel := tc["thinkingLevel"]
 	assert.False(t, hasLevel, "gemini-2.5 must NOT send thinkingLevel")
 }
