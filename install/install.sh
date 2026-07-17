@@ -577,11 +577,10 @@ write_opencode_config() {
     | (if $name  != "" then . + {"X-Weave-User-Name":  $name } else . end)
   ')"
 
-  # Headline models we surface in opencode's picker. The router re-routes
-  # each request anyway, so this list is mostly UX — what shows up when the
-  # user runs /models inside opencode. We list a mix of GPT + Claude so the
-  # picker reflects that the router spans families; whichever model serves the
-  # turn, its matching subscription (if connected) pays.
+  # Surface one Auto choice in opencode's picker. The router chooses the
+  # upstream model for every request, so presenting pinned model names would
+  # imply a choice that the router intentionally does not honor. Whichever
+  # model serves a turn uses its matching subscription when one is connected.
   #
   # npm is @ai-sdk/openai and baseURL KEEPS its /v1 here: opencode's
   # @ai-sdk/openai provider appends /responses, yielding the router's
@@ -601,14 +600,7 @@ write_opencode_config() {
       name: "Weave Router",
       options: { apiKey: $key, baseURL: $url, headers: $headers },
       models: {
-        "claude-sonnet-5":   { name: "Claude Sonnet 5 (via Weave Router)" },
-        "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
-        "claude-opus-4-8":   { name: "Claude Opus 4.8 (via Weave Router)" },
-        "claude-haiku-4-5":  { name: "Claude Haiku 4.5 (via Weave Router)" },
-        "gpt-5.6-sol":       { name: "GPT-5.6 Sol (via Weave Router)" },
-        "gpt-5.5":           { name: "GPT-5.5 (via Weave Router)" },
-        "gpt-5.4":           { name: "GPT-5.4 (via Weave Router)" },
-        "grok-4.5":          { name: "Grok 4.5 (via Weave Router)" }
+        auto: { name: "Auto" }
       }
     }
   ')"
@@ -658,8 +650,9 @@ write_opencode_config() {
 
   # Merge into any existing opencode.json. We always overwrite provider.weave
   # so re-install reflects the latest key/identity, but we leave the rest of the
-  # file (other providers, mcp, agent settings) untouched. Top-level `model` is
-  # only set when the user hasn't already picked one.
+  # file (other providers, mcp, agent settings) untouched. A previously
+  # installed `weave/*` model is migrated to `weave/auto`; unrelated provider
+  # choices stay untouched.
   #
   # The weave-claude login provider AND the plugin entry are written together
   # only when the bundled plugin was present and copied ($plugin non-empty): the
@@ -687,12 +680,12 @@ write_opencode_config() {
                    then (.plugin -= [$pluginspec]) | (if (.plugin | length) == 0 then del(.plugin) else . end)
                    else . end)
          end)
-      | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
-      # Reset the default model if it points at a provider we just removed: the
-      # retired weave-codex, or weave-claude on a plugin-less re-install (it has
-      # no models anyway). Otherwise opencode boots with a dangling model.
-      | (if (.model // "" | tostring | startswith("weave-codex/")) then .model = "weave/claude-sonnet-4-6" else . end)
-      | (if $plugin == "" and (.model // "" | tostring | startswith("weave-claude/")) then .model = "weave/claude-sonnet-4-6" else . end)
+      | (if (.model // "") == "" then .model = "weave/auto" else . end)
+      # Replace any legacy Weave model choice with the single auto-routing
+      # choice. Models from unrelated providers remain unchanged.
+      | (if (.model // "" | tostring) as $model
+           | ($model | startswith("weave/") or startswith("weave-codex/") or startswith("weave-claude/"))
+           then .model = "weave/auto" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
   else
@@ -702,7 +695,7 @@ write_opencode_config() {
       --arg plugin "$plugin_arg" '
       {
         "$schema": "https://opencode.ai/config.json",
-        model: "weave/claude-sonnet-4-6",
+        model: "weave/auto",
         provider: { weave: $block }
       }
       | (if $plugin != "" then .provider["weave-claude"] = $claude | .plugin = [$plugin] else . end)
@@ -1577,30 +1570,34 @@ toggle_opencode() {
       ;;
     on)
       if [ "$on" = "true" ]; then ok "opencode is already on — nothing to do."; return 0; fi
-      restore_model="weave/claude-sonnet-4-6"
+      restore_model="weave/auto"
       if [ "$parked_present" = "true" ]; then
-        restore_model="$(jq -r '.model // "weave/claude-sonnet-4-6"' "$parked")"
+        restore_model="$(jq -r '.model // "weave/auto"' "$parked")"
       elif [ "$has_weave" != "true" ]; then
         warn "opencode isn't configured for the router. Run the installer first."; return 0
       else
         # No parked model (sidecar deleted by hand). Derive the default from the
         # installed provider.weave.models block rather than a hardcoded literal
-        # that silently diverges when the installer's default changes — prefer a
-        # sonnet entry, else the first model the installer registered.
+        # that silently diverges when the installer's default changes — prefer
+        # the auto-routing entry, else the first model the installer registered.
         restore_model="$(jq -r '
           (.provider.weave.models // {} | keys) as $k
-          | (([$k[] | select(test("sonnet"))] | first) // $k[0] // "claude-sonnet-4-6")
+          | (([$k[] | select(. == "auto")] | first) // $k[0] // "auto")
           | "weave/" + .
-        ' "$f" 2>/dev/null || echo "weave/claude-sonnet-4-6")"
+        ' "$f" 2>/dev/null || echo "weave/auto")"
       fi
-      # Never restore a legacy weave-codex model whose provider is no longer
-      # registered (every current install strips weave-codex). Fall back to the
-      # `weave` default so `on` can't leave opencode pointing at a missing
-      # provider.
+      # Restore only a registered `weave` model. Legacy installations may have
+      # parked a pinned model, but a current install exposes only `weave/auto`.
       case "$restore_model" in
+        weave/*)
+          local model_id="${restore_model#weave/}"
+          if ! jq -e --arg id "$model_id" '(.provider.weave.models // {}) | has($id)' "$f" >/dev/null 2>&1; then
+            restore_model="weave/auto"
+          fi
+          ;;
         weave-codex/*)
           if [ "$(jq -r '((.provider // {}) | has("weave-codex"))' "$f" 2>/dev/null || true)" != "true" ]; then
-            restore_model="weave/claude-sonnet-4-6"
+            restore_model="weave/auto"
           fi
           ;;
       esac
