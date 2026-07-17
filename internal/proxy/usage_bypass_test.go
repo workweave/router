@@ -341,10 +341,15 @@ func TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch(t *testing.T)
 	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
 		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
 	})
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: wrappedP}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
-		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+	svc := proxy.NewService(fr, map[string]providers.Client{
+		providers.ProviderAnthropic:  wrappedP,
+		providers.ProviderOpenRouter: &fakeProvider{},
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0).
+		WithTranslationCompatibilityMode(proxy.TranslationCompatibilityEnforce)
 
 	rec, req, body := bypassRequest(t)
+	body = []byte(`{"model":"` + bypassRequestedMdl + `","system":[{"type":"text","text":"cached instructions","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
 	const organizationID = "org-bypass-reroute"
 	installationID := uuid.New()
 	ctx := context.WithValue(bypassCtx(0.80), proxy.ExternalIDContextKey{}, organizationID)
@@ -356,6 +361,9 @@ func TestProxyMessages_BypassWeeklyLimit_FallsBackToRoutedDispatch(t *testing.T)
 	require.NotNil(t, fr.capturedReq)
 	assert.Equal(t, organizationID, fr.capturedReq.OrganizationID)
 	assert.Equal(t, installationID.String(), fr.capturedReq.InstallationID)
+	assert.True(t, fr.capturedReq.TranslationRequirements.PromptCacheControl)
+	assert.Equal(t, map[string]struct{}{providers.ProviderAnthropic: {}}, fr.capturedReq.EnabledProviders,
+		"reroute must retain translation-plan provider constraints")
 	assert.NotEqual(t, http.StatusTooManyRequests, rec.Code,
 		"the 429 must NOT be flushed — the client must not see the bypass failure")
 	assert.Equal(t, bypassScorerPickMdl, rec.Header().Get("x-router-model"),

@@ -2131,15 +2131,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	routeStart := time.Now()
 	req := router.Request{
-		RequestedModel:       feats.Model,
-		ForceModel:           forceModel,
-		EstimatedInputTokens: feats.Tokens,
-		HasTools:             feats.HasTools,
-		HasImages:            feats.HasImages,
-		PromptText:           promptText,
-		ConversationMessages: conversationMessagesForRouting(env),
-		AvailableTools:       availableToolsForRouting(env),
-		OrganizationID:       externalID,
+		RequestedModel:          feats.Model,
+		ForceModel:              forceModel,
+		EstimatedInputTokens:    feats.Tokens,
+		HasTools:                feats.HasTools,
+		HasImages:               feats.HasImages,
+		TranslationRequirements: env.TranslationRequirements(router.EndpointAnthropicMessages),
+		PromptText:              promptText,
+		ConversationMessages:    conversationMessagesForRouting(env),
+		AvailableTools:          availableToolsForRouting(env),
+		OrganizationID:          externalID,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
@@ -4743,10 +4744,8 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 		return fmt.Errorf("translate responses request: %w", err)
 	}
 	chatBody, model := conversion.Body, conversion.Model
-	// Keep original bytes only when the request must remain native (an
-	// unrepresentable Responses union) or a Codex subscription is using its
-	// direct Responses endpoint. Ordinary portable Responses requests retain the
-	// existing Chat-projection path and its cache/compaction behavior.
+	// Keep original bytes only when the request is unrepresentable as Chat
+	// Completions (NativeOnly) or a Codex subscription is using its direct endpoint.
 	if conversion.Requirements.NativeOnly || codexResponsesRequest(ctx, r.Header) {
 		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, conversion.OriginalBody)
 	}

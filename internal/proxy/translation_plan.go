@@ -58,9 +58,8 @@ type TranslationPlan struct {
 }
 
 // translationConstraint is the code-owned compatibility matrix entry for one
-// semantic. Families describe a wire protocol; ExactProviders is used when a
-// particular endpoint (currently OpenAI Responses) is implemented by only one
-// provider adapter despite sharing a broader protocol family.
+// semantic. ExactProviders pins to a single adapter when a broader protocol
+// family has only one implementation (currently OpenAI Responses).
 type translationConstraint struct {
 	Code           string
 	TargetFamily   providers.TranslationFamily

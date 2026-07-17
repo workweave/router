@@ -62,10 +62,8 @@ func containsAnyKey(body []byte, keys ...string) bool {
 	return false
 }
 
-// anthropicMediaRequirements identifies non-image content blocks. Image
-// support is already represented by HasImages; files and audio need their own
-// compatibility constraints because sending them through a text translation
-// can silently discard provider-specific fields.
+// anthropicMediaRequirements identifies non-image content blocks; files and audio
+// need separate constraints because text translation can silently discard them.
 func anthropicMediaRequirements(body []byte) (audio, files bool) {
 	gjson.GetBytes(body, "messages").ForEach(func(_, message gjson.Result) bool {
 		message.Get("content").ForEach(func(_, block gjson.Result) bool {
