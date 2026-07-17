@@ -263,9 +263,8 @@ func (t *ResponsesToAnthropicWriter) processResponsesSSEBuffer() error {
 	}
 }
 
-// processFinalResponsesSSETail accepts the final SSE frame even when an
-// upstream closes immediately after its data line instead of writing a final
-// blank separator. A terminal event at EOF is still a terminal event.
+// processFinalResponsesSSETail flushes any buffered SSE bytes that arrived
+// without a trailing blank separator before EOF is classified.
 func (t *ResponsesToAnthropicWriter) processFinalResponsesSSETail() error {
 	if t.buf.Len() == 0 {
 		return nil

@@ -69,9 +69,8 @@ func (b *preludeBuffer) WriteHeader(status int) {
 		return
 	}
 	if b.sealed {
-		// Adapters receive success headers before their first body byte. Keep
-		// those headers buffered so an empty stream remains retryable. Buffered
-		// non-2xx responses are rendered by flushErr, not this path.
+		// Buffer success headers so an empty or retryable stream can still
+		// avoid committing a downstream 200 before upstream output arrives.
 		b.bufStatus = status
 		return
 	}
@@ -488,9 +487,8 @@ func emitOpenAISSEErrorEvent(sink http.ResponseWriter, err error) error {
 	return &providers.UpstreamStatusError{Status: resp.Status}
 }
 
-// emitGeminiSSEErrorEvent terminates a committed native Gemini stream without
-// exposing an upstream response body. A buffered non-2xx never reaches this
-// path; it is for post-commit transport/truncation failures only.
+// emitGeminiSSEErrorEvent writes a terminal error frame to a committed
+// Gemini stream; called only on post-commit transport or truncation failure.
 func emitGeminiSSEErrorEvent(sink http.ResponseWriter) {
 	_, _ = sink.Write([]byte("data: {\"error\":{\"code\":\"UNAVAILABLE\",\"message\":\"upstream stream failed\"}}\n\n"))
 	if f, ok := sink.(http.Flusher); ok {
