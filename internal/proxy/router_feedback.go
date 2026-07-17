@@ -118,7 +118,7 @@ func (s *Service) handleRouterFeedbackCommand(
 	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
 		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 		var trainingDelta []router.ConversationMessage
-		if strategy == router.StrategyHMM && trainingAllowed {
+		if router.IsHMMStrategy(strategy) && trainingAllowed {
 			trainingDelta = routerFeedbackTrainingDelta(env)
 		}
 		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, trainingDelta)
@@ -197,7 +197,7 @@ func (s *Service) reportRouterFeedback(
 	if installationID != uuid.Nil {
 		payload["installation_id"] = installationID.String()
 	}
-	if strategy == router.StrategyHMM && trainingAllowed && len(trainingDelta) > 0 {
+	if router.IsHMMStrategy(strategy) && trainingAllowed && len(trainingDelta) > 0 {
 		payload["training_conversation_delta"] = trainingDelta
 	}
 	log := observability.FromContext(ctx)
