@@ -1,0 +1,27 @@
+internal/router/cluster/artifacts/v0.66/model_axes.json
+  s_e0d782d7352f9d::t_a695e54a28a4e5 3-9,142,147,171-172,174
+internal/router/cluster/artifacts/v0.66/rankings.json
+  s_e0d782d7352f9d::t_a695e54a28a4e5 28,33,57-58,60,82-97,100-115,118-133,136-151,154-169,172-187,190-205,208-223,226-241,244-250,252-259,262-277,280-295,298-304,306-313,316-331,334-349,352-367,370
+internal/router/cluster/artifacts/v0.66/metadata.yaml
+  s_e0d782d7352f9d::t_a695e54a28a4e5 2-5,7,15,18,27,31,36,63-78,97-102,104-119,121,137
+internal/router/cluster/artifacts/v0.66/quality_means.json
+  s_e0d782d7352f9d::t_a695e54a28a4e5 28,33,57-58,60,82-97,100-105,107-112,114-115,118-123,125-133,136-151,154-169,172-187,190-195,197-202,204-205,208-223,226-241,244-249,251-256,258-259,262-277,280-285,287-292,294-295,298-303,305-310,312-313,316-321,323-331,334-339,341-346,348-349,352-367,370
+internal/router/cluster/artifacts/v0.66/model_registry.json
+  s_e0d782d7352f9d::t_56bc4396d2a49d 139-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "64d749cbf19b1e44d49e309112814f26fd3c0e32",
+  "prompts": {},
+  "sessions": {
+    "s_e0d782d7352f9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47439573-f58f-49ec-bee2-52c2c8311ac6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

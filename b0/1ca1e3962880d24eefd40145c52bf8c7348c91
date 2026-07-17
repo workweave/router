@@ -1,0 +1,19 @@
+scripts/record_provider_fixtures/main.go
+  s_b36b97f279629a::t_56f847d487575e 64,68,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b01ca1e3962880d24eefd40145c52bf8c7348c91",
+  "prompts": {},
+  "sessions": {
+    "s_b36b97f279629a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd95d435-2a08-4d67-ab56-6c970c9b1c7a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

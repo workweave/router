@@ -1,0 +1,33 @@
+internal/router/catalog/catalog_test.go
+  s_838f318952ec2a::t_18948372682bd6 110-135
+internal/router/cluster/scorer_test.go
+  s_838f318952ec2a::t_faa0c162e42f10 169-211
+internal/router/catalog/lookup.go
+  s_838f318952ec2a::t_d2b0c2c0f5c19b 97-142
+internal/router/cluster/scorer.go
+  s_838f318952ec2a::t_8960f13fb6ee87 305-341
+internal/router/catalog/catalog.go
+  s_838f318952ec2a::t_5438ed98059861 265-268,276
+  s_838f318952ec2a::t_bfa1ba7d0bdc6f 291,296
+  s_838f318952ec2a::t_63b249d53c39aa 350,355
+  s_838f318952ec2a::t_baa88651116a23 149-151,154,157,161,164
+  s_838f318952ec2a::t_5cf8649dfc7adc 94-100
+  s_838f318952ec2a::t_f47372faab1319 129-132,135,138,141,144
+  s_838f318952ec2a::t_0edcf93c9a0e5d 211-213,216,219,222,225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "f2b327503564520dd33e40483a0875a940599843",
+  "prompts": {},
+  "sessions": {
+    "s_838f318952ec2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "583af56d-abba-4520-9462-ee80e138da7c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

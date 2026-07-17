@@ -1,0 +1,9 @@
+internal/router/cluster/artifacts.go
+  ai_agent 109-120,152-158,163-167,492
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "38a9597dec529c65b5a7f0089e6363d0cb9385ea",
+  "prompts": {}
+}

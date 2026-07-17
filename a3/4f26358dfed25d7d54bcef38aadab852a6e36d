@@ -1,0 +1,45 @@
+internal/translate/gemini_envelope_test.go
+  s_3f8d95a685b537::t_7b07d3141c7513 73
+  s_3f8d95a685b537::t_b2df7899d159d2 83
+db/queries/model_router_request_telemetry.sql
+  s_3f8d95a685b537::t_12d7cd64d409cb 70-71
+  s_3f8d95a685b537::t_38fdbf94376b7c 122-123
+internal/translate/envelope_extras_test.go
+  s_3f8d95a685b537::t_acbe9f6f1c01ba 95,106,117
+  s_3f8d95a685b537::t_742446c18574d7 160
+  s_3f8d95a685b537::t_f095060cdd8d3a 169
+internal/proxy/telemetry.go
+  s_3f8d95a685b537::t_78e7edc2415d60 87-91
+internal/translate/features.go
+  s_3f8d95a685b537::t_1e6996f37a5fbe 222
+  s_3f8d95a685b537::t_bc1db188b42ee1 260
+internal/postgres/telemetry.go
+  s_3f8d95a685b537::t_c1af2fa75fd749 104
+internal/translate/envelope.go
+  s_3f8d95a685b537::t_8365197c79a2be 244-248
+internal/translate/features_gemini.go
+  s_3f8d95a685b537::t_116f795f71ddd1 178
+db/migrations/0023_telemetry-tool-result-bytes.up.sql
+  s_3f8d95a685b537::t_90dd8afa05697f 1-31
+internal/proxy/service.go
+  s_3f8d95a685b537::t_9684d30efedee5 2170-2182
+  s_3f8d95a685b537::t_5bfcddc87bc099 1777-1780,2893-2896
+db/migrations/0023_telemetry-tool-result-bytes.down.sql
+  s_3f8d95a685b537::t_9869f516c98e6f 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "a34f26358dfed25d7d54bcef38aadab852a6e36d",
+  "prompts": {},
+  "sessions": {
+    "s_3f8d95a685b537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86141471-a1a5-4e3a-bdf9-190038e3d42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

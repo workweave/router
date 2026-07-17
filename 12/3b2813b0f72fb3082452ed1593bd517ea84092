@@ -1,0 +1,43 @@
+internal/proxy/service.go
+  ai_agent 61-66,205-237,541,568,581,596,768-778,1014,1040,1053,1068
+frontend/src/lib/api.ts
+  s_771c32aa83b174::t_81cd545aa1de1b 108
+internal/providers/provider.go
+  s_771c32aa83b174::t_81cd545aa1de1b 23-40
+internal/proxy/gemini.go
+  s_771c32aa83b174::t_81cd545aa1de1b 125,138
+frontend/next.config.ts
+  s_771c32aa83b174::t_81cd545aa1de1b 47
+frontend/src/app/(app)/settings/page.tsx
+  s_771c32aa83b174::t_81cd545aa1de1b 336-342,349,351,368-390,393,419,424-446,448-450,454-456,458-472,474,481-509,549,553,576
+internal/postgres/telemetry.go
+  s_771c32aa83b174::t_81cd545aa1de1b 5-6,360-364,366-377
+frontend/src/components/Sidebar.tsx
+  s_771c32aa83b174::t_81cd545aa1de1b 6,74-84,86-97,102-107
+internal/api/admin/config.go
+  s_771c32aa83b174::t_81cd545aa1de1b 7,19-33,43-48,55
+README.md
+  s_771c32aa83b174::t_81cd545aa1de1b 16-19,21-25,28-33,35-37,39-43,45-51
+cmd/router/main.go
+  s_771c32aa83b174::t_81cd545aa1de1b 117-128,149,152-157,161,163-166,168-176,179,181-184,186-194,197,199-202,204-212,215,221-224,226-234,306-315,321-334,494,755-760,762
+cmd/seed/main.go
+  s_771c32aa83b174::t_81cd545aa1de1b 25-31
+internal/server/server.go
+  s_771c32aa83b174::t_81cd545aa1de1b 6-8,60-61,128-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "123b2813b0f72fb3082452ed1593bd517ea84092",
+  "prompts": {},
+  "sessions": {
+    "s_771c32aa83b174": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e7c36a-b781-4b42-8327-0788380bc09e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
