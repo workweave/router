@@ -118,9 +118,7 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	providers.ObserveUpstreamHeaders(ctx, resp.Header)
 
 	if resp.StatusCode >= 400 {
-		// Do not touch the downstream writer until dispatchWithFallback decides
-		// whether this response should be retried or rendered. In particular, a
-		// native Gemini marker may already be buffered ahead of this adapter.
+		// Caller decides retry vs render; do not commit the downstream writer.
 		body, _, readErr := httputil.ReadCapped(resp.Body, providers.MaxBufferedErrorBytes)
 		if len(body) > 0 {
 			t.StampUpstreamFirstByte()

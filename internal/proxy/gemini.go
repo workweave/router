@@ -190,9 +190,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	// Keep every prelude byte behind the same commitment boundary as other
-	// protocol paths: the first upstream event releases it, so a 429/5xx or
-	// empty stream can still retry cleanly.
+	// preludeBuf delays commit so a 429 or empty stream stays retryable.
 	preludeBuf := newPreludeBuffer(contentSink)
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
 	bindings := s.resolveBindingsForDispatch(ctx, decision)
