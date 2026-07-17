@@ -1,0 +1,20 @@
+internal/proxy/force_model.go
+  s_d3fc1c517ba243::t_a8e4e40dfed603 293
+  s_d3fc1c517ba243::t_1bff7d88ceda66 284,286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6fdfb2c57e160b9cd0992f4ac8955349cb3238ec",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+internal/proxy/service.go
+  s_b82fdafa2fd896::t_9b570f312c5799 880-882,907-909,923,927
+  s_b82fdafa2fd896::t_3d90e5fa22a27a 815,818-819
+  s_b82fdafa2fd896::t_7e793e4a99782d 1923,1928-1935
+  s_b82fdafa2fd896::t_a5710fe8e8b694 808-814,816-817,820,822,824
+  s_b82fdafa2fd896::t_1f95bdcf70e4ff 1674-1683,1697,1699,1703-1716,1718,1742-1743,1745,1748-1750,1766-1770,1787-1791,1803,1807
+  s_b82fdafa2fd896::t_0d37174e14b849 1684-1695
+  s_b82fdafa2fd896::t_d0f9141f077aa0 848-849
+internal/proxy/fallback.go
+  s_b82fdafa2fd896::t_3228edadfd94d1 14
+  s_b82fdafa2fd896::t_1604d66f1a8fac 4
+  s_b82fdafa2fd896::t_b3cd238e3828e4 164-166,168-173,183-189
+  s_b82fdafa2fd896::t_db9228d46452f8 355-358,377-403
+  s_b82fdafa2fd896::t_b32ee33c165b0a 17-46,49-59,62,64-66,68-76,79-92,95-101,106-153
+  s_b82fdafa2fd896::t_4948f65e07d014 215-219,240-242,262-266,271-280,294-302
+internal/proxy/fallback_test.go
+  s_b82fdafa2fd896::t_bd4bc3f3a6679a 343
+  s_b82fdafa2fd896::t_9adb20afb198c9 426-521
+  s_b82fdafa2fd896::t_385caaad27ede4 305
+  s_b82fdafa2fd896::t_a83eb59f91e91d 77,120,164,203,251,292,333
+  s_b82fdafa2fd896::t_5f095fc3fe6194 216
+  s_b82fdafa2fd896::t_49350444ddc3b2 84-88,127-131,171-175,210-214,258-262,299-303,337-341
+  s_b82fdafa2fd896::t_0292cebd017a06 72,115,159,198,246,287,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "58ee4cbc025518e5669e90114077131d9b4c0eb3",
+  "prompts": {},
+  "sessions": {
+    "s_b82fdafa2fd896": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c67ac055-440a-48d7-a835-8588ea20d9cb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

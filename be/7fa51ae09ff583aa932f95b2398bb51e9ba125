@@ -1,0 +1,19 @@
+install/install.sh
+  s_88d7ae306e08b7::t_a0c0f8f9c83af2 931
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "be7fa51ae09ff583aa932f95b2398bb51e9ba125",
+  "prompts": {},
+  "sessions": {
+    "s_88d7ae306e08b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d89733f8-9d43-4a55-95f0-24a9d812e3ee",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

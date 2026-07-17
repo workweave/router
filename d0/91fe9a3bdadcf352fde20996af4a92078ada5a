@@ -1,0 +1,42 @@
+internal/proxy/telemetry.go
+  s_181299bbd674e9::t_023ad94de62bba 63-73
+  s_181299bbd674e9::t_9f56b527e991c1 74
+db/migrations/20260710002702_telemetry-policy-router.down.sql
+  s_181299bbd674e9::t_023ad94de62bba 1-13
+internal/postgres/telemetry.go
+  s_181299bbd674e9::t_023ad94de62bba 78-85
+internal/proxy/observation_internal_test.go
+  s_181299bbd674e9::t_47340c9f6b0b6d 76-81,83
+  s_181299bbd674e9::t_0e2fd8c63774a4 8,82,84-86,90-92,96-103,108-137
+  s_181299bbd674e9::t_af35815f3a270c 41,62,153,176,189
+internal/sqlc/models.go
+  s_181299bbd674e9::t_9f56b527e991c1 161-172
+internal/proxy/service_observation_test.go
+  s_181299bbd674e9::t_4b3133388e3b7b 142-188
+db/migrations/20260710002702_telemetry-policy-router.up.sql
+  s_181299bbd674e9::t_023ad94de62bba 1-18
+internal/proxy/service.go
+  s_181299bbd674e9::t_af35815f3a270c 2753,2822-2829,4398,4475-4482
+internal/proxy/observation.go
+  s_181299bbd674e9::t_023ad94de62bba 31-41,65-71,108-115,131-155,193-212
+db/queries/model_router_request_telemetry.sql
+  s_181299bbd674e9::t_023ad94de62bba 58-65,124-131
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_181299bbd674e9::t_9f56b527e991c1 845-852,911-913,916-917,919-926,928-930,932-942,981-988,1072-1079,1138-1140,1143-1144,1146-1153,1155-1157,1159-1169,1207-1214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d091fe9a3bdadcf352fde20996af4a92078ada5a",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

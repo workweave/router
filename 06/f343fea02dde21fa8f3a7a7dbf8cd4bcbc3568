@@ -1,0 +1,24 @@
+internal/router/turntype/detect_test.go
+  s_0ac1abdedf47d0::t_d33e901c450887 78-85
+  s_0ac1abdedf47d0::t_9638435918f9c2 200-201,203,206
+  s_0ac1abdedf47d0::t_d4aa3b3bb3f875 275-276,278,281
+internal/router/turntype/detect.go
+  s_0ac1abdedf47d0::t_552b9171940e02 92-102,106
+  s_0ac1abdedf47d0::t_76b57f6d036bfe 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "06f343fea02dde21fa8f3a7a7dbf8cd4bcbc3568",
+  "prompts": {},
+  "sessions": {
+    "s_0ac1abdedf47d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4555dc00-dcca-4e93-9af7-b0a0af00d4d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

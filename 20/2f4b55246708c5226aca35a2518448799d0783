@@ -1,0 +1,21 @@
+db/migrations/0008_ledger_memo.up.sql
+  s_d7cbd6f01f66b8::t_f0b14367a1d5ca 1-3
+db/migrations/0008_ledger_memo.down.sql
+  s_d7cbd6f01f66b8::t_10fe585d0ae584 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "202f4b55246708c5226aca35a2518448799d0783",
+  "prompts": {},
+  "sessions": {
+    "s_d7cbd6f01f66b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9424170-0dbe-494d-af74-b6ae282c89e2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}
