@@ -105,3 +105,31 @@ func TestSubscriptionOnly_OpenAI_BypassRetryable_Refuses402(t *testing.T) {
 	assert.Equal(t, 0, fr.routeCalls)
 	assert.Equal(t, 1, wrappedP.calls)
 }
+
+// TestSubscriptionOnly_OpenAI_BypassRetryable_Stream_NoPartialCommit: streaming Prelude stays buffered until Discard on 402.
+func TestSubscriptionOnly_OpenAI_BypassRetryable_Stream_NoPartialCommit(t *testing.T) {
+	bypassResp := &providers.UpstreamErrorResponse{
+		Status: http.StatusTooManyRequests,
+		Body:   []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"weekly limit exceeded"}}`),
+	}
+	p := &fakeProvider{proxyErr: bypassResp}
+	wrappedP := &swapErrProvider{first: bypassResp, second: nil, inner: p}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl, Reason: "cluster:v0.2"}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: wrappedP}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	body := []byte(`{"model":"` + bypassRequestedMdl + `","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	err := svc.ProxyOpenAIChatCompletion(billing.WithSubscriptionOnly(bypassCtx(0.80)), body, rec, req)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, proxy.ErrCreditsExhaustedSubscriptionUnavailable))
+	assert.Equal(t, 0, fr.routeCalls)
+	assert.Equal(t, 1, wrappedP.calls)
+	assert.Empty(t, rec.Body.String(), "retryable bypass must Discard buffered Prelude; client must see no SSE bytes")
+	assert.False(t, rec.Flushed, "HTTP status must not be committed before the 402 mapping")
+}

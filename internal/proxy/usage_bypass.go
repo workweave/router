@@ -414,9 +414,12 @@ func (s *Service) bypassAnthropicOpenAI(
 		return fmt.Errorf("emit bypass body: %w", emitErr)
 	}
 
-	sink := http.ResponseWriter(w)
+	// Buffer synthetic preamble (subscription-only marker) so a retryable bypass
+	// failure can Discard and return 402 without a partial SSE stream on the wire.
+	preludeBuf := newPreludeBuffer(w)
+	sink := http.ResponseWriter(preludeBuf)
 	if billing.SubscriptionOnlyFromContext(ctx) {
-		mw := translate.NewOpenAIRoutingMarkerWriter(w, decision.Model, subscriptionOnlyWarningMarker)
+		mw := translate.NewOpenAIRoutingMarkerWriter(preludeBuf, decision.Model, subscriptionOnlyWarningMarker)
 		if err := mw.Prelude(env.Stream()); err != nil {
 			log.Error("OpenAI usage-bypass routing-marker prelude failed", "err", err)
 		}
@@ -430,17 +433,28 @@ func (s *Service) bypassAnthropicOpenAI(
 		usageSink = extractor
 	}
 	translator := translate.NewSSETranslator(sink, decision.Model, usageSink)
+	preludeBuf.Seal()
 
 	proxyStart := time.Now()
 	proxyErr := p.Proxy(ctx, decision, prep, translator, r)
 	if providers.IsRetryable(proxyErr) {
+		if !preludeBuf.Committed() {
+			preludeBuf.Discard()
+		}
 		return errBypassRetryable
 	}
 	proxyErr = finalizeAfterProxy(proxyErr, translator.Finalize)
 
 	var upstreamErr *providers.UpstreamErrorResponse
 	if errors.As(proxyErr, &upstreamErr) {
-		flushBufferedIfPresent(w, proxyErr)
+		if !preludeBuf.Committed() {
+			preludeBuf.Discard()
+			flushBufferedIfPresent(w, proxyErr)
+		} else if env.Stream() {
+			_ = emitOpenAISSEErrorEvent(sink, proxyErr)
+		} else {
+			flushBufferedIfPresent(w, proxyErr)
+		}
 		proxyErr = nil
 	}
 
