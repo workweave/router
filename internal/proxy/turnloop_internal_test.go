@@ -108,6 +108,54 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
+// TestRecordTurnUsage_ForwardsPriorServedModel locks that a regular (non-HMM)
+// usage writeback carries PriorServedModel into UpdateUsage. Without it, a
+// brand-new tier-role row cannot latch has_ever_switched from sibling
+// hmm_history evidence that switchHistoryFromPins already surfaced on the
+// turnLoopResult.
+func TestRecordTurnUsage_ForwardsPriorServedModel(t *testing.T) {
+	store := newStubPinStore()
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		"anthropic", "claude-haiku-4-5",
+		nil,
+	)
+
+	var sessionKey [sessionpin.SessionKeyLen]byte
+	for i := range sessionKey {
+		sessionKey[i] = byte(i + 1)
+	}
+
+	role := sessionpin.DefaultRole + "_low"
+	res := turnLoopResult{
+		Decision: router.Decision{
+			Provider: providers.ProviderAnthropic,
+			Model:    "claude-haiku-4-5",
+			Reason:   "cluster:v0.73",
+		},
+		SessionKey: sessionKey,
+		PinRole:    role,
+		// Value switchHistoryFromPins would set from hmm_history.LastServedModel
+		// when the active tier pin has never been written.
+		PriorServedModel: "claude-fable-5",
+	}
+	svc.recordTurnUsage(res, res.Decision.Provider, res.Decision.Model, 1200, 80, 200, 900)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, 1, store.usageHits, "UpdateUsage must run on the active tier role")
+	assert.Equal(t, []string{role}, store.usageRoles)
+	assert.NotContains(t, store.usageRoles, hmmHistoryRole(role), "regular turns must not write the HMM history role")
+	assert.Equal(t, "claude-haiku-4-5", store.lastUsage.ServedModel)
+	assert.Equal(t, "claude-fable-5", store.lastUsage.PriorServedModel)
+}
+
 func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(

@@ -3201,6 +3201,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 		OutputTokens:      out,
 		EndedAt:           time.Now(),
 		ServedModel:       servedModel,
+		PriorServedModel:  res.PriorServedModel,
 	}
 	role := res.PinRole
 	if role == "" {
