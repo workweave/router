@@ -1570,30 +1570,34 @@ toggle_opencode() {
       ;;
     on)
       if [ "$on" = "true" ]; then ok "opencode is already on — nothing to do."; return 0; fi
-      restore_model="weave/claude-sonnet-4-6"
+      restore_model="weave/auto"
       if [ "$parked_present" = "true" ]; then
-        restore_model="$(jq -r '.model // "weave/claude-sonnet-4-6"' "$parked")"
+        restore_model="$(jq -r '.model // "weave/auto"' "$parked")"
       elif [ "$has_weave" != "true" ]; then
         warn "opencode isn't configured for the router. Run the installer first."; return 0
       else
         # No parked model (sidecar deleted by hand). Derive the default from the
         # installed provider.weave.models block rather than a hardcoded literal
-        # that silently diverges when the installer's default changes — prefer a
-        # sonnet entry, else the first model the installer registered.
+        # that silently diverges when the installer's default changes — prefer
+        # the auto-routing entry, else the first model the installer registered.
         restore_model="$(jq -r '
           (.provider.weave.models // {} | keys) as $k
-          | (([$k[] | select(test("sonnet"))] | first) // $k[0] // "claude-sonnet-4-6")
+          | (([$k[] | select(. == "auto")] | first) // $k[0] // "auto")
           | "weave/" + .
-        ' "$f" 2>/dev/null || echo "weave/claude-sonnet-4-6")"
+        ' "$f" 2>/dev/null || echo "weave/auto")"
       fi
-      # Never restore a legacy weave-codex model whose provider is no longer
-      # registered (every current install strips weave-codex). Fall back to the
-      # `weave` default so `on` can't leave opencode pointing at a missing
-      # provider.
+      # Restore only a registered `weave` model. Legacy installations may have
+      # parked a pinned model, but a current install exposes only `weave/auto`.
       case "$restore_model" in
+        weave/*)
+          local model_id="${restore_model#weave/}"
+          if ! jq -e --arg id "$model_id" '(.provider.weave.models // {}) | has($id)' "$f" >/dev/null 2>&1; then
+            restore_model="weave/auto"
+          fi
+          ;;
         weave-codex/*)
           if [ "$(jq -r '((.provider // {}) | has("weave-codex"))' "$f" 2>/dev/null || true)" != "true" ]; then
-            restore_model="weave/claude-sonnet-4-6"
+            restore_model="weave/auto"
           fi
           ;;
       esac
