@@ -36,11 +36,31 @@ func TestSSETranslator_IncompleteEOFEmitsFailureNotDone(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "[DONE]")
 }
 
+func TestSSETranslator_PreludeOnlyEOFEmitsFailure(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewAnthropicSSETranslator(rec, "gpt-x", nil)
+	require.NoError(t, w.Prelude(true))
+	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete)
+	assert.Contains(t, rec.Body.String(), "event: error")
+	assert.NotContains(t, rec.Body.String(), "event: message_stop")
+}
+
 func TestResponsesWriter_IncompleteEOFTerminatesAsFailed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w := translate.NewResponsesWriter(rec, "gpt-x")
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"))
+	require.NoError(t, err)
+	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete)
+	assert.Contains(t, rec.Body.String(), "response.failed")
+	assert.NotContains(t, rec.Body.String(), "response.completed")
+}
+
+func TestResponsesWriter_BareDoneTerminatesAsFailed(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := translate.NewResponsesWriter(rec, "gpt-x")
+	require.NoError(t, w.Prelude(true))
+	_, err := w.Write([]byte("data: [DONE]\n\n"))
 	require.NoError(t, err)
 	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete)
 	assert.Contains(t, rec.Body.String(), "response.failed")

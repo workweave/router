@@ -34,10 +34,8 @@ func NewToolCallLedger() *ToolCallLedger {
 	return &ToolCallLedger{entries: make(map[int]*ToolCallEntry), sourceOwners: make(map[string]int)}
 }
 
-// Upsert records source fields for index and returns its stable entry. When an
-// ID is present in the first delta it remains client-visible for round-trip
-// correlation. Id-less calls receive an opaque generated ID that a late source
-// ID can only alias.
+// Upsert records source fields for index and returns its stable entry.
+// The first delta's ID is kept as client-visible; late IDs alias it.
 func (l *ToolCallLedger) Upsert(index int, sourceID, name string) *ToolCallEntry {
 	entry, ok := l.entries[index]
 	if !ok {

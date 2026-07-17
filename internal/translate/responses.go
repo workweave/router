@@ -485,7 +485,7 @@ func (t *ResponsesWriter) Finalize() error {
 			return err
 		}
 		if err := t.lifecycle.EOF(); err != nil {
-			if t.lifecycle.OutputStarted() {
+			if t.lifecycle.State() == StreamStarted {
 				if emitErr := t.emitIncompleteFailure(); emitErr != nil {
 					return emitErr
 				}
@@ -567,6 +567,9 @@ func (t *ResponsesWriter) translateChunk(raw []byte) error {
 		return nil
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if !t.lifecycle.OutputStarted() {
+			return nil
+		}
 		t.closeOpenItems()
 		if t.completedEmitted {
 			return nil

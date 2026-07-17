@@ -3,6 +3,7 @@ package translate_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -617,6 +618,26 @@ data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","
 	e, _ := msg["error"].(map[string]any)
 	require.NotNil(t, e)
 	assert.Contains(t, e["message"], "ran out of juice")
+}
+
+func TestResponsesToAnthropicWriter_IncompleteNonMaxIsFailure(t *testing.T) {
+	const fixture = `event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}}
+
+`
+	for _, streaming := range []bool{true, false} {
+		t.Run(strconv.FormatBool(streaming), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
+			require.NoError(t, w.Prelude(streaming))
+			_, err := w.Write([]byte(fixture))
+			require.NoError(t, err)
+			require.NoError(t, w.Finalize())
+			assert.Contains(t, rec.Body.String(), `"type":"api_error"`)
+			assert.Contains(t, rec.Body.String(), "content_filter")
+			assert.NotContains(t, rec.Body.String(), `"stop_reason":"max_tokens"`)
+		})
+	}
 }
 
 // An error object with a code but empty message keeps the upstream code in

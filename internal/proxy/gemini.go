@@ -190,10 +190,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	// Native Gemini used to emit its marker before the provider had even
-	// accepted the request. Keep every prelude byte behind the same commitment
-	// boundary as the other protocol paths: the first upstream event releases
-	// it, while a 429/5xx/transport/empty stream can still retry cleanly.
+	// Keep every prelude byte behind the same commitment boundary as other
+	// protocol paths: the first upstream event releases it, so a 429/5xx or
+	// empty stream can still retry cleanly.
 	preludeBuf := newPreludeBuffer(contentSink)
 	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
 	bindings := s.resolveBindingsForDispatch(ctx, decision)

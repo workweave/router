@@ -788,7 +788,7 @@ func (t *AnthropicSSETranslator) Finalize() error {
 			return t.finishStream()
 		}
 		if err := t.lifecycle.EOF(); err != nil {
-			if t.lifecycle.OutputStarted() {
+			if t.lifecycle.State() == StreamStarted {
 				if emitErr := t.emitIncompleteErrorEvent(); emitErr != nil {
 					return emitErr
 				}

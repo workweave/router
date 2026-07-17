@@ -224,7 +224,7 @@ func (t *ResponsesToAnthropicWriter) Finalize() error {
 			return err
 		}
 		if err := t.lifecycle.EOF(); err != nil {
-			if t.lifecycle.OutputStarted() {
+			if t.lifecycle.State() == StreamStarted {
 				if emitErr := t.emitStreamErrorEvent("api_error", "upstream stream ended before a terminal event"); emitErr != nil {
 					return emitErr
 				}
@@ -327,8 +327,9 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 	case "response.completed", "response.incomplete":
 		// Terminal envelope counts as progress; a post-trip cancel is moot anyway.
 		t.markOutputProgress()
-		if gjson.GetBytes(data, "response.error").Exists() && gjson.GetBytes(data, "response.error").Type != gjson.Null {
-			errType, msg := responsesFailureFromResponse(gjson.GetBytes(data, "response"))
+		resp := gjson.GetBytes(data, "response")
+		if responsesTerminalIsFailure(resp) {
+			errType, msg := responsesFailureFromResponse(resp)
 			return t.emitStreamErrorEvent(errType, msg)
 		}
 		if err := t.lifecycle.Terminal(); err != nil {
@@ -564,7 +565,7 @@ func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
 	switch {
 	case hasToolCall:
 		t.finalStopReason = "tool_use"
-	case resp.Get("incomplete_details.reason").String() == "max_output_tokens" || resp.Get("status").String() == "incomplete":
+	case resp.Get("incomplete_details.reason").String() == "max_output_tokens":
 		t.finalStopReason = "max_tokens"
 	default:
 		t.finalStopReason = "end_turn"
@@ -642,15 +643,13 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 		observability.Get().Error("ResponsesToAnthropic: no terminal response event in stream")
 		return t.finalizeError()
 	}
-	// A failed terminal response is an error, not an empty assistant turn.
-	// `incomplete` (max_output_tokens) is a valid truncated response, left to
-	// ResponsesToAnthropicResponse.
-	respErr := gjson.GetBytes(finalResp, "error")
-	if gjson.GetBytes(finalResp, "status").String() == "failed" || (respErr.Exists() && respErr.Type != gjson.Null) {
-		errType, errMsg := responsesFailureFromResponse(gjson.ParseBytes(finalResp))
+	// Only max_output_tokens is a valid incomplete terminal response.
+	resp := gjson.ParseBytes(finalResp)
+	if responsesTerminalIsFailure(resp) {
+		errType, errMsg := responsesFailureFromResponse(resp)
 		observability.Get().Error("ResponsesToAnthropic: upstream response failed",
 			"request_model", t.requestModel,
-			"upstream_status", gjson.GetBytes(finalResp, "status").String(),
+			"upstream_status", resp.Get("status").String(),
 			"upstream_error_type", errType,
 			"upstream_error_message", errMsg,
 		)
@@ -743,10 +742,8 @@ func (t *ResponsesToAnthropicWriter) anthropicErrorFromBuffer() []byte {
 			errType, msg := responsesFailureFromResponse(resp)
 			return responsesError(errType, msg)
 		case "response.incomplete":
-			// Only an error if it carries an error object; a plain
-			// max_output_tokens incomplete is valid and must not stop the scan.
 			resp := gjson.GetBytes(data, "response")
-			if e := resp.Get("error"); e.Exists() && e.Type != gjson.Null {
+			if responsesTerminalIsFailure(resp) {
 				errType, msg := responsesFailureFromResponse(resp)
 				return responsesError(errType, msg)
 			}
@@ -778,6 +775,19 @@ func responsesFailureFromResponse(resp gjson.Result) (errType, msg string) {
 		return errType, "upstream Responses request failed (status: failed)"
 	}
 	return errType, ""
+}
+
+func responsesTerminalIsFailure(resp gjson.Result) bool {
+	if !resp.Exists() {
+		return true
+	}
+	if resp.Get("status").String() == "failed" {
+		return true
+	}
+	if err := resp.Get("error"); err.Exists() && err.Type != gjson.Null {
+		return true
+	}
+	return resp.Get("status").String() == "incomplete" && resp.Get("incomplete_details.reason").String() != "max_output_tokens"
 }
 
 // responsesError builds an Anthropic error envelope from a Responses-style

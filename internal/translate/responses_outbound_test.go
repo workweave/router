@@ -393,6 +393,9 @@ func TestResponsesToAnthropicResponse_StopReasons(t *testing.T) {
 	out, err = translate.ResponsesToAnthropicResponse(et, "gpt-5.5")
 	require.NoError(t, err)
 	assert.Equal(t, "end_turn", gjsonStopReason(out))
+	filtered := []byte(`{"id":"r","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`)
+	_, err = translate.ResponsesToAnthropicResponse(filtered, "gpt-5.5")
+	require.Error(t, err)
 }
 
 // gemini-3.x uses string `thinkingLevel`, not the legacy numeric `thinkingBudget`
