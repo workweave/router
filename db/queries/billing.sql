@@ -80,6 +80,42 @@ key_spend AS (
     SET spent_usd_micros = spent_usd_micros - @delta_usd_micros::bigint
     WHERE id = sqlc.narg('api_key_id')::uuid
       AND EXISTS (SELECT 1 FROM updated)
+),
+user_month_spend AS (
+    -- Month-bucketed per-engineer spend counter for monthly limit
+    -- enforcement. Same gating and sign convention as key_spend; no-ops when
+    -- the request carried no resolvable user identity (router_user_id NULL).
+    -- Also no-ops when the user row no longer exists (stale cached id after a
+    -- cascade delete mid-request) so a dangling FK can't roll back the debit
+    -- after inference was already served.
+    INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
+    SELECT
+        sqlc.narg('router_user_id')::uuid,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -(@delta_usd_micros::bigint),
+        NOW()
+    WHERE sqlc.narg('router_user_id')::uuid IS NOT NULL
+      AND EXISTS (SELECT 1 FROM updated)
+      AND EXISTS (
+          SELECT 1 FROM router.model_router_users
+          WHERE id = sqlc.narg('router_user_id')::uuid
+      )
+    ON CONFLICT (router_user_id, month) DO UPDATE
+    SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
+),
+org_month_spend AS (
+    -- Month-bucketed org spend counter for the org-wide monthly cap.
+    INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, updated_at)
+    SELECT
+        @organization_id::varchar,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -(@delta_usd_micros::bigint),
+        NOW()
+    WHERE EXISTS (SELECT 1 FROM updated)
+    ON CONFLICT (organization_id, month) DO UPDATE
+    SET spent_usd_micros = router.organization_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
 )
 SELECT balance_after_micros FROM ledger;
 
@@ -102,9 +138,11 @@ WHERE organization_id = @organization_id::varchar
 ORDER BY created_at DESC
 LIMIT @row_limit::int;
 
--- Returns true if the three billing tables exist in the router schema. Used
--- by the router boot-time health check so a missing-migration state
--- disables billing rather than 500ing on every request.
+-- Returns true if every table the billing debit path touches exists in the
+-- router schema. Used by the router boot-time health check so a
+-- missing-migration state disables billing rather than 500ing on every
+-- request. Includes the monthly-spend counter and limit tables because
+-- DebitOrgCredits writes the counters in the same statement as the debit.
 -- name: CheckBillingTablesExist :one
 SELECT (
     SELECT COUNT(*) FROM information_schema.tables
@@ -112,6 +150,10 @@ SELECT (
       AND table_name IN (
         'organization_credit_balance',
         'organization_credit_ledger',
-        'organization_billing_overrides'
+        'organization_billing_overrides',
+        'model_router_user_monthly_spend',
+        'organization_monthly_spend',
+        'organization_spend_limits',
+        'model_router_user_spend_limits'
       )
-) = 3 AS billing_tables_exist;
+) = 7 AS billing_tables_exist;

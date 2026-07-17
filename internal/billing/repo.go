@@ -45,4 +45,7 @@ type DebitParams struct {
 	// APIKeyID, if non-empty, attributes the debit to that key, bumping its
 	// lifetime spent_usd_micros in the same transaction.
 	APIKeyID string
+	// RouterUserID, if non-empty, attributes the debit to that engineer and bumps
+	// the org's monthly counter; org counter is always bumped regardless.
+	RouterUserID string
 }

@@ -187,6 +187,21 @@ type RouterModelRouterUser struct {
 	DisplayName *string
 }
 
+type RouterModelRouterUserMonthlySpend struct {
+	RouterUserID   uuid.UUID
+	Month          pgtype.Date
+	SpentUsdMicros int64
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type RouterModelRouterUserSpendLimit struct {
+	RouterUserID          uuid.UUID
+	MonthlyLimitUsdMicros *int64
+	CreatedBy             *string
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+}
+
 type RouterOrganizationAutopayConfig struct {
 	OrganizationID      string
 	Enabled             bool
@@ -231,6 +246,22 @@ type RouterOrganizationCreditLedger struct {
 	RouterModel           *string
 	CreatedAt             pgtype.Timestamptz
 	Memo                  *string
+}
+
+type RouterOrganizationMonthlySpend struct {
+	OrganizationID string
+	Month          pgtype.Date
+	SpentUsdMicros int64
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type RouterOrganizationSpendLimit struct {
+	OrganizationID            string
+	UserMonthlyLimitUsdMicros *int64
+	OrgMonthlyLimitUsdMicros  *int64
+	CreatedBy                 *string
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
 }
 
 // Content-free serving-vs-shadow policy comparisons; shadow decisions never dispatch or enter online learning

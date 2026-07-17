@@ -3024,6 +3024,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					Pricing:         sumPricing,
 					HasOverride:     billing.HasOverrideFromContext(ctx),
 					APIKeyID:        apiKeyID,
+					RouterUserID:    auth.UserIDFrom(ctx),
 				})
 			}
 		}
@@ -3859,6 +3860,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		HasOverride:        hasOverride,
 		SubscriptionServed: routeRes.UsageBypass || servedOnSubscription(ctx),
 		APIKeyID:           apiKeyID,
+		RouterUserID:       auth.UserIDFrom(ctx),
 	})
 
 	// The handover summary always runs on the deployment/BYOK key (never the
@@ -3879,6 +3881,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 				Pricing:         sumPricing,
 				HasOverride:     hasOverride,
 				APIKeyID:        apiKeyID,
+				RouterUserID:    auth.UserIDFrom(ctx),
 			})
 		}
 	}
