@@ -1,0 +1,19 @@
+cmd/router/main.go
+  s_539e346e9e9b07::t_97f7a10f330716 1195-1201,1218-1222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "eda87b3a79432efed40ac20cd882c510ffd0439c",
+  "prompts": {},
+  "sessions": {
+    "s_539e346e9e9b07": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "13e880c5-2152-4f64-ad08-30fd4fa15166",
+        "model": "unknown"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

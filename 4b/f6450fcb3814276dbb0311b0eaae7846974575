@@ -1,0 +1,27 @@
+internal/router/policy/resolver_test.go
+  s_181299bbd674e9::t_9f64ad2ca88e80 30,38-49
+  s_181299bbd674e9::t_76c9c4bcb1c793 50-51
+internal/policyclient/client_test.go
+  s_181299bbd674e9::t_9f64ad2ca88e80 97
+  s_181299bbd674e9::t_1996995259a43c 73
+internal/router/policy/resolver.go
+  s_181299bbd674e9::t_9f64ad2ca88e80 70,252-256
+  s_181299bbd674e9::t_1996995259a43c 210
+  s_181299bbd674e9::t_64c07dd54d9cad 257-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4bf6450fcb3814276dbb0311b0eaae7846974575",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

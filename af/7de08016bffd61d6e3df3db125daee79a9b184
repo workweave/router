@@ -1,0 +1,35 @@
+internal/router/hmm/hmm.go
+  s_68aeee63f31e70::t_f85aa3457639cf 30,37-40,176,183,257-337
+  s_68aeee63f31e70::t_f571cd18e5e528 41-45
+internal/router/hmm/client.go
+  s_68aeee63f31e70::t_c68102ceb559fa 79-91,147,155
+internal/router/hmm/client_test.go
+  s_68aeee63f31e70::t_eaa56136345627 39,43,68-73,96-102
+internal/proxy/service.go
+  s_68aeee63f31e70::t_be83cb44ee5014 541-554
+  s_68aeee63f31e70::t_4bdb773457c233 1524,1957,3871
+internal/proxy/gemini.go
+  s_68aeee63f31e70::t_8ac26aafe34bcd 91
+internal/router/hmm/hmm_test.go
+  s_68aeee63f31e70::t_f571cd18e5e528 85,93-94
+  s_68aeee63f31e70::t_02f030a6268439 76-84,86-92,95-110,115-119
+  s_68aeee63f31e70::t_afe70b2db8d338 111-114
+internal/router/router.go
+  s_68aeee63f31e70::t_96c6d3d23ec80f 6-15,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "af7de08016bffd61d6e3df3db125daee79a9b184",
+  "prompts": {},
+  "sessions": {
+    "s_68aeee63f31e70": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4440-8508-7fb0-8b5d-214cc211ab9a",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

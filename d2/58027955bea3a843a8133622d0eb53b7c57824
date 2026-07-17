@@ -1,0 +1,39 @@
+internal/proxy/service.go
+  s_e314738a9195df::t_bd071409cc7c2d 124-129
+  s_e314738a9195df::t_c03b5b960f4f46 857-876
+  s_e314738a9195df::t_aa4d6211bf64a9 2729
+  s_e314738a9195df::t_425ea80b589e8a 23
+  s_e314738a9195df::t_5d5795b72b35f3 2713-2728,2730-2792
+cmd/router/main.go
+  s_e314738a9195df::t_999895d76d1cf7 717
+  s_e314738a9195df::t_d01fc8f91c71b2 593-595
+internal/router/bandswap/artifacts/metadata.json
+  s_e314738a9195df::t_0a5de8add59253 1-42
+internal/router/bandswap/bandswap_test.go
+  s_e314738a9195df::t_d53c45ff8cd53a 1-72
+internal/router/bandswap/bandswap.go
+  s_e314738a9195df::t_be038acce06393 1-139
+internal/proxy/bandswap_integration_test.go
+  s_e314738a9195df::t_115a98de0b6fb3 1-59
+internal/router/bandswap/artifacts/action_clf_logreg_embonly.json
+  s_e314738a9195df::t_0a5de8add59253 1
+internal/proxy/turnloop.go
+  s_e314738a9195df::t_2609c8547adea4 626
+  s_e314738a9195df::t_5d7bca03e73422 621-625,627,630
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d258027955bea3a843a8133622d0eb53b7c57824",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

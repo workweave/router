@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "200ed3b2bcf46bf61f3a3dd11efd730b08dae439",
+  "prompts": {
+    "3ee3a5192ae58ef7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "de061cda-8df1-4237-b978-64632fa2c3af",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 960,
+      "total_deletions": 20475,
+      "accepted_lines": 960,
+      "overriden_lines": 0
+    }
+  }
+}

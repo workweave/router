@@ -1,0 +1,24 @@
+docs/CONFIGURATION.md
+  s_181299bbd674e9::t_eb05cbb239ff7a 13,68,84-120
+  s_181299bbd674e9::t_31cfe5182ac842 121
+docs/POLICY_ROUTER_HARNESS.md
+  s_181299bbd674e9::t_eb05cbb239ff7a 1-192
+README.md
+  s_181299bbd674e9::t_eb05cbb239ff7a 166-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b07c708366e87d7bdff90318789a2373a91cad28",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+internal/server/middleware/routing_knobs_override.go
+  s_c280035be5a4e1::t_11e58c1ff469e8 4
+  s_c280035be5a4e1::t_487a15b3915090 32,36,47,51,62,66
+internal/router/cluster/scorer.go
+  s_c280035be5a4e1::t_b748ce0ecebff8 341-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f3694732117235a2e5fb2748dc2707906fcb0888",
+  "prompts": {},
+  "sessions": {
+    "s_c280035be5a4e1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b8c2c42-371e-4176-885a-d4fb986796b1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

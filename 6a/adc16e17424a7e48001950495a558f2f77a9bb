@@ -1,0 +1,50 @@
+db/migrations/0022_telemetry-fresh-scorer-shadow.up.sql
+  s_3f8d95a685b537::t_5fa04748ccf73a 1-37
+internal/proxy/service.go
+  s_3f8d95a685b537::t_f336c08961e1b9 1274-1280
+  s_3f8d95a685b537::t_d330ffdd9ea6d4 1683
+  s_3f8d95a685b537::t_2ee68b8efdeccd 1760,1769
+  s_3f8d95a685b537::t_4e163502d5eadb 1761-1768
+  s_3f8d95a685b537::t_2a065869069edd 1776-1781
+  s_3f8d95a685b537::t_afad12a7ba47a1 2162,2165-2171
+  s_3f8d95a685b537::t_9f59863b065fcc 2795
+  s_3f8d95a685b537::t_f8706cc7502f90 2869,2871
+  s_3f8d95a685b537::t_0b1f49a05d5a6e 2870
+  s_3f8d95a685b537::t_2b76b202e99285 2878-2880
+db/queries/model_router_request_telemetry.sql
+  s_3f8d95a685b537::t_958fe0d88d5069 12-13
+  s_3f8d95a685b537::t_8b848c37d782da 14-18
+  s_3f8d95a685b537::t_3814f3b0d5c570 65-66
+  s_3f8d95a685b537::t_131b19db1d51f0 67-70
+  s_3f8d95a685b537::t_f8b629363b474a 116-117
+  s_3f8d95a685b537::t_9d923aa16f18a0 118-121
+internal/proxy/telemetry.go
+  s_3f8d95a685b537::t_e9fbf047e487c2 73-78
+  s_3f8d95a685b537::t_230164dac7575d 79-86
+db/migrations/0022_telemetry-fresh-scorer-shadow.down.sql
+  s_3f8d95a685b537::t_0964a0bd62b462 1-17
+internal/postgres/telemetry.go
+  s_3f8d95a685b537::t_e66e90bd6959fc 99-100
+  s_3f8d95a685b537::t_be8c828c18489a 101-103
+internal/proxy/observation.go
+  s_3f8d95a685b537::t_dbc90c52a79870 35-44
+  s_3f8d95a685b537::t_935b3c9a9116f5 49-53,55-67
+internal/proxy/observation_internal_test.go
+  s_3f8d95a685b537::t_1f49a76c4c896e 1-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "6aadc16e17424a7e48001950495a558f2f77a9bb",
+  "prompts": {},
+  "sessions": {
+    "s_3f8d95a685b537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86141471-a1a5-4e3a-bdf9-190038e3d42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

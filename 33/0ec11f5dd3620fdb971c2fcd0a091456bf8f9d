@@ -1,0 +1,36 @@
+internal/version/version_test.go
+  s_a04c807f6b101d::t_f33503679dabaf 1-30
+internal/version/version.go
+  s_a04c807f6b101d::t_74741e44b67b98 1-25
+internal/api/admin/version_test.go
+  s_a04c807f6b101d::t_5179e612db32f5 1-45
+internal/api/admin/version.go
+  s_a04c807f6b101d::t_de5ef2f41dc813 1-31
+Dockerfile
+  s_a04c807f6b101d::t_c74e5185b1b82c 55-59
+  s_a04c807f6b101d::t_587c2f63427433 201-203
+internal/server/server.go
+  s_a04c807f6b101d::t_6c32147b32c3cc 71-76
+README.md
+  s_a04c807f6b101d::t_cb77a4bd38f52f 30
+internal/observability/apm/apm.go
+  s_a04c807f6b101d::t_d820dcf43e5b28 136
+  s_a04c807f6b101d::t_e33e175c4d7566 75
+  s_a04c807f6b101d::t_1d70b8b0f92408 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "330ec11f5dd3620fdb971c2fcd0a091456bf8f9d",
+  "prompts": {},
+  "sessions": {
+    "s_a04c807f6b101d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69cca121-ecb7-4a53-8a71-ca0107fed063",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

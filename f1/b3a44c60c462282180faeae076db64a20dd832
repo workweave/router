@@ -1,0 +1,27 @@
+internal/translate/emit_openai.go
+  s_1f0150b349ee2c::t_c9f1f26c0a9814 22-23
+internal/router/router.go
+  s_1f0150b349ee2c::t_bfb69ac638dd30 24-26
+internal/server/middleware/force_effort_override.go
+  s_1f0150b349ee2c::t_f64ad47c67bf3d 22-23
+internal/translate/envelope.go
+  s_1f0150b349ee2c::t_7804a5737d4b25 56-58
+  s_1f0150b349ee2c::t_140d0ae632eb86 473-474
+  s_1f0150b349ee2c::t_9a4707cfc62aa6 1003-1004
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f1b3a44c60c462282180faeae076db64a20dd832",
+  "prompts": {},
+  "sessions": {
+    "s_1f0150b349ee2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b525f980-c9fc-4332-bbe9-8a627ee8612e",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

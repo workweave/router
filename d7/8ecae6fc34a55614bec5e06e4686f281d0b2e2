@@ -1,0 +1,19 @@
+internal/translate/translate.go
+  s_60615be0bc358c::t_939eb64797f259 265-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "d78ecae6fc34a55614bec5e06e4686f281d0b2e2",
+  "prompts": {},
+  "sessions": {
+    "s_60615be0bc358c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf16e54b-8d14-42de-a419-dbca7d5c8083",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,42 @@
+install/commands/router-on.md
+  s_121129bb7f9e0b::t_5c6c74a0484417 1-10
+install/commands/router-status.md
+  s_121129bb7f9e0b::t_2eee0a4046678c 1-10
+install/install.sh
+  s_121129bb7f9e0b::t_bcd8cec1a2c934 759-760
+  s_121129bb7f9e0b::t_fd75d66a504857 979-1040,1043,1045-1047,1049-1224
+  s_121129bb7f9e0b::t_6ebc60d8d4b7bc 1041-1042,1044,1048
+  s_121129bb7f9e0b::t_f175eeab14b17b 1317-1335,1342-1346,1348
+  s_121129bb7f9e0b::t_941c97c8eadfe4 80-84
+  s_121129bb7f9e0b::t_58d9701ddf0d25 701-705,715-724
+  s_121129bb7f9e0b::t_0fbd48ea7920e6 828-832,836-837,841-843
+  s_121129bb7f9e0b::t_c137ac291321d2 40-51
+install/commands/router-off.md
+  s_121129bb7f9e0b::t_aefc088c596c9c 1-10
+install/README.md
+  s_121129bb7f9e0b::t_d7e68be0cf7b7c 181-212
+install/npm/README.md
+  s_121129bb7f9e0b::t_743877ad418331 22-36
+README.md
+  s_121129bb7f9e0b::t_a016af1b41f248 142-148
+install/uninstall.sh
+  s_121129bb7f9e0b::t_957abfa401b327 362-364,367,376-381
+  s_121129bb7f9e0b::t_34f681dd209e91 397
+  s_121129bb7f9e0b::t_f61aab9584fcd4 176-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1e82d09e9563c82ff9ffd7f44a5d45cbf0e35ee3",
+  "prompts": {},
+  "sessions": {
+    "s_121129bb7f9e0b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9d5a8226-cfdc-48ee-a9e9-ab7297123317",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

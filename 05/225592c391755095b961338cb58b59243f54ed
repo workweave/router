@@ -1,0 +1,19 @@
+internal/proxy/marker_internal_test.go
+  s_9d0bcc14b37a3f::t_7d26620fb3b5ab 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "05225592c391755095b961338cb58b59243f54ed",
+  "prompts": {},
+  "sessions": {
+    "s_9d0bcc14b37a3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3163b21-663c-4687-b3ce-22590c69cb20",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

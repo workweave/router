@@ -1,0 +1,19 @@
+Dockerfile
+  s_41b77c3e6803bd::t_50add4b32c9fec 33-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "4f8f71c38f71dd61d2cf0b54c4d3d8c17da65250",
+  "prompts": {},
+  "sessions": {
+    "s_41b77c3e6803bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bc750055-8558-4c21-8d0c-130e9e6f2c86",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+cmd/router/main.go
+  s_d3fc1c517ba243::t_672bcac36153b1 97
+  s_d3fc1c517ba243::t_2e787ee84e7286 785
+  s_d3fc1c517ba243::t_4e4948db2e9777 799
+  s_d3fc1c517ba243::t_fa04f06684fbc6 835
+  s_d3fc1c517ba243::t_9fe882efe81981 862
+  s_d3fc1c517ba243::t_e4ff2821f6cf67 880
+  s_d3fc1c517ba243::t_05bf9fa0fd3405 886
+  s_d3fc1c517ba243::t_faa1bcec132aca 911
+  s_d3fc1c517ba243::t_5cd3e921e7b83f 919
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7d7bb3ef742e147f144b3e72aa5f8edcf3292a8f",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

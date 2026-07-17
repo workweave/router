@@ -1,0 +1,27 @@
+internal/proxy/turnloop.go
+  s_e314738a9195df::t_4418afb910016d 626
+internal/proxy/service.go
+  s_e314738a9195df::t_63141756b844fe 2746-2749,2757-2774
+  s_e314738a9195df::t_c491c38a95e70c 2722
+internal/proxy/bandswap_integration_test.go
+  s_e314738a9195df::t_6123be3cd5c4b4 7,9
+  s_e314738a9195df::t_d8ae4d115b3240 62-120
+  s_e314738a9195df::t_a0d80764219a5d 47
+  s_e314738a9195df::t_b1559412280663 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "e1157171da7c7049fc3fb041524f17d0326ce3df",
+  "prompts": {},
+  "sessions": {
+    "s_e314738a9195df": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "17bb5105-1a4b-4d8b-8633-f796bbc7df06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
