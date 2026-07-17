@@ -166,3 +166,22 @@ func TestProxyGeminiGenerateContent_PersistsNonAuthoritativeUsageForReconciliati
 	assert.Equal(t, "missing", row.UsageAuthorityStatus)
 	assert.JSONEq(t, `{"authority_status":"missing"}`, string(row.UsageDetails))
 }
+
+func TestProxyGeminiGenerateContent_PersistsToolResultBytes(t *testing.T) {
+	telemetry := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderGoogle, Model: "gemini-2.5-pro", Reason: "cluster"}},
+		map[string]providers.Client{providers.ProviderGoogle: &fakeProvider{}},
+		nil, false, nil, newFakePinStore(), false, providers.ProviderGoogle, "gemini-2.5-flash", telemetry,
+	)
+	ctx := context.WithValue(authedCtx("00000000-0000-0000-0000-000000000001"), proxy.ExternalIDContextKey{}, "org-1")
+	body := `{"model":"gemini-1.5-pro","stream":false,"contents":[{"role":"user","parts":[{"functionResponse":{"name":"Bash","response":{"out":"x"}}}]}]}`
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, svc.ProxyGeminiGenerateContent(ctx, []byte(body), rec,
+		httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-1.5-pro:generateContent", nil)))
+
+	row := telemetry.firstRow(t)
+	require.NotNil(t, row.ToolResultBytes)
+	assert.Equal(t, int32(38), *row.ToolResultBytes)
+}

@@ -60,6 +60,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		log.Error("Failed to parse Gemini request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+	inboundLastUser := env.LastUserMessage()
 	embedFlag := s.embedOnlyUserMessage
 	if v, ok := embedOnlyUserMessageOverride(ctx); ok {
 		embedFlag = v
@@ -330,6 +331,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 			FreshDecisionModel:     geminiObs.FreshDecisionModel,
 			FreshCandidateScores:   geminiObs.FreshCandidateScores,
 			PinAgeSec:              int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
+			ToolResultBytes:        toolResultBytesPtr(inboundLastUser, tt),
 			UsageAuthorityStatus:   string(usageSnapshot.Authority),
 			UsageDetails:           usageTelemetryDetails(usageSnapshot),
 			CredentialKeyPrefix:    credentialKeyPrefix,

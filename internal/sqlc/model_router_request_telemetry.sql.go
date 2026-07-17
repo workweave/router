@@ -24,6 +24,10 @@ SELECT
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+  -- A successful proxy response has status 0 (the success sentinel). Include
+  -- any future 1xx-3xx success representations, but never reconcile an
+  -- upstream 4xx/5xx failure as if it were an unbilled response.
+  AND upstream_status_code < 400
   AND timestamp >= $1::timestamptz
   AND timestamp < $2::timestamptz
 ORDER BY timestamp ASC
@@ -46,9 +50,9 @@ type GetPendingUsageTelemetryRow struct {
 	UsageDetails         []byte
 }
 
-// Returns telemetry rows whose provider did not report authoritative usage,
-// so control-plane reconciliation can find unbilled requests without reading
-// customer content.
+// Returns successful telemetry rows whose provider did not report authoritative
+// usage, so control-plane reconciliation can find unbilled requests without
+// reading customer content.
 //
 //	SELECT
 //	    installation_id,
@@ -61,6 +65,10 @@ type GetPendingUsageTelemetryRow struct {
 //	FROM router.model_router_request_telemetry
 //	WHERE span_type = 'router.upstream'
 //	  AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+//	  -- A successful proxy response has status 0 (the success sentinel). Include
+//	  -- any future 1xx-3xx success representations, but never reconcile an
+//	  -- upstream 4xx/5xx failure as if it were an unbilled response.
+//	  AND upstream_status_code < 400
 //	  AND timestamp >= $1::timestamptz
 //	  AND timestamp < $2::timestamptz
 //	ORDER BY timestamp ASC

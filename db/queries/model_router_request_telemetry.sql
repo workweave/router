@@ -163,9 +163,9 @@ INSERT INTO router.model_router_request_telemetry (
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 
--- Returns telemetry rows whose provider did not report authoritative usage,
--- so control-plane reconciliation can find unbilled requests without reading
--- customer content.
+-- Returns successful telemetry rows whose provider did not report authoritative
+-- usage, so control-plane reconciliation can find unbilled requests without
+-- reading customer content.
 -- name: GetPendingUsageTelemetry :many
 SELECT
     installation_id,
@@ -178,6 +178,10 @@ SELECT
 FROM router.model_router_request_telemetry
 WHERE span_type = 'router.upstream'
   AND usage_authority_status IN ('partial', 'missing', 'contradictory')
+  -- A successful proxy response has status 0 (the success sentinel). Include
+  -- any future 1xx-3xx success representations, but never reconcile an
+  -- upstream 4xx/5xx failure as if it were an unbilled response.
+  AND upstream_status_code < 400
   AND timestamp >= @from_time::timestamptz
   AND timestamp < @to_time::timestamptz
 ORDER BY timestamp ASC
