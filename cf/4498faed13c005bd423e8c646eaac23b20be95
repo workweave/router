@@ -1,0 +1,99 @@
+internal/api/anthropic/route.go
+  s_b433170fe0a2ef::t_da732ef07d0e3d 53-57
+  s_b433170fe0a2ef::t_cbf441b03b74ca 4,11
+  s_b433170fe0a2ef::t_b52c41e5672234 50
+internal/router/cluster/diff_v2_test.go
+  s_347607bdf72328::t_976abd538be831 1-49
+internal/server/server.go
+  s_b433170fe0a2ef::t_56cfa160a943dc 131
+  s_b433170fe0a2ef::t_6c4cc3d7853ee7 161
+  s_b433170fe0a2ef::t_f7ad781c0073b5 115
+internal/router/cluster/scorer.go
+  s_b433170fe0a2ef::t_514f6d06e7a80c 24-26,45-57,137,139-149,151-160,166-178
+  s_b433170fe0a2ef::t_0c4d59eee8e346 332-563,566,616
+internal/server/middleware/routing_knobs_override.go
+  s_b433170fe0a2ef::t_ef0448b1667af9 1-122
+internal/api/openai/completions.go
+  s_b433170fe0a2ef::t_3684dc8f48ba58 72-76
+internal/router/cluster/artifacts/v0.53/model_registry.json
+  s_b433170fe0a2ef::t_9c553037684223 1-31
+internal/router/cache/cache_test.go
+  s_b433170fe0a2ef::t_f05eccfd195289 137,139
+  s_347607bdf72328::t_1824cbcbc99cc5 206-233
+  s_b433170fe0a2ef::t_4faf499ff2a941 81,83
+  s_b433170fe0a2ef::t_743692e8e083c4 149,151,155
+  s_b433170fe0a2ef::t_56439327a2bdc2 58,60
+  s_b433170fe0a2ef::t_29e202fc1473d0 113-114,117-118
+  s_b433170fe0a2ef::t_66f641b4a418e5 96,98
+  s_b433170fe0a2ef::t_fae06e81f7e82b 127,129
+  s_b433170fe0a2ef::t_d97d5ddf77b3de 164,166,182,184,192,195,200,202-203
+internal/router/router.go
+  s_b433170fe0a2ef::t_86f19eff8fff54 6-13,24,43
+  s_b433170fe0a2ef::t_82360959d3c7c8 49-64
+internal/router/cluster/artifacts/README.md
+  s_347607bdf72328::t_c46d8121f7b561 1-57
+internal/router/cluster/knobs.go
+  s_b433170fe0a2ef::t_9415c9aa5d9f27 1-38
+internal/router/cluster/artifacts/legacy/README.md
+  s_347607bdf72328::t_cbe199d105257b 1-31
+internal/router/cache/cache.go
+  s_b433170fe0a2ef::t_82147fd127846e 86-87,111,116,138,145,160-167
+internal/router/cluster/artifacts_test.go
+  s_347607bdf72328::t_b17d698be45799 202-226
+  s_b433170fe0a2ef::t_19de6c374f2c58 175-179
+internal/router/cluster/artifacts.go
+  s_b433170fe0a2ef::t_973c7bdc2cc6b6 109-120,137-150,152-167,173-181,195-208,218-225,244-245
+  s_b433170fe0a2ef::t_e98ebcd5ca4b5d 491-537
+  s_347607bdf72328::t_13d225000ad685 10
+  s_b433170fe0a2ef::t_a5b887cd367b1a 255,286,295,304-311,313-318,320-353,355-373
+  s_347607bdf72328::t_241d1ad76e2fa8 252-253,256-278,287,298,312,319,354,374-385,389-392,397-404,406,419,423-426
+internal/router/cluster/testdata/diff_v2_prompts.jsonl
+  s_347607bdf72328::t_b9a28427ff815c 1-1000
+internal/api/anthropic/messages.go
+  s_b433170fe0a2ef::t_b5515434279197 106-110
+internal/router/cluster/diff_v2_integration_test.go
+  s_347607bdf72328::t_4092b2d90f2877 184,192-194
+  s_347607bdf72328::t_206d91ca90db21 119
+  s_347607bdf72328::t_53a5fd8a66a2ac 92
+  s_347607bdf72328::t_d25e08928eb4a2 1-91,93-118,120-183,185-191,195-216
+internal/proxy/gemini.go
+  s_b433170fe0a2ef::t_daa049464896c7 71
+internal/router/cluster/scorer_test.go
+  s_b433170fe0a2ef::t_aea9a7f882bdd5 781,783
+  s_347607bdf72328::t_fa4cd04ec976cb 831-1196
+  s_b433170fe0a2ef::t_b64ffce5547027 782
+  s_b433170fe0a2ef::t_c7b5abfebd8a57 698-780,784-830
+internal/api/gemini/generate_content.go
+  s_b433170fe0a2ef::t_def49739107715 102-106
+internal/proxy/service.go
+  s_b433170fe0a2ef::t_3f9d7358bdc927 1412
+  s_b433170fe0a2ef::t_fc12a9e2743acc 1428
+  s_b433170fe0a2ef::t_0f3da7bbe2d3d1 826
+  s_b433170fe0a2ef::t_dc4b87e98958b4 671
+  s_b433170fe0a2ef::t_e0e2719afcbc5c 653
+  s_b433170fe0a2ef::t_c6998d3c08a7e9 1571
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "cf4498faed13c005bd423e8c646eaac23b20be95",
+  "prompts": {},
+  "sessions": {
+    "s_347607bdf72328": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8f826b8-9709-482b-b225-c63c96ae69ac",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_b433170fe0a2ef": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48110dc8-74b5-4f29-abeb-d391dc95be35",
+        "model": "gemini-3.5-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+internal/translate/responses.go
+  s_836acf51854e15::t_511c0f852d7ea3 339-346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "7c7dbacc54cf7fd8a1c3598365a70e45bf7c0464",
+  "prompts": {},
+  "sessions": {
+    "s_836acf51854e15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03f1fbfe-8854-4dc9-8cb2-8a126f7d6750",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

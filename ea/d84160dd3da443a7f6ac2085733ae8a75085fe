@@ -1,0 +1,23 @@
+internal/proxy/phase_routing.go
+  s_5e3a104baf6120::t_cb692aed241f0f 91-100,106-112,114
+  s_5e3a104baf6120::t_4b487dc323bfcf 72
+internal/proxy/phase_routing_internal_test.go
+  s_5e3a104baf6120::t_feea3e223a1328 77-104
+  s_5e3a104baf6120::t_12a09322fa26b7 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ead84160dd3da443a7f6ac2085733ae8a75085fe",
+  "prompts": {},
+  "sessions": {
+    "s_5e3a104baf6120": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57fa3570-ad2e-4b37-8bf3-d544d400cca7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

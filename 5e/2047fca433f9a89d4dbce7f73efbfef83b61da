@@ -1,0 +1,21 @@
+internal/sqlc/models.go
+  s_10ba238d5cdbea::t_240e228ef6c630 139
+internal/sqlc/billing.sql.go
+  s_10ba238d5cdbea::t_240e228ef6c630 10-12,211-223,242,248,250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "5e2047fca433f9a89d4dbce7f73efbfef83b61da",
+  "prompts": {},
+  "sessions": {
+    "s_10ba238d5cdbea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f82b0354-d303-4f97-933a-151bc47b8f34",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

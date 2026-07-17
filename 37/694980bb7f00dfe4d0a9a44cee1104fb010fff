@@ -1,0 +1,36 @@
+internal/observability/otel/pricing_test.go
+  s_dc1721788803f6::t_0d0665c9058281 28-30
+install/cc-statusline.sh
+  s_dc1721788803f6::t_6283f472838144 173-175,238-240
+internal/proxy/force_model.go
+  s_dc1721788803f6::t_45a5cf78089016 30-52,54-61
+  s_dc1721788803f6::t_cd35f1952d4638 53
+internal/router/catalog/catalog_test.go
+  s_dc1721788803f6::t_3fd62d675d624a 262-264
+internal/router/catalog/catalog.go
+  s_dc1721788803f6::t_c605252790e07d 274-284
+install/install.sh
+  s_dc1721788803f6::t_6283f472838144 2118-2120,2183-2185
+  s_dc1721788803f6::t_bbd7c2c15b74c8 780
+  s_dc1721788803f6::t_a90a4d6e972d91 608
+internal/translate/envelope.go
+  s_dc1721788803f6::t_199879a3ba7a10 1057
+internal/router/model.go
+  s_dc1721788803f6::t_1fa0a9bffef6a7 105-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "37694980bb7f00dfe4d0a9a44cee1104fb010fff",
+  "prompts": {},
+  "sessions": {
+    "s_dc1721788803f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "509768f5-6d84-4526-8d9a-1128fa1aeda7",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

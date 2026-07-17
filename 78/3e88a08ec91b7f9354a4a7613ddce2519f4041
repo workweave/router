@@ -1,0 +1,68 @@
+internal/feedback/token_test.go
+  s_74c1d8358797be::t_459bbf0521a6ba 46
+  s_74c1d8358797be::t_f718dcac2bc14a 1-45,47-69
+db/queries/model_router_request_telemetry.sql
+  s_74c1d8358797be::t_4b72790e4fc243 127-145
+db/migrations/0024_request-feedback.down.sql
+  s_74c1d8358797be::t_49a3145e91a1c9 1-5
+db/queries/request_feedback.sql
+  s_74c1d8358797be::t_6b55699c70b461 1-40
+internal/server/server.go
+  s_74c1d8358797be::t_7b5e9fcbf8be8d 13
+  s_74c1d8358797be::t_4571a9130d98b7 33-35
+  s_74c1d8358797be::t_aff7e6ff62e487 185-194
+internal/api/feedback/feedback.go
+  s_74c1d8358797be::t_9493098fe68ef9 1-159
+internal/postgres/feedback.go
+  s_74c1d8358797be::t_a8a73555155ad6 1-96
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_74c1d8358797be::t_6d5edf7035aa42 15-73
+internal/proxy/gemini.go
+  s_74c1d8358797be::t_b1e443cc7a21aa 107-109
+internal/api/feedback/feedback_test.go
+  s_74c1d8358797be::t_1826f82e949c1d 1-168
+internal/postgres/repository.go
+  s_74c1d8358797be::t_1e23132082a36b 20
+  s_74c1d8358797be::t_a9a172666b65fa 31
+internal/sqlc/models.go
+  s_74c1d8358797be::t_6d5edf7035aa42 241-254
+.env.example
+  s_74c1d8358797be::t_cecc450a118f20 166-177
+internal/feedback/token.go
+  s_74c1d8358797be::t_cba9b543a968c5 1-130
+internal/sqlc/request_feedback.sql.go
+  s_74c1d8358797be::t_af93b9ecd2f967 1-129
+cmd/router/main.go
+  s_74c1d8358797be::t_703025129106af 1030-1038
+  s_74c1d8358797be::t_2f8179f477d80c 24
+  s_74c1d8358797be::t_8b8d49846d742b 568-581,584
+db/migrations/0024_request-feedback.up.sql
+  s_74c1d8358797be::t_49a3145e91a1c9 1-39
+internal/proxy/service.go
+  s_74c1d8358797be::t_620817dce59dde 2582
+  s_74c1d8358797be::t_452402c1865c2f 1367
+  s_74c1d8358797be::t_cd31b3a24d3540 156-166
+  s_74c1d8358797be::t_35c598b49e73d5 16
+internal/proxy/feedback.go
+  s_74c1d8358797be::t_b6bf82c9858f2c 157,161,164
+  s_74c1d8358797be::t_59d44802789a81 12-13
+  s_74c1d8358797be::t_afc4daae2b1f64 83-86,88-89
+  s_74c1d8358797be::t_bcc2442c5d7d8f 87
+  s_74c1d8358797be::t_b6bee92e761eff 1-11,14-82,90-156,158-160,162-163,165-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "783e88a08ec91b7f9354a4a7613ddce2519f4041",
+  "prompts": {},
+  "sessions": {
+    "s_74c1d8358797be": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3922321c-192c-48af-aa2f-c6638fdf350c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

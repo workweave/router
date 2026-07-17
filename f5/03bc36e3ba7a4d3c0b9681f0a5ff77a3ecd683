@@ -1,0 +1,64 @@
+AGENTS.md
+  s_b7895e8aa1ad68::t_6e40c3289c49ee 175
+internal/proxy/CLAUDE.md
+  s_b7895e8aa1ad68::t_d5ba07b038fb7a 50-52
+internal/proxy/AGENTS.md
+  s_b7895e8aa1ad68::t_1534754bfed3b1 50-52
+internal/server/server.go
+  s_b7895e8aa1ad68::t_a00d06626bf7ed 107-111
+  s_b7895e8aa1ad68::t_ff947774010f01 18
+  s_9a5f9f3204ddf4::t_e034bd5a83a386 112
+go.mod
+  s_b7895e8aa1ad68::t_763174506ff210 46,84,88-91,106
+  s_b7895e8aa1ad68::t_e05e463acfeaff 17,31
+  s_b7895e8aa1ad68::t_43b6cc8ab1c532 19
+internal/proxy/fallback_test.go
+  s_b7895e8aa1ad68::t_965b7d91bb1421 647-652
+internal/proxy/breaker.go
+  s_9a5f9f3204ddf4::t_00ee409339a622 1-94
+internal/proxy/service.go
+  s_9a5f9f3204ddf4::t_716afd1b25b41d 185-189
+  s_9a5f9f3204ddf4::t_699f6f7c1764e9 858
+internal/proxy/breaker_internal_test.go
+  s_9a5f9f3204ddf4::t_06cc04205a5597 1-71
+internal/server/server_test.go
+  s_b7895e8aa1ad68::t_eb2fb24cec0b27 48
+internal/proxy/fallback.go
+  s_b7895e8aa1ad68::t_05a50aedee5211 7
+  s_b7895e8aa1ad68::t_8560663c3d4c15 397-398,400-402
+  s_b7895e8aa1ad68::t_cb98ed33476608 248-260
+  s_b7895e8aa1ad68::t_31c80fbe86f3dc 288,304
+internal/observability/apm/apm.go
+  s_b7895e8aa1ad68::t_bc153f0062d705 51-54
+  s_b7895e8aa1ad68::t_dd887d26bfce52 87-103,112-136,139-140,143-148,152,156,160-161,169-179
+  s_b7895e8aa1ad68::t_bc59db22e6888d 19,24,31
+  s_9a5f9f3204ddf4::t_65f37e9d05b964 180-181
+CLAUDE.md
+  s_b7895e8aa1ad68::t_6074b1232c635d 175
+go.sum
+  s_9a5f9f3204ddf4::t_3afb4c0a9c825d 27-28,174-175,188-189,209-210,220-221,223-230,239-240,300-301,316-317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f503bc36e3ba7a4d3c0b9681f0a5ff77a3ecd683",
+  "prompts": {},
+  "sessions": {
+    "s_9a5f9f3204ddf4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a9e3ebf8-54e2-47ef-bde5-db0ec91b92c4",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_b7895e8aa1ad68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "141bc5ea-e430-4c8f-ad63-c1d6f78bf2c7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
