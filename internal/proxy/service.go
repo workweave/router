@@ -4541,20 +4541,119 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		return fmt.Errorf("%w: %s (no translation path defined)", ErrProviderNotConfigured, decision.Provider)
 	}
 
+	// openaiAnthropicAttempt builds the OpenAI-wire → Anthropic upstream closure
+	// used by baseline failover (and subscription-credit retry). Mirrors the
+	// FamilyAnthropic primary attempt, rebuilt per retry with a fresh prep.
+	openaiAnthropicAttempt := func(prep providers.PreparedRequest, markerText string) dispatchAttempt {
+		return func(actx context.Context, d router.Decision, p providers.Client) error {
+			var usageSink otel.UsageSink
+			if s.usageRequired() {
+				extractor = otel.NewUsageExtractor(nil, providers.ProviderAnthropic)
+				usageSink = extractor
+			}
+			attemptSink := sink
+			if !isResponses && !verbatimPassthrough {
+				mw := translate.NewOpenAIRoutingMarkerWriter(sink, d.Model, markerText)
+				if err := mw.Prelude(env.Stream()); err != nil {
+					log.Error("OpenAI routing-marker prelude failed", "err", err)
+				}
+				attemptSink = mw
+			}
+			translator := translate.NewSSETranslator(attemptSink, d.Model, usageSink)
+			if preludeBuf != nil {
+				preludeBuf.Seal()
+			}
+			err := p.Proxy(actx, d, prep, translator, r)
+			if err != nil && env.Stream() && preludeBuf.Committed() {
+				err = emitOpenAISSEErrorEvent(sink, err)
+			}
+			return finalizeAfterProxy(err, translator.Finalize)
+		}
+	}
+
+	// In-turn baseline failover eligibility — same predicates as ProxyMessages.
+	baselineModel := s.baselineFor(feats.Model)
+	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
+	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
+	baselineEligible := decision.Reason != translate.ReasonUserForceModel &&
+		s.shouldFailover(ctx) &&
+		!anthropicExcluded &&
+		decision.Provider != providers.ProviderAnthropic &&
+		baselineModel != decision.Model &&
+		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
+
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
 		// contentSink is the raw w when capture is off.
-		w:               contentSink,
-		buf:             preludeBuf,
-		initialDecision: decision,
-		bindings:        bindings,
-		attempt:         attempt,
-		flushErr:        flushBufferedIfPresent,
+		w:                      contentSink,
+		buf:                    preludeBuf,
+		initialDecision:        decision,
+		bindings:               bindings,
+		attempt:                attempt,
+		flushErr:               flushBufferedIfPresent,
+		deferFlushOnExhaustion: baselineEligible,
 	})
+
+	baselineFailoverUsed := false
+	baselineAttempted := false
+	if baselineEligible && proxyErr != nil && !preludeBuf.Committed() &&
+		(providers.IsRetryable(proxyErr) || providers.IsUpstreamModelNotFound(proxyErr)) {
+		baselineDecision := decision
+		baselineDecision.Model = baselineModel
+		baselineDecision.Provider = providers.ProviderAnthropic
+		baselineOpts := opts
+		baselineOpts.TargetModel = baselineModel
+		baselineOpts.TargetProvider = providers.ProviderAnthropic
+		baselineOpts.Capabilities = router.Lookup(baselineModel)
+		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
+		if s.effortEscalation {
+			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
+		}
+		baselinePrep, baselineEmitErr := env.PrepareAnthropic(r.Header, baselineOpts)
+		if baselineEmitErr != nil {
+			log.Error("Baseline failover: emit Anthropic body failed; surfacing original error", "err", baselineEmitErr, "baseline_model", baselineModel)
+			flushBufferedIfPresent(contentSink, proxyErr)
+		} else {
+			log.Warn("Baseline failover: routed model exhausted, retrying requested model on Anthropic",
+				"failed_model", decision.Model,
+				"failed_provider", primaryProvider,
+				"baseline_model", baselineModel,
+				"err", proxyErr)
+			baselineCtx := ctx
+			if s.claudeSubscriptionExhausted(ctx, r.Header) {
+				baselineCtx = withSuppressedClaudeSubscription(baselineCtx)
+			}
+			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)
+			baselineBindings := s.resolveBindingsForDispatch(baselineCtx, baselineDecision)
+			baselineMarker := suppressMarkerIfRequested(r.Header, baselineRoutingMarkerFor(routeRes, baselineModel))
+			if billing.SubscriptionOnlyFromContext(ctx) {
+				baselineMarker = subscriptionOnlyWarningMarkerCodex
+			}
+			crossFormat = true
+			logUpstreamBody(log, routeRes.SessionKey, baselineDecision, feats, baselinePrep.Body)
+			winnerIdx, proxyErr = s.dispatchWithFallback(baselineCtx, failoverInputs{
+				w:               contentSink,
+				buf:             preludeBuf,
+				initialDecision: baselineDecision,
+				bindings:        baselineBindings,
+				attempt:         openaiAnthropicAttempt(baselinePrep, baselineMarker),
+				flushErr:        flushBufferedIfPresent,
+			})
+			decision = baselineDecision
+			bindings = baselineBindings
+			baselineAttempted = true
+			baselineFailoverUsed = proxyErr == nil
+		}
+	} else if baselineEligible && proxyErr != nil {
+		flushBufferedIfPresent(contentSink, proxyErr)
+	}
+
 	finalProvider := primaryProvider
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
+	} else if baselineAttempted {
+		finalProvider = providers.ProviderAnthropic
 	}
 	decision.Provider = finalProvider
 
@@ -4612,7 +4711,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("dispatch.primary_provider", primaryProvider).
 		String("dispatch.final_provider", finalProvider).
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
-		Bool("dispatch.failover_used", finalProvider != primaryProvider)
+		Bool("dispatch.failover_used", finalProvider != primaryProvider).
+		Bool("dispatch.baseline_failover", baselineFailoverUsed)
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	applyRoutingStateAttrs(openaiUpstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
@@ -4729,7 +4829,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
+	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "baseline_failover", baselineFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 
 	// Subscription-only mode disables paid failover by pinning dispatch to the
