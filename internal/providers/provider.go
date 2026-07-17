@@ -103,10 +103,8 @@ type UsageSource struct {
 	Endpoint UsageEndpoint
 }
 
-// UsageSourceForProvider returns the default response wire source for a
-// provider. OpenAI-compatible providers may serve either Chat Completions or
-// Responses, so their endpoint remains unknown while their family selects the
-// shared OpenAI parser.
+// UsageSourceForProvider returns the default wire source for a provider.
+// OpenAI-compatible providers may serve Chat Completions or Responses.
 func UsageSourceForProvider(provider string) UsageSource {
 	switch FamilyFor(provider) {
 	case FamilyAnthropic:

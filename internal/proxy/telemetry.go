@@ -21,10 +21,8 @@ type TelemetryRepository interface {
 	GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error)
 }
 
-// UsageReconciliationRepository exposes unbilled request usage for a
-// control-plane reconciliation job. It is deliberately separate from the
-// request-path TelemetryRepository contract so existing telemetry sinks do not
-// need database read capabilities.
+// UsageReconciliationRepository exposes unbilled request usage for control-plane reconciliation.
+// Deliberately separate from TelemetryRepository so telemetry sinks don't need read capabilities.
 type UsageReconciliationRepository interface {
 	GetPendingUsageTelemetry(ctx context.Context, from, to time.Time, limit int32) ([]PendingUsageTelemetry, error)
 }

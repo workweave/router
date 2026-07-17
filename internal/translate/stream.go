@@ -123,10 +123,10 @@ func (t *SSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usage")
 		if usage.Exists() {
-			t.usageSink.RecordUsage(
-				int(usage.Get("input_tokens").Int()),
-				int(usage.Get("output_tokens").Int()),
-			)
+			t.usageSink.RecordUsageValues(UsageValues{
+				InputTokens:  usageResultInt(usage.Get("input_tokens")),
+				OutputTokens: usageResultInt(usage.Get("output_tokens")),
+			})
 			t.usageSink.RecordCacheUsage(
 				int(usage.Get("cache_creation_input_tokens").Int()),
 				int(usage.Get("cache_read_input_tokens").Int()),
@@ -809,10 +809,10 @@ func (t *AnthropicSSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usage")
 		if usage.Exists() {
-			t.usageSink.RecordUsage(
-				int(usage.Get("prompt_tokens").Int()),
-				int(usage.Get("completion_tokens").Int()),
-			)
+			t.usageSink.RecordUsageValues(UsageValues{
+				InputTokens:  usageResultInt(usage.Get("prompt_tokens")),
+				OutputTokens: usageResultInt(usage.Get("completion_tokens")),
+			})
 			t.usageSink.RecordCacheUsage(
 				int(usage.Get("prompt_tokens_details.cache_creation_tokens").Int()),
 				int(usage.Get("prompt_tokens_details.cached_tokens").Int()),
@@ -949,7 +949,10 @@ func (t *AnthropicSSETranslator) extractAndForwardUsage(data []byte) {
 	t.usageCacheReadTokens = int(cachedRead)
 	t.hasUsage = true
 	if t.usageSink != nil {
-		t.usageSink.RecordUsage(int(prompt), int(completion))
+		t.usageSink.RecordUsageValues(UsageValues{
+			InputTokens:  usageResultInt(usage.Get("prompt_tokens")),
+			OutputTokens: usageResultInt(usage.Get("completion_tokens")),
+		})
 		t.usageSink.RecordCacheUsage(int(cacheCreation), int(cachedRead))
 	}
 }
@@ -1604,6 +1607,14 @@ func openAIFinishToAnthropic(reason string) string {
 	default:
 		return "end_turn"
 	}
+}
+
+func usageResultInt(result gjson.Result) *int {
+	if !result.Exists() {
+		return nil
+	}
+	value := int(result.Int())
+	return &value
 }
 
 var _ http.ResponseWriter = (*AnthropicSSETranslator)(nil)

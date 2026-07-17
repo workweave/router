@@ -203,7 +203,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		}
 		proxySink := attemptSink
 		if s.usageRequired() {
-			extractor = otel.NewUsageExtractor(attemptSink, d.Provider)
+			extractor = otel.NewUsageExtractor(attemptSink, providers.UsageSourceForProvider(d.Provider))
 			proxySink = extractor
 		}
 		preludeBuf.Seal()
@@ -259,6 +259,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	applyPlannerAttrs(geminiUpstreamBuilder, routeRes)
 	applyRoutingStateAttrs(geminiUpstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, geminiUpstreamBuilder)
+	geminiObs := buildObservationContext(ctx, decision, routeRes.Fresh, s.captureMode)
+	geminiObs.applySpanAttrs(geminiUpstreamBuilder)
 	otel.Record(ctx, otel.Span{
 		Name:  "router.upstream",
 		Start: proxyStart,
@@ -272,6 +274,69 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	// Persist last-turn usage to the pin row so the next turn's planner
 	// has cache-hit evidence. Off the request path; drops on saturation.
 	s.recordTurnUsage(routeRes, decision.Provider, decision.Model, in, out, cacheCreation, cacheRead)
+	if installationID != uuid.Nil {
+		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
+		s.fireTelemetry(InsertTelemetryParams{
+			InstallationID:         installationID.String(),
+			APIKeyID:               apiKeyID,
+			RequestID:              requestID,
+			SpanType:               "router.upstream",
+			TraceID:                requestID,
+			Timestamp:              requestStart,
+			RequestedModel:         feats.Model,
+			DecisionModel:          decision.Model,
+			DecisionProvider:       decision.Provider,
+			DecisionReason:         decision.Reason,
+			EstimatedInputTokens:   int32(feats.Tokens),
+			StickyHit:              stickyHit,
+			EmbedInput:             embedInput,
+			InputTokens:            int32(in),
+			OutputTokens:           int32(out),
+			RequestedInputCostUSD:  catalog.EffectiveInputCost(in, cacheCreation, cacheRead, reqPricing.InputUSDPer1M, reqPricing, decision.Provider),
+			RequestedOutputCostUSD: catalog.EffectiveOutputCost(out, reqPricing.OutputUSDPer1M),
+			ActualInputCostUSD:     catalog.EffectiveInputCost(in, cacheCreation, cacheRead, actPricing.InputUSDPer1M, actPricing, decision.Provider),
+			ActualOutputCostUSD:    catalog.EffectiveOutputCost(out, actPricing.OutputUSDPer1M),
+			RouteLatencyMs:         routeMs,
+			UpstreamLatencyMs:      proxyMs,
+			TotalLatencyMs:         time.Since(requestStart).Milliseconds(),
+			CrossFormat:            false,
+			UpstreamStatusCode:     int32(upstreamStatus(proxyErr)),
+			ClusterIDs:             geminiObs.ClusterIDs,
+			CandidateModels:        geminiObs.CandidateModels,
+			ChosenScore:            geminiObs.ChosenScore,
+			CandidateScores:        geminiObs.CandidateScores,
+			Propensity:             geminiObs.Propensity,
+			ClusterRouterVersion:   geminiObs.ClusterRouterVersion,
+			Strategy:               geminiObs.Strategy,
+			RouteID:                geminiObs.RouteID,
+			PolicyRouteKey:         geminiObs.PolicyRouteKey,
+			PolicyArtifactID:       geminiObs.PolicyArtifactID,
+			PolicyArtifactSHA256:   geminiObs.PolicyArtifactSHA256,
+			RosterVersion:          geminiObs.RosterVersion,
+			SidecarSchemaVersion:   geminiObs.SidecarSchemaVersion,
+			TrainingAllowed:        geminiObs.TrainingAllowed,
+			CaptureMode:            geminiObs.CaptureMode,
+			DebugRef:               geminiObs.DebugRef,
+			TTFTMs:                 geminiObs.TTFTMs,
+			CacheCreationTokens:    cacheTokenPtr(cacheCreation),
+			CacheReadTokens:        cacheTokenPtr(cacheRead),
+			DeviceID:               clientID.DeviceID,
+			SessionID:              clientID.SessionID,
+			ClientApp:              clientID.ClientApp,
+			TurnType:               string(routeRes.TurnType),
+			RolloutID:              geminiObs.RolloutID,
+			SessionKey:             sessionKey[:],
+			Role:                   routeRes.PinRole,
+			FreshDecisionModel:     geminiObs.FreshDecisionModel,
+			FreshCandidateScores:   geminiObs.FreshCandidateScores,
+			PinAgeSec:              int64PtrIf(stickyHit && pinAgeSec > 0, pinAgeSec),
+			UsageAuthorityStatus:   string(usageSnapshot.Authority),
+			UsageDetails:           usageTelemetryDetails(usageSnapshot),
+			CredentialKeyPrefix:    credentialKeyPrefix,
+			CredentialKeySuffix:    credentialKeySuffix,
+			CredentialSource:       credSource,
+		})
+	}
 
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead, usageSnapshot.Authority)

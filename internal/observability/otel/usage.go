@@ -13,10 +13,7 @@ import (
 
 // UsageSink receives extracted token usage. Translators call it directly when
 // they've already parsed usage from an event, skipping a separate parse pass.
-type UsageSink interface {
-	RecordUsage(inputTokens, outputTokens int)
-	RecordCacheUsage(cacheCreationTokens, cacheReadTokens int)
-}
+type UsageSink = translate.UsageSink
 
 var (
 	_ http.ResponseWriter = (*UsageExtractor)(nil)
@@ -100,6 +97,15 @@ func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
 			InputTokens:  positiveUsageInt(inputTokens),
 			OutputTokens: positiveUsageInt(outputTokens),
 		},
+	})
+}
+
+// RecordUsageValues records a complete usage report while retaining explicit
+// zero counters as distinct from fields omitted by incremental translators.
+func (u *UsageExtractor) RecordUsageValues(values translate.UsageValues) {
+	u.usage.Observe(translate.UsageObservation{
+		Phase:  translate.UsagePhaseTerminal,
+		Values: values,
 	})
 }
 

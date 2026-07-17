@@ -8,5 +8,6 @@ package translate
 // changes needed since Go interfaces are structurally typed.
 type UsageSink interface {
 	RecordUsage(inputTokens, outputTokens int)
+	RecordUsageValues(values UsageValues)
 	RecordCacheUsage(cacheCreationTokens, cacheReadTokens int)
 }

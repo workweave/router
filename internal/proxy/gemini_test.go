@@ -1,6 +1,7 @@
 package proxy_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -146,4 +147,22 @@ func TestProxyGeminiGenerateContent_RetriesBuffered429WithoutMarkerLeak(t *testi
 	assert.Len(t, googleProv.proxyBodies, 3, "single-provider 429 retries are bounded")
 	assert.NotContains(t, rec.Body.String(), "Weave Router", "a retryable upstream failure must not commit the marker")
 	assert.Contains(t, rec.Body.String(), "retry later")
+}
+
+func TestProxyGeminiGenerateContent_PersistsNonAuthoritativeUsageForReconciliation(t *testing.T) {
+	telemetry := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderGoogle, Model: "gemini-2.5-pro", Reason: "cluster"}},
+		map[string]providers.Client{providers.ProviderGoogle: &fakeProvider{}},
+		nil, false, nil, newFakePinStore(), false, providers.ProviderGoogle, "gemini-2.5-flash", telemetry,
+	)
+	ctx := context.WithValue(authedCtx("00000000-0000-0000-0000-000000000001"), proxy.ExternalIDContextKey{}, "org-1")
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, svc.ProxyGeminiGenerateContent(ctx, []byte(geminiInjectedBody), rec,
+		httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-1.5-pro:generateContent", nil)))
+
+	row := telemetry.firstRow(t)
+	assert.Equal(t, "missing", row.UsageAuthorityStatus)
+	assert.JSONEq(t, `{"authority_status":"missing"}`, string(row.UsageDetails))
 }

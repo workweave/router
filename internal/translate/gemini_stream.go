@@ -146,10 +146,10 @@ func (t *GeminiToOpenAISSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usageMetadata")
 		if usage.Exists() {
-			t.usageSink.RecordUsage(
-				int(usage.Get("promptTokenCount").Int()),
-				int(usage.Get("candidatesTokenCount").Int()),
-			)
+			t.usageSink.RecordUsageValues(UsageValues{
+				InputTokens:  usageResultInt(usage.Get("promptTokenCount")),
+				OutputTokens: usageResultInt(usage.Get("candidatesTokenCount")),
+			})
 			if cached := int(usage.Get("cachedContentTokenCount").Int()); cached > 0 {
 				t.usageSink.RecordCacheUsage(0, cached)
 			}
@@ -378,7 +378,16 @@ func (t *GeminiToOpenAISSETranslator) recordUsageOnSink(usage map[string]int) {
 	if t.usageSink == nil {
 		return
 	}
-	t.usageSink.RecordUsage(usage["prompt_tokens"], usage["completion_tokens"])
+	inputTokens, hasInput := usage["prompt_tokens"]
+	outputTokens, hasOutput := usage["completion_tokens"]
+	values := UsageValues{}
+	if hasInput {
+		values.InputTokens = &inputTokens
+	}
+	if hasOutput {
+		values.OutputTokens = &outputTokens
+	}
+	t.usageSink.RecordUsageValues(values)
 	if cached := usage["cached_tokens"]; cached > 0 {
 		t.usageSink.RecordCacheUsage(0, cached)
 	}

@@ -43,6 +43,21 @@ func TestUsageExtractor_PreservesExplicitTerminalZero(t *testing.T) {
 	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
 }
 
+func TestUsageExtractor_RecordUsageValuesPreservesExplicitTerminalZero(t *testing.T) {
+	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderOpenRouter))
+	input, output := 9, 0
+
+	ext.RecordUsageValues(translate.UsageValues{
+		InputTokens:  &input,
+		OutputTokens: &output,
+	})
+
+	snapshot := ext.Usage()
+	require.NotNil(t, snapshot.OutputTokens)
+	assert.Zero(t, *snapshot.OutputTokens)
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
+}
+
 func TestUsageExtractor_LegacySinkObservationsDoNotTreatOmittedFieldsAsZeros(t *testing.T) {
 	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
 
