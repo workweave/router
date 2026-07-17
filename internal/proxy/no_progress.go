@@ -113,7 +113,14 @@ func (r *fingerprintRing) recordAndDetect(fp noProgressFingerprint, now time.Tim
 
 // noProgressTracker is the package-level tracker. Construct via
 // newNoProgressTracker; nil receivers are valid (no-op).
+//
+// mu serializes the check-then-create of a bucket's ring in recordAndDetect:
+// the LRU synchronizes individual Get/Add calls, but two goroutines racing on
+// the first insert can each allocate a ring and silently orphan one (with its
+// recorded fingerprint). ring.recordAndDetect runs outside mu — fingerprintRing
+// guards its own state — so contention on one bucket never blocks others.
 type noProgressTracker struct {
+	mu    sync.Mutex
 	cache *lru.LRU[string, *fingerprintRing]
 }
 
@@ -153,7 +160,12 @@ const compactionMinHistoryMessages = 8
 // to avoid false-firing on sub-agent startup and Explore's flat window.
 //
 // nil receivers are valid (no-op), matching noProgressTracker.
+//
+// mu makes checkAndRecord's Get+Add a single step: the LRU synchronizes each
+// call individually, but a concurrent Get between the read and the write can
+// observe stale prior state and false-trip the drop check.
 type compactionTracker struct {
+	mu    sync.Mutex
 	cache *lru.LRU[string, compactionState]
 }
 
@@ -174,8 +186,11 @@ func (t *compactionTracker) checkAndRecord(sessionKey [sessionpin.SessionKeyLen]
 	if !ok {
 		return false
 	}
+	t.mu.Lock()
 	last, found := t.cache.Get(key)
 	t.cache.Add(key, compactionState{msgCount: messageCount, toolCallCount: toolCallCount})
+	t.mu.Unlock()
+
 	if !found {
 		return false
 	}
@@ -211,11 +226,14 @@ func (t *noProgressTracker) recordAndDetect(sessionKey [sessionpin.SessionKeyLen
 	if !ok {
 		return false, 0
 	}
+	t.mu.Lock()
 	ring, ringOk := t.cache.Get(key)
 	if !ringOk || ring == nil {
 		ring = &fingerprintRing{}
 		t.cache.Add(key, ring)
 	}
+	t.mu.Unlock()
+
 	return ring.recordAndDetect(fp, now)
 }
 
