@@ -142,6 +142,29 @@ func TestPrepareOpenAIResponses_PreservesMediumReasoningEffort(t *testing.T) {
 	assert.Equal(t, "medium", out["reasoning"].(map[string]any)["effort"])
 }
 
+func TestAdaptiveReasoningDelegatesToCrossFormatTargetDefault(t *testing.T) {
+	env, err := translate.ParseAnthropic([]byte(`{"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"}}`))
+	require.NoError(t, err)
+
+	t.Run("OpenAI Responses", func(t *testing.T) {
+		prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{TargetModel: "gpt-5.5", Capabilities: router.Lookup("gpt-5.5")})
+		require.NoError(t, err)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(prep.Body, &out))
+		assert.NotContains(t, out, "reasoning")
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro-preview"})
+		require.NoError(t, err)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(prep.Body, &out))
+		if config, ok := out["generationConfig"].(map[string]any); ok {
+			assert.NotContains(t, config, "thinkingConfig")
+		}
+	})
+}
+
 func TestApplyReasoningIntent_ClampsAndRejectsUnsupportedSemantics(t *testing.T) {
 	spec := router.NewSpecWithReasoning(router.ReasoningCapabilities{Levels: []string{"low", "medium", "high"}})
 	clamped, err := translate.ApplyReasoningIntent(translate.ReasoningIntent{Kind: translate.ReasoningLevel, Level: "xhigh", Explicit: true}, spec, "")

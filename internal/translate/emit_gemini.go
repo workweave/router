@@ -1271,9 +1271,8 @@ var geminiSupportedFormats = map[string]struct{}{
 	"int64":     {},
 }
 
-// sanitizeSchemaForGemini preserves schema meaning or returns a typed error.
-// Gemini schema support is a routing constraint, not an excuse to broaden a
-// tool's accepted input language.
+// sanitizeSchemaForGemini preserves schema meaning or returns ErrGeminiSchemaIncompatible.
+// Gemini schema limits are a routing constraint, not license to widen a tool's input language.
 func sanitizeSchemaForGemini(v any) (any, error) {
 	inlined, err := inlineGeminiSchemaRefs(v)
 	if err != nil {

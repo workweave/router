@@ -604,37 +604,8 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	out := mustUnmarshal(t, prep.Body)
-	tools := out["tools"].([]any)
-	require.Len(t, tools, 1)
-	decls := tools[0].(map[string]any)["functionDeclarations"].([]any)
-	require.Len(t, decls, 1)
-	params := decls[0].(map[string]any)["parameters"].(map[string]any)
-
-	// Survivors: type, properties, required, description on leaf nodes.
-	assert.Equal(t, "object", params["type"])
-	assert.NotNil(t, params["properties"])
-	assert.Equal(t, []any{"url"}, params["required"])
-
-	// Casualties: keys Google rejects with "Cannot find field".
-	assert.NotContains(t, params, "$schema", "$schema must be stripped at every level")
-	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped at every level")
-
-	// Nested objects: stripping must apply at every level.
-	props := params["properties"].(map[string]any)
-	paramsField := props["params"].(map[string]any)
-	assert.NotContains(t, paramsField, "additionalProperties",
-		"additionalProperties on a nested schema must also be stripped")
-	assert.NotContains(t, paramsField, "propertyNames",
-		"propertyNames must be stripped — Google doesn't recognize it")
-	// Nested leaf description/type pass through.
-	url := props["url"].(map[string]any)
-	assert.Equal(t, "string", url["type"])
-	assert.Equal(t, "URL to fetch", url["description"])
 }
 
 func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
@@ -662,20 +633,8 @@ func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	out := mustUnmarshal(t, prep.Body)
-	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
-
-	// Tool 1: keep the real property, drop the dangling one.
-	p0 := decls[0].(map[string]any)["parameters"].(map[string]any)
-	assert.Equal(t, []any{"x"}, p0["required"], "dangling 'ghost' must be pruned, 'x' kept")
-
-	// Tool 2: nothing in required survives → drop the key entirely.
-	p1 := decls[1].(map[string]any)["parameters"].(map[string]any)
-	assert.NotContains(t, p1, "required", "an all-dangling required must be removed, not left empty")
 }
 
 func TestPrepareGemini_PreservesPropertyNamedRequired(t *testing.T) {
@@ -750,26 +709,8 @@ func TestPrepareGemini_StripsVendorExtensionAndDollarPrefixedKeys(t *testing.T) 
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-
-	assert.NotContains(t, params, "x-google-resource", "top-level x- extension must be stripped")
-	assert.NotContains(t, params, "$schema", "top-level $-prefixed key must be stripped")
-	assert.NotContains(t, params, "$id", "top-level $-prefixed key must be stripped")
-
-	props := params["properties"].(map[string]any)
-	rangeField := props["range"].(map[string]any)
-	assert.NotContains(t, rangeField, "x-google-enum-descriptions", "nested x- extension must be stripped")
-	assert.Equal(t, []any{"A1", "B2"}, rangeField["enum"], "real enum must survive")
-
-	nested := props["nested"].(map[string]any)
-	assert.NotContains(t, nested, "x-google-foo", "nested x- extension must be stripped at every level")
-	leaf := nested["properties"].(map[string]any)["leaf"].(map[string]any)
-	assert.NotContains(t, leaf, "x-vendor-thing", "leaf x- extension must be stripped")
-	assert.Equal(t, "string", leaf["type"], "real type must survive")
 }
 
 func TestSanitizeSchemaForGemini_PreservesSupportedFields(t *testing.T) {
@@ -830,21 +771,8 @@ func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	params := mustUnmarshal(t, prep.Body)["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-	props := params["properties"].(map[string]any)
-
-	homepage := props["homepage"].(map[string]any)
-	assert.NotContains(t, homepage, "format", "unsupported format \"uri\" must be dropped")
-	assert.Equal(t, "string", homepage["type"], "the rest of the property schema must survive")
-	assert.Equal(t, "site", homepage["description"], "sibling keys must survive format drop")
-	assert.NotContains(t, props["contact"].(map[string]any), "format", "unsupported format \"email\" must be dropped")
-
-	assert.Equal(t, "date-time", props["when"].(map[string]any)["format"], "supported string format must survive")
-	assert.Equal(t, "double", props["score"].(map[string]any)["format"], "supported numeric format must survive")
 }
 
 func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
@@ -875,26 +803,8 @@ func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	out := mustUnmarshal(t, prep.Body)
-	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-	props := params["properties"].(map[string]any)
-
-	args := props["args"].(map[string]any)
-	assert.Equal(t, "array", args["type"])
-	items, ok := args["items"].(map[string]any)
-	require.True(t, ok, "items:true must become empty Schema, not remain bool")
-	assert.NotNil(t, items)
-
-	// items:false is removed, then repaired as missing-items-on-array → default.
-	disabled := props["disabled"].(map[string]any)
-	assert.Equal(t, map[string]any{"type": "string"}, disabled["items"], "items:false removed then repaired with default")
-
-	links := props["links"].(map[string]any)
-	assert.Equal(t, map[string]any{"type": "string"}, links["items"], "real items Schema must survive")
 }
 
 func TestPrepareGemini_CollapsesArrayTypeField(t *testing.T) {
@@ -1036,20 +946,8 @@ func TestPrepareGemini_UserDefinedPropertyNamedProperties(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	out := mustUnmarshal(t, prep.Body)
-	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-	props := params["properties"].(map[string]any)
-
-	userProp, ok := props["properties"].(map[string]any)
-	require.True(t, ok, "user-defined 'properties' property must survive")
-	assert.Equal(t, "object", userProp["type"])
-	assert.Equal(t, "Additional properties", userProp["description"])
-	assert.NotContains(t, userProp, "additionalProperties",
-		"additionalProperties must be stripped even inside a property named 'properties'")
 }
 
 func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
@@ -1071,16 +969,8 @@ func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
 	}`)
 	env, err := translate.ParseGemini(body)
 	require.NoError(t, err)
-	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
 	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
-	return
-
-	out := mustUnmarshal(t, prep.Body)
-	assert.NotContains(t, out, "model")
-	assert.NotContains(t, out, "stream")
-	params := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-	assert.NotContains(t, params, "additionalProperties", "additionalProperties must be stripped in Gemini-format path")
-	assert.NotNil(t, params["properties"])
 }
 
 func TestPrepareGemini_GeminiFormatInlinesSchemaRefs(t *testing.T) {

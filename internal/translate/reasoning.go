@@ -123,9 +123,7 @@ func ApplyReasoningIntent(intent ReasoningIntent, spec router.ModelSpec, forcedL
 		}
 		return intent, nil
 	case ReasoningAuto:
-		if !caps.SupportsAuto {
-			return ReasoningIntent{}, fmt.Errorf("%w: target model does not support adaptive reasoning", ErrReasoningIncompatible)
-		}
+		// Omitting a target-specific setting preserves the target's default.
 		return intent, nil
 	case ReasoningBudget:
 		if !caps.SupportsBudget {
