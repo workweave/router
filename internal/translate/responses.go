@@ -60,10 +60,9 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	return result.Body, result.Stream, result.Model, nil
 }
 
-// ConvertResponsesToChatCompletions creates the routing-compatible Chat
-// projection of a Responses request. Any extension that cannot be faithfully
-// represented is marked native-only before conversion, so proxy can retain the
-// original bytes for OpenAI-family dispatch instead of silently dropping it.
+// ConvertResponsesToChatCompletions projects a Responses request into Chat
+// Completions for routing. Extensions that cannot be faithfully represented
+// are marked native-only so proxy can dispatch the original bytes losslessly.
 func ConvertResponsesToChatCompletions(body []byte) (ResponsesConversion, error) {
 	if err := validateJSONObject(body); err != nil {
 		return ResponsesConversion{}, err

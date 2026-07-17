@@ -110,13 +110,9 @@ func translationEndpointFor(env *translate.RequestEnvelope) router.TranslationEn
 	}
 }
 
-// planTranslation computes candidate restrictions without performing I/O. Its
-// matrix intentionally names only semantics that the existing translators can
-// prove they preserve. Function tools, image inputs, and stream usage retain
-// their portable paths; native-only unions, replay/signature state, provider
-// cache controls, search/citation payloads, structured-output contracts, and
-// non-image media require their source wire family until a translator explicitly
-// adds a lossless cross-family mapping.
+// planTranslation computes candidate restrictions without performing I/O.
+// Only semantics a translator can prove it preserves losslessly are listed
+// in the compatibility matrix; add entries there when a new lossless path lands.
 func (s *Service) planTranslation(req router.Request) TranslationPlan {
 	plan := TranslationPlan{}
 	if req.EnabledProviders != nil {

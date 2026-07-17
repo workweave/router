@@ -4318,7 +4318,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// Inject verbose routing marker when policy debug is enabled; gated on
 	// verbatimPassthrough (verbatim OpenAI frames can't have chunks injected).
-	verbatimPassthrough := responsesPassthrough && providers.IsOpenAICompat(decision.Provider)
+	verbatimPassthrough := responsesPassthrough && decision.Provider == providers.ProviderOpenAI
 	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
 	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !verbatimPassthrough && (debugEnabled || billing.SubscriptionOnlyFromContext(ctx)) {
 		rw.SetBadgeText(marker)
@@ -4330,7 +4330,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// (Codex client sees response.created via ResponsesWriter's lazy
 	// emitCreated on the first upstream byte instead).
 	if rw, ok := w.(*translate.ResponsesWriter); ok {
-		// A native OpenAI-family Responses route streams the original Responses
+		// A native OpenAI Responses route streams the original Responses
 		// bytes verbatim; cross-family routes stay in translation mode.
 		//
 		// Set once here (before Prelude), not per-attempt: response.created
@@ -4338,7 +4338,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// write. Safe because decision.Provider == OpenAI is always a
 		// single-binding GPT model with no cross-format fallback to retry
 		// into. If a GPT model ever gains a fallback, gate this per-attempt.
-		if responsesPassthrough && providers.IsOpenAICompat(decision.Provider) {
+		if verbatimPassthrough {
 			rw.SetPassthrough()
 		}
 		if len(bindings) <= 1 {
@@ -4355,7 +4355,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		sink = captureW
 	}
 
-	if responsesPassthrough {
+	if verbatimPassthrough {
 		// The client receives raw Responses SSE from the Codex backend; a
 		// chat-completions routing-marker chunk would corrupt that stream.
 		marker = ""
@@ -4373,7 +4373,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// Codex passthrough streams raw Responses SSE; wrapping it in a
 		// chat-completions marker writer would inject a foreign frame (and the
 		// output-progress scan reads choices[].delta, which Responses lacks).
-		if isResponses || responsesPassthrough {
+		if isResponses || verbatimPassthrough {
 			return sink
 		}
 		mw := translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
@@ -4399,9 +4399,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// should not see. On failover to OpenRouter the body must be re-emitted.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var prep providers.PreparedRequest
-			if responsesPassthrough && providers.IsOpenAICompat(d.Provider) {
+			if responsesPassthrough && d.Provider == providers.ProviderOpenAI {
 				// Dispatch the caller's ORIGINAL Responses body (untranslated) to
-				// an OpenAI-family endpoint, rewriting only the model. This keeps
+				// the OpenAI Responses endpoint, rewriting only the model. This keeps
 				// native Responses extensions lossless.
 				outBody, setErr := sjson.SetBytes(responsesBody, "model", d.Model)
 				if setErr != nil {
@@ -4443,7 +4443,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// still route to Claude/OSS through the translating ResponsesWriter,
 			// which needs its own error frame — only the verbatim Codex attempt
 			// already delivered the upstream's own Responses error event.
-			verbatimCodex := responsesPassthrough && providers.IsOpenAICompat(d.Provider)
+			verbatimCodex := responsesPassthrough && d.Provider == providers.ProviderOpenAI
 			if err != nil && !verbatimCodex && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}

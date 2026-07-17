@@ -30,9 +30,7 @@ func initTranslationMetrics() {
 	)
 }
 
-// RecordTranslationCompatibility increments one counter per compatibility
-// exclusion. requirement, source_format, target_family, mode, and enforced all
-// come from fixed enums controlled by the router.
+// RecordTranslationCompatibility increments one counter per compatibility exclusion.
 func RecordTranslationCompatibility(ctx context.Context, requirement, sourceFormat, targetFamily, mode string, enforced bool) {
 	translationMetricsOnce.Do(initTranslationMetrics)
 	if compatibilityCounter == nil {
