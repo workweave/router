@@ -383,17 +383,21 @@ func openAIUserPartsGJSON(content gjson.Result) []string {
 func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 	var parts []string
 
+	// A text-only Gemini 3.x turn carries its thoughtSignature at the OpenAI
+	// message level (writeOpenAIMessageFromGemini emits message.thought_signature
+	// when there are no tool_calls). Round-trip it onto the text part so the next
+	// turn doesn't 400 on the missing signature — mirroring the Anthropic text
+	// block in anthropicAssistantPartsGJSON.
+	msgSig := msg.Get("thought_signature").String()
+
 	content := msg.Get("content")
 	if text := openAIContentTextGJSON(content); text != "" {
-		parts = append(parts, geminiTextPart(text))
+		parts = append(parts, geminiTextPartWithSig(text, msgSig))
 	}
 
 	// Inherit any sig from sibling tool_calls or message-level thought_signature
 	// so every functionCall carries one on round-trip to Gemini 3.x.
-	var inheritedSig string
-	if sig := msg.Get("thought_signature").String(); sig != "" {
-		inheritedSig = sig
-	}
+	inheritedSig := msgSig
 	if inheritedSig == "" {
 		msg.Get("tool_calls").ForEach(func(_, tc gjson.Result) bool {
 			if sig := extractThoughtSignature(tc); sig != "" {
@@ -443,10 +447,21 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 }
 
 func geminiTextPart(text string) string {
+	return geminiTextPartWithSig(text, "")
+}
+
+// geminiTextPartWithSig is geminiTextPart plus an optional thoughtSignature,
+// used to round-trip the signature a text-only Gemini 3.x turn carries at the
+// OpenAI message level back onto the Gemini text part.
+func geminiTextPartWithSig(text, sig string) string {
 	jw := newJSONWriter()
 	jw.Obj()
 	jw.Key("text")
 	jw.Str(text)
+	if sig != "" {
+		jw.Key("thoughtSignature")
+		jw.Str(sig)
+	}
 	jw.EndObj()
 	return string(jw.Bytes())
 }

@@ -98,11 +98,13 @@ func (c *NativeClient) Proxy(ctx context.Context, decision router.Decision, prep
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
-	upstream.Header.Set("Content-Type", "application/json")
-	c.applyAPIKey(ctx, upstream)
+	// Copy caller-supplied headers first so the reserved Content-Type / auth /
+	// Accept sets below stay authoritative and can't be clobbered by prep.Headers.
 	for k, vs := range prep.Headers {
 		upstream.Header[http.CanonicalHeaderKey(k)] = vs
 	}
+	upstream.Header.Set("Content-Type", "application/json")
+	c.applyAPIKey(ctx, upstream)
 	if stream {
 		upstream.Header.Set("Accept", "text/event-stream")
 	}
@@ -177,13 +179,15 @@ func (c *NativeClient) Passthrough(ctx context.Context, prep providers.PreparedR
 	if err != nil {
 		return fmt.Errorf("build upstream passthrough request: %w", err)
 	}
+	// Copy caller-supplied headers first so the reserved Content-Type / auth /
+	// Accept sets below stay authoritative and can't be clobbered by prep.Headers.
+	for k, vs := range prep.Headers {
+		upstream.Header[http.CanonicalHeaderKey(k)] = vs
+	}
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
 	c.applyAPIKey(ctx, upstream)
-	for k, vs := range prep.Headers {
-		upstream.Header[http.CanonicalHeaderKey(k)] = vs
-	}
 	if v := r.Header.Get("Accept"); v != "" {
 		upstream.Header.Set("Accept", v)
 	}

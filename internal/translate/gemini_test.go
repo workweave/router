@@ -103,6 +103,32 @@ func TestPrepareGemini_AssistantToolCallsRoundTripsThoughtSignature(t *testing.T
 	assert.Equal(t, "f1\nf2", fr["response"].(map[string]any)["result"])
 }
 
+func TestPrepareGemini_FromOpenAI_TextOnlyTurnRoundTripsThoughtSignature(t *testing.T) {
+	// A text-only Gemini 3.x turn carries its signature at the OpenAI message
+	// level (message.thought_signature). It must land as thoughtSignature on
+	// the Gemini text part so the next turn doesn't 400 on the missing sig.
+	body := []byte(`{
+		"messages": [
+			{"role": "user", "content": "think about it"},
+			{"role": "assistant", "content": "let me reason first", "thought_signature": "TEXT_SIG"},
+			{"role": "user", "content": "now answer"}
+		]
+	}`)
+	env, _ := translate.ParseOpenAI(body)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	contents := out["contents"].([]any)
+	require.Len(t, contents, 3)
+
+	model := contents[1].(map[string]any)
+	assert.Equal(t, "model", model["role"])
+	p := model["parts"].([]any)[0].(map[string]any)
+	assert.Equal(t, "let me reason first", p["text"])
+	assert.Equal(t, "TEXT_SIG", p["thoughtSignature"])
+}
+
 func TestPrepareGemini_ToolsMappedToFunctionDeclarations(t *testing.T) {
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
