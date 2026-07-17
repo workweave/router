@@ -2,6 +2,7 @@ package translate_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/tidwall/gjson"
 
+	"workweave/router/internal/providers"
 	"workweave/router/internal/translate"
 	"workweave/router/internal/translate/toolcheck"
 
@@ -544,12 +546,14 @@ data: {"type":"response.failed","response":{"id":"r","status":"failed","output":
 	w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
-	require.NoError(t, err)
-	require.NoError(t, w.Finalize())
+	require.Error(t, err)
+	var upstreamErr *providers.UpstreamErrorResponse
+	require.True(t, errors.As(err, &upstreamErr))
+	assert.Equal(t, 502, upstreamErr.Status)
+	assert.Contains(t, string(upstreamErr.Body), "status: failed")
 
 	body := rec.Body.String()
-	assert.Contains(t, body, "event: error")
-	assert.Contains(t, body, "status: failed")
+	assert.NotContains(t, body, "event: error", "pre-output failure must return to dispatch before committing an error frame")
 	assert.NotContains(t, body, "event: message_stop")
 }
 
@@ -631,11 +635,19 @@ data: {"type":"response.incomplete","response":{"id":"r","status":"incomplete","
 			w := translate.NewResponsesToAnthropicWriter(rec, "gpt-5.5", nil)
 			require.NoError(t, w.Prelude(streaming))
 			_, err := w.Write([]byte(fixture))
-			require.NoError(t, err)
-			require.NoError(t, w.Finalize())
-			assert.Contains(t, rec.Body.String(), `"type":"api_error"`)
-			assert.Contains(t, rec.Body.String(), "content_filter")
-			assert.NotContains(t, rec.Body.String(), `"stop_reason":"max_tokens"`)
+			body := rec.Body.String()
+			if streaming {
+				var upstreamErr *providers.UpstreamErrorResponse
+				require.ErrorAs(t, err, &upstreamErr)
+				body = string(upstreamErr.Body)
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, w.Finalize())
+				body = rec.Body.String()
+			}
+			assert.Contains(t, body, `"type":"api_error"`)
+			assert.Contains(t, body, "content_filter")
+			assert.NotContains(t, body, `"stop_reason":"max_tokens"`)
 		})
 	}
 }

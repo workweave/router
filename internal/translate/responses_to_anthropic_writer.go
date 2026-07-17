@@ -792,6 +792,10 @@ func responsesTerminalIsFailure(resp gjson.Result) bool {
 // responsesError builds an Anthropic error envelope from a Responses-style
 // type/message pair via ResponsesToAnthropicError, keeping the wire shape single-sourced.
 func responsesError(errType, msg string) []byte {
+	return ResponsesToAnthropicError(responsesErrorBody(errType, msg))
+}
+
+func responsesErrorBody(errType, msg string) []byte {
 	if errType == "" {
 		errType = "api_error"
 	}
@@ -808,7 +812,7 @@ func responsesError(errType, msg string) []byte {
 	jw.Str(msg)
 	jw.EndObj()
 	jw.EndObj()
-	return ResponsesToAnthropicError(jw.Bytes())
+	return jw.Bytes()
 }
 
 // extractFinalResponseObject scans a buffered SSE stream for the last terminal
@@ -1017,12 +1021,19 @@ func (t *ResponsesToAnthropicWriter) emitMessageStop() error {
 	return t.flushEvent()
 }
 
-// emitStreamErrorEvent writes an `event: error` frame for a stream-level
-// failure and marks the stream closed so finishStream skips the success trailer.
+// emitStreamErrorEvent returns pre-output failures to dispatch for fallback;
+// after output starts it emits an error frame because the stream is committed.
 func (t *ResponsesToAnthropicWriter) emitStreamErrorEvent(errType, msg string) error {
 	if t.lifecycle.State() == StreamStarted {
 		if err := t.lifecycle.Fail(); err != nil {
 			return err
+		}
+	}
+	if !t.lifecycle.OutputStarted() {
+		t.closed = true
+		return &providers.UpstreamErrorResponse{
+			Status: http.StatusBadGateway,
+			Body:   responsesErrorBody(errType, msg),
 		}
 	}
 	t.bw.WriteString("event: error\ndata: ")
