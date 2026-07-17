@@ -128,7 +128,24 @@ func TestRoutingDistribution_DefaultGridAndV1Guard(t *testing.T) {
 func TestRoutingDistribution_NoDeadZone(t *testing.T) {
 	// Regression guard: a run of identical mixes across adjacent dial steps is
 	// what made "50% look like 20%" — the calibration must keep steps live.
-	s := loadV0_67(t)
+	// v0.67 ships no alpha_floor (backward-compat path); floored bundles are
+	// covered by TestRoutingDistribution_NoDeadZone_FlooredBundle.
+	assertNoDeadZone(t, loadV0_67(t))
+}
+
+func TestRoutingDistribution_NoDeadZone_FlooredBundle(t *testing.T) {
+	// #779: calibration must apply AlphaFloor, or floored bundles (latest)
+	// reintroduce a half-dial dead zone that CI on v0.67 cannot see.
+	// Floored bundles still have sparse adjacent ties (same mix at two
+	// neighboring grid steps); what matters is no long consecutive run.
+	points, err := loadV0_73(t).RoutingDistribution(21, nil, nil)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, maxIdenticalMixRun(points), 2,
+		"floored bundle: consecutive identical-mix run too long — dial dead zone")
+}
+
+func assertNoDeadZone(t *testing.T, s *Scorer) {
+	t.Helper()
 	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
 
@@ -144,10 +161,39 @@ func TestRoutingDistribution_NoDeadZone(t *testing.T) {
 		"too many adjacent dial positions route an identical mix (%d) — dial has a dead zone", identicalRuns)
 }
 
+// maxIdenticalMixRun returns the longest streak of identical adjacent mixes
+// (number of consecutive equal pairs). A real dead zone is a long streak;
+// sparse one-off ties across the dial are not.
+func maxIdenticalMixRun(points []DistributionPoint) int {
+	maxRun, cur := 0, 0
+	for i := 1; i < len(points); i++ {
+		if mixSignatureOf(points[i].Models) == mixSignatureOf(points[i-1].Models) {
+			cur++
+			if cur > maxRun {
+				maxRun = cur
+			}
+		} else {
+			cur = 0
+		}
+	}
+	return maxRun
+}
+
 func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 	// Reported bug: mid dial (0.5) used to route the same all-cheapest mix as
 	// low dial (0.2); it must now route a meaningfully pricier mix.
-	s := loadV0_67(t)
+	assertMidDialPricierThanLow(t, loadV0_67(t), 1.5)
+}
+
+func TestRoutingDistribution_MidDialIsPricierThanLowDial_FlooredBundle(t *testing.T) {
+	// #779: on floored latest, an unfloored calibration left cost(0.5)==cost(0.2).
+	// Floors compress the low-dial cost span vs v0.67, so require a clear rise
+	// (1.2×) rather than v0.67's 1.5× — the bug symptom was equality, not ratio.
+	assertMidDialPricierThanLow(t, loadV0_73(t), 1.2)
+}
+
+func assertMidDialPricierThanLow(t *testing.T, s *Scorer, minRatio float64) {
+	t.Helper()
 	points, err := s.RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
 
@@ -162,8 +208,8 @@ func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 	}
 	require.NotEmpty(t, low.Models, "dial position 0.2 must be present in the 21-point grid")
 	require.NotEmpty(t, mid.Models)
-	assert.Greater(t, mid.ProjectedCostPer1KInputUSD, low.ProjectedCostPer1KInputUSD*1.5,
-		"the 50%% dial must route a meaningfully pricier (higher-quality) mix than the 20%% dial")
+	assert.Greater(t, mid.ProjectedCostPer1KInputUSD, low.ProjectedCostPer1KInputUSD*minRatio,
+		"the 50%% dial must route a meaningfully pricier (higher-quality) mix than the 20%% dial (ratio > %.2f)", minRatio)
 }
 
 // loadV0_70 loads the committed v0.70 bundle (default alpha protects
@@ -176,6 +222,76 @@ func loadV0_70(t *testing.T) *Scorer {
 	s, err := NewScorer(bundle, DefaultConfig(), &fakeEmbedder{dim: bundle.Centroids.Dim}, allProviders())
 	require.NoError(t, err)
 	return s
+}
+
+// loadV0_73 loads the committed floored latest-era bundle used to pin #779.
+func loadV0_73(t *testing.T) *Scorer {
+	t.Helper()
+	bundle, err := LoadBundle("v0.73")
+	require.NoError(t, err)
+	require.True(t, bundle.IsV2)
+	require.NotEmpty(t, bundle.Metadata.Training.DefaultRoutingKnobs.AlphaFloor,
+		"v0.73 must ship alpha_floor — otherwise this is not a floored-bundle fixture")
+	s, err := NewScorer(bundle, DefaultConfig(), &fakeEmbedder{dim: bundle.Centroids.Dim}, allProviders())
+	require.NoError(t, err)
+	return s
+}
+
+func TestApplyAlphaFloor_NilAndHeterogeneous(t *testing.T) {
+	alpha := []float64{0, 0, 0}
+	applyAlphaFloor(alpha, 0.2, nil)
+	assert.Equal(t, []float64{0.2, 0.2, 0.2}, alpha, "nil floor writes raw into every slot")
+
+	floor := []float64{0.4, 0.1, 0.7}
+	applyAlphaFloor(alpha, 0.3, floor)
+	assert.InDelta(t, 0.4, alpha[0], 1e-9, "slot above raw is held at floor")
+	assert.InDelta(t, 0.3, alpha[1], 1e-9, "slot below raw follows raw")
+	assert.InDelta(t, 0.7, alpha[2], 1e-9, "higher floor still wins")
+}
+
+func TestComputeDialCalibration_NoBreakpointsBelowMinFloor(t *testing.T) {
+	// Structural #779 guard: after flooring the sweep, no interior breakpoint
+	// can sit below min(AlphaFloor) — those alphas are unreachable at request
+	// time, so recording them wastes dial travel on a dead zone.
+	s := loadV0_73(t)
+	floor := s.defaultActiveKnobs().AlphaFloor
+	require.NotEmpty(t, floor)
+	minFloor := floor[0]
+	for _, f := range floor {
+		if f < minFloor {
+			minFloor = f
+		}
+	}
+	for _, a := range s.dialAlphaBreakpoints {
+		if a == 0 || a == 1 {
+			continue
+		}
+		assert.GreaterOrEqual(t, a, minFloor,
+			"breakpoint alpha=%.4f is below min_floor=%.2f — calibration swept an unreachable region", a, minFloor)
+	}
+}
+
+func TestComputeDialCalibration_HeterogeneousFloorSynthetic(t *testing.T) {
+	// Two clusters, deliberately different floors. Calibration must not record
+	// mix changes in (0, minFloor) even when an unfloored sweep would.
+	const lo, hi = 0.45, 0.70
+	s := newV2BundleForTest(t, &fakeEmbedder{vec: makeOpusVec()}, v2BundleOpts{
+		defaultKnobs: &DefaultRoutingKnobs{
+			Alpha:                []float64{0.5, 0.5},
+			AlphaFloor:           []float64{lo, hi},
+			SpeedWeight:          0.0,
+			OutputCostRatio:      1.0, // cost axis active so alpha travel moves the mix
+			ExpectedOutputTokens: 2000,
+		},
+	})
+	require.GreaterOrEqual(t, len(s.dialAlphaBreakpoints), 2)
+	for _, a := range s.dialAlphaBreakpoints {
+		if a == 0 || a == 1 {
+			continue
+		}
+		assert.GreaterOrEqual(t, a, lo,
+			"heterogeneous-floor synthetic: breakpoint %.4f below min floor %.2f", a, lo)
+	}
 }
 
 func TestApplyDialAlpha_HoldsEachClusterAtItsDeclaredFloor(t *testing.T) {
