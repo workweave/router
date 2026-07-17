@@ -2140,16 +2140,15 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		return routeErr
 	}
 
-	// Subscription usage-bypass: engaged inside runTurnLoop after hard-pin,
-	// force-pin, and tool-result sticky branches (those still win). The
-	// caller's own Claude subscription has headroom, so serve straight through
-	// to Anthropic with no substitution and no billing debit.
-	if routeRes.UsageBypass {
+	// On a retryable 429 the bypass falls through to re-routing; rate-limit
+	// headers prime the observer so the retry discounts Anthropic.
+	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
 		if !errors.Is(err, errBypassRetryable) {
 			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err
 		}
+
 		// Subscription-only mode: the subscription just failed (e.g. 429
 		// weekly-limit). Paid failover is disabled, so refuse rather than
 		// reroute onto a paid model against an already-negative balance.
@@ -2164,35 +2163,28 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// discounts Anthropic correctly on reroute.
 		req.SubsidizedModelCostFactor = s.subsidyFactors(ctx, r.Header)
 
-		// Bypass returns early without loading pin history, so load it now for
-		// modelSwitched() to correctly detect a switch away from it.
-		var priorServedModel string
-		var sessionEverSwitched bool
+		// bypassToAnthropic returns before session pin/HMM history are loaded,
+		// but modelSwitched() below needs them. Load the same switch history
+		// the turn loop would have produced.
 		if s.pinStore != nil {
 			sessionKey := DeriveSessionKey(env, apiKeyID)
 			role := roleForTier(catalog.TierFor(feats.Model))
 			pin, _ := s.loadPin(ctx, sessionKey, role)
 			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role)
-			priorServedModel, sessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
+			routeRes.SessionKey = sessionKey
+			routeRes.PriorServedModel, routeRes.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 		}
 
-		log.Info("usage-bypass pre-commit failure, rerouting via scorer",
-			"request_id", requestID,
-			"external_id", externalID,
-			"requested_model", feats.Model,
-		)
 		routeRes.UsageBypass = false
-		decision, routeErr := s.routeFor(ctx, req)
-		if routeErr != nil {
-			log.Error("Reroute after usage-bypass failure failed", "err", routeErr)
-			return routeErr
+		decision, rerouteErr := s.routeFor(ctx, req)
+		if rerouteErr != nil {
+			log.Error("Reroute after usage-bypass failure failed", "err", rerouteErr)
+			return rerouteErr
 		}
 		routeRes.Decision = decision
 		routeRes.Fresh = decision
-		// Populate switch-detection fields skipped during bypass.
-		routeRes.PriorServedModel = priorServedModel
-		routeRes.SessionEverSwitched = sessionEverSwitched
 	}
+
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
 	s.firePolicyShadowForServingDecision(ctx, decision, req)
@@ -3836,7 +3828,7 @@ func (s *Service) emitBilling(ctx context.Context, requestID, externalID string,
 		CacheRead:          cacheRead,
 		Pricing:            actPricing,
 		HasOverride:        hasOverride,
-		SubscriptionServed: servedOnSubscription(ctx),
+		SubscriptionServed: routeRes.UsageBypass || servedOnSubscription(ctx),
 		APIKeyID:           apiKeyID,
 	})
 

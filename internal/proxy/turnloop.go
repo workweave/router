@@ -524,11 +524,12 @@ func (s *Service) runTurnLoop(
 		pin = sessionpin.Pin{}
 	}
 
-	// Positioned after hard-pin/forced-pin (higher precedence) but before the
-	// tool-result/planner-disabled stickies below, so a stale pin from a prior
-	// routed stretch can't make a tool_result continuation diverge from the
-	// bypassed tool_use turn. The pin itself is untouched and resumes once
-	// utilization crosses the threshold.
+	// Positioned after hard-pin/forced-pin (higher precedence) and after all
+	// pin-drop guards (context overflow, provider disabled, images, maxed-out),
+	// but before the tool-result/planner-disabled stickies and scorer, so a
+	// stale pin from a prior routed stretch can't make a tool_result
+	// continuation diverge from the bypassed tool_use turn. The pin itself is
+	// untouched and resumes once utilization crosses the threshold.
 	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
 		res.Decision = dec
 		res.UsageBypass = true

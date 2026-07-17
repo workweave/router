@@ -110,6 +110,40 @@ func TestUsageBypass_ColdStart_Bypasses(t *testing.T) {
 	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"))
 }
 
+func TestUsageBypass_CodexSubscriptionPreservesRequestedModel(t *testing.T) {
+	const codexToken = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.signature"
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","choices":[]}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(codexToken)), usage.Snapshot{
+		Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderOpenAI: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithUsageObserver(obs)
+	threshold := 0.80
+	ctx := context.WithValue(context.Background(), proxy.OpenAISubscriptionContextKey{}, codexToken)
+	ctx = context.WithValue(ctx, proxy.OpenAIAccountIDContextKey{}, "account-1")
+	ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{
+		Enabled:   true,
+		Threshold: &threshold,
+	})
+	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, body, rec, req))
+
+	assert.Equal(t, 0, fr.routeCalls, "strict pass-through must not call the scorer")
+	require.Len(t, p.proxyBodies, 1)
+	assert.Contains(t, string(p.proxyBodies[0]), `"model":"gpt-5.5"`)
+	assert.Equal(t, "usage_bypass", rec.Header().Get("x-router-decision"))
+	assert.Equal(t, "gpt-5.5", rec.Header().Get("x-router-model"))
+}
+
 // TestUsageBypass_GateDisabled_EngagesRouting: with no per-installation config
 // on ctx the gate is off, so routing runs even with headroom.
 func TestUsageBypass_GateDisabled_EngagesRouting(t *testing.T) {
