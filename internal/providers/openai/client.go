@@ -17,6 +17,9 @@ import (
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/timing"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const DefaultBaseURL = "https://api.openai.com"
@@ -36,6 +39,30 @@ const (
 	codexUserAgentHeader  = "User-Agent"
 	codexUserAgentValue   = "codex_cli_rs"
 )
+
+// maxEffortToXhigh clamps a Responses-API body's top-of-ladder "max" reasoning
+// effort to "xhigh" before it reaches api.openai.com. "max" is a Codex-backend
+// (chatgpt.com/backend-api/codex) reasoning level for the "ultra" UI setting;
+// the public Responses API tops out at "xhigh" and 400s on "max"
+// ("Invalid value: 'max'. Supported values are: 'none', 'minimal', 'low',
+// 'medium', 'high', and 'xhigh'."). ProxyOpenAIResponses forwards Codex's
+// original Responses body verbatim for any NativeOnly request (custom tools,
+// reasoning-item replay) — which covers every Codex turn — but only rewrites
+// `model` before dispatch; a turn without a real ChatGPT subscription
+// credential (BYOK, deployment key, router-keyed prepaid) lands on
+// api.openai.com with the client's untouched effort value. Scoped to the
+// non-Codex-backend branch only: the Codex backend itself understands "max"
+// natively and must see it unmodified.
+func maxEffortToXhigh(body []byte) []byte {
+	if gjson.GetBytes(body, "reasoning.effort").String() != "max" {
+		return body
+	}
+	out, err := sjson.SetBytes(body, "reasoning.effort", "xhigh")
+	if err != nil {
+		return body
+	}
+	return out
+}
 
 // codexSubscriptionCreds returns the resolved credential when it's a Codex
 // (ChatGPT) subscription bearer (OAuth token with a paired account id), else
@@ -180,11 +207,16 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 	if prep.Endpoint == providers.EndpointResponses {
 		path = "/v1/responses"
 	}
+	reqBody := prep.Body
 	if useCodex {
 		baseURL = c.codexBaseURL
 		path = codexResponsesPath
+	} else if prep.Endpoint == providers.EndpointResponses {
+		// Only the direct api.openai.com Responses path needs the clamp; the
+		// Codex backend branch above understands "max" natively.
+		reqBody = maxEffortToXhigh(reqBody)
 	}
-	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(prep.Body))
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("build upstream request: %w", err)
 	}
