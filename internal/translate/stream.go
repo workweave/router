@@ -340,7 +340,9 @@ func (t *SSETranslator) handleMessageDelta(data []byte) error {
 		sse.WriteJSONInt(t.bw, int64(t.inputTokens)+outputTokens)
 		t.bw.WriteByte('}')
 		if t.usageSink != nil {
-			t.usageSink.RecordUsage(0, int(outputTokens))
+			t.usageSink.RecordUsageValues(UsageValues{
+				OutputTokens: usageResultInt(usageResult.Get("output_tokens")),
+			})
 		}
 	}
 

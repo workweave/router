@@ -128,9 +128,7 @@ type InsertTelemetryParams struct {
 	CredentialKeySuffix string
 	CredentialSource    string
 
-	// UsageAuthorityStatus is provider usage authority at request completion.
-	// UsageDetails is JSON containing only presence-aware token counters and
-	// stable contradiction codes; it must never carry request content.
+	// UsageAuthorityStatus and UsageDetails record billing authority and presence-aware token counters; UsageDetails must never carry request content.
 	UsageAuthorityStatus string
 	UsageDetails         []byte
 }

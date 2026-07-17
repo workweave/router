@@ -68,9 +68,7 @@ type UsageSnapshot struct {
 	Contradictions []UsageContradiction `json:"contradictions,omitempty"`
 }
 
-// FreshInputTokens returns input tokens not attributed to cache creation or
-// cache reads, clamped at zero so cached tokens are never double-counted as
-// fresh input.
+// FreshInputTokens returns input tokens minus cache creation and cache reads, clamped at zero to prevent double-counting.
 func (s UsageSnapshot) FreshInputTokens() *int {
 	if s.InputTokens == nil {
 		return nil

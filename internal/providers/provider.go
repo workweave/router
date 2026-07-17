@@ -77,9 +77,8 @@ const (
 	FamilyGemini
 )
 
-// UsageEndpoint identifies the upstream response protocol used to report
-// token usage. It is intentionally independent from a provider name: every
-// OpenAI-compatible provider shares the OpenAI parsers.
+// UsageEndpoint identifies the upstream wire protocol for usage reporting,
+// independent from provider identity — every OpenAI-compatible provider shares the OpenAI parsers.
 type UsageEndpoint int
 
 const (
