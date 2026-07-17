@@ -989,8 +989,8 @@ func CanonicalizeEffort(level string) string {
 }
 
 // IsValidEffort reports whether the canonicalized level is one the router
-// accepts as wire output. Returns false for typos so the middleware can 400
-// with the format-aware envelope instead of silently forwarding garbage.
+// accepts as wire output. Returns false for typos so middleware can 400
+// rather than forward garbage to a provider.
 func IsValidEffort(level string) bool {
 	switch CanonicalizeEffort(level) {
 	case effortLow, effortMedium, effortHigh, effortMax, effortXhigh:
@@ -1013,9 +1013,8 @@ func ResolveForceEffort(caps router.ModelSpec, level string) string {
 	return canonical
 }
 
-// resolveForceEffort is the EmitOptions-method variant of ResolveForceEffort.
-// It reads opts.ForceEffort; the wider helper exists so external callers can
-// reuse the cap logic without constructing EmitOptions.
+// resolveForceEffort is the package-private variant of ResolveForceEffort;
+// exists so call sites inside EmitOptions don't repeat caps + level extraction.
 func resolveForceEffort(opts EmitOptions) string {
 	return ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
 }

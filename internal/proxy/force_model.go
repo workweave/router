@@ -220,8 +220,8 @@ func (s *Service) setForceModelPin(
 // (re)written on every request carrying the header. Unrecognized models are
 // ignored (routing proceeds automatically) rather than failing the request.
 //
-// A `:level` suffix (`:low`, `:fast`, `:ultra`) is stashed on the request
-// context as router.Overrides.ForceEffort so pin + effort land in one header.
+// A `:level` suffix is stashed on context as router.Overrides.ForceEffort
+// so pin + effort land in one header.
 func (s *Service) applyForceModelHeader(
 	ctx context.Context,
 	r *http.Request,
