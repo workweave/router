@@ -1,0 +1,38 @@
+internal/translate/jsonw_test.go
+  s_6a47df7c07691e::t_c9e4f27b76af24 88-102
+internal/translate/emit_gemini.go
+  s_6a47df7c07691e::t_9ba06d7c8e291c 816
+internal/translate/gemini_response.go
+  s_6a47df7c07691e::t_33013a05951019 66
+  s_6a47df7c07691e::t_b8d79c1a97c9bb 198
+internal/translate/gemini_stream.go
+  s_6a47df7c07691e::t_b84323498c07d7 175
+internal/translate/crossformat_response_test.go
+  s_6a47df7c07691e::t_a6982a7e030066 837-852,860-888
+  s_6a47df7c07691e::t_8611383593899d 853-859
+internal/translate/jsonw.go
+  s_6a47df7c07691e::t_2df0f07c398d28 16
+  s_6a47df7c07691e::t_5a4577b4860d3d 22-25
+  s_6a47df7c07691e::t_962ca31b5cd661 45
+  s_6a47df7c07691e::t_17f2b618c4521d 53-60,65
+internal/translate/crossformat_request_test.go
+  s_6a47df7c07691e::t_15ea8a001bfff5 1241-1305
+internal/translate/emit_openai.go
+  s_6a47df7c07691e::t_ce86fa4f407534 454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "735ddfb99d0c1c2f6e762e02b64e1bc348ecafd9",
+  "prompts": {},
+  "sessions": {
+    "s_6a47df7c07691e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5206d9af-d5e6-4e45-8ac7-ead1fdb0cd81",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

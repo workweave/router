@@ -1,0 +1,19 @@
+internal/config/config.go
+  s_d3fc1c517ba243::t_b77f36f9db0120 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "0687c5a36adabe9777c3ae1f46b31c3f945b4937",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+internal/translate/gemini_stream.go
+  s_f04c43600c106a::t_ba76c6eba15be8 123-125
+  s_f04c43600c106a::t_9298f28802132c 230,238
+  s_f04c43600c106a::t_49ff1136936490 290-291,299-311,317-331
+internal/observability/otel/usage.go
+  s_f04c43600c106a::t_72db52b1a41b2e 238-240,242-250
+internal/translate/cache_usage_test.go
+  s_f04c43600c106a::t_3b9c1c62d26fc7 76-129
+internal/observability/otel/usage_test.go
+  s_f04c43600c106a::t_c0f869522e4c6c 202-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "45040b777b8e0156e7764e03db3b771e25d0aa4a",
+  "prompts": {},
+  "sessions": {
+    "s_f04c43600c106a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f2e2c1f-e399-4bce-ae7f-5b7f99a12ead",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+internal/translate/envelope.go
+  s_9109012920806e::t_76544702c0977f 203-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "94acc444eb7cd654b88cf878a092b06cb02f69b3",
+  "prompts": {},
+  "sessions": {
+    "s_9109012920806e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "304d9b90-34da-4bb4-9b57-be98ad14de98",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

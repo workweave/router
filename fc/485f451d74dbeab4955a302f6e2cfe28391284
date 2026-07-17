@@ -1,0 +1,76 @@
+internal/proxy/router_feedback.go
+  s_181299bbd674e9::t_a14dc4c6fe2478 180-184
+internal/auth/installation.go
+  s_181299bbd674e9::t_c8d6ba34ce5d99 8-9,58-72
+internal/server/middleware/router_strategy_override.go
+  s_181299bbd674e9::t_cf0c306f039667 21-29,36,38-41,43,45,47-61,63,69-75
+  s_181299bbd674e9::t_1301e78d31575e 76
+  s_181299bbd674e9::t_3c87a7f46b29cd 19-20
+  s_a81d8efc38ee57::t_8fb176bb8bc884 37
+db/migrations/0034_installation-policy-routing.down.sql
+  s_181299bbd674e9::t_c8d6ba34ce5d99 1-12
+internal/server/middleware/auth.go
+  s_181299bbd674e9::t_8cfb2c49bddfab 135-146
+internal/sqlc/model_router_api_keys.sql.go
+  s_181299bbd674e9::t_a383cced54e054 97,116,153-159
+internal/postgres/converters.go
+  s_181299bbd674e9::t_72355d0a4ee1b1 7
+  s_181299bbd674e9::t_5dd5de4ce6011e 28-45
+  s_181299bbd674e9::t_c8d6ba34ce5d99 46-48
+internal/server/server.go
+  s_181299bbd674e9::t_507b24677c9bb8 142-143,160-161,193-194
+  s_181299bbd674e9::t_a2e85cefede657 135-138
+  s_181299bbd674e9::t_bf13b53698daeb 19
+internal/server/middleware/router_strategy_override_test.go
+  s_181299bbd674e9::t_9b0c88bddeea75 17,27,45,50,55,60,70,74-78,84-95,100-103
+  s_a81d8efc38ee57::t_8fb176bb8bc884 79-83
+internal/server/middleware/auth_test.go
+  s_181299bbd674e9::t_a9344f1dc3460c 125-128,141-145
+internal/sqlc/models.go
+  s_181299bbd674e9::t_a383cced54e054 85-93
+internal/server/middleware/policy_debug_override_test.go
+  s_181299bbd674e9::t_9b0c88bddeea75 1-52
+internal/server/middleware/policy_debug_override.go
+  s_181299bbd674e9::t_9cb402394ad6dc 4
+  s_181299bbd674e9::t_cf0c306f039667 1-3,5-48
+internal/proxy/service.go
+  s_181299bbd674e9::t_79f2962eeb3416 1483-1485
+  s_181299bbd674e9::t_507b24677c9bb8 1480-1482,1486-1493
+  s_181299bbd674e9::t_8cfb2c49bddfab 347-349
+  s_181299bbd674e9::t_a797c9fe41b1b5 1561,1569-1575,2830,3151,4475
+internal/sqlc/model_router_installations.sql.go
+  s_181299bbd674e9::t_a383cced54e054 25,46,65-71,77,91,114-120,126,135,164-170
+db/migrations/0034_installation-policy-routing.up.sql
+  s_181299bbd674e9::t_c8d6ba34ce5d99 1-17
+internal/postgres/converters_test.go
+  s_181299bbd674e9::t_8677dc86d1afd2 6,34-57
+  s_181299bbd674e9::t_4cab894fa6c7a9 58
+internal/proxy/service_observation_test.go
+  s_181299bbd674e9::t_a797c9fe41b1b5 334-357
+  s_181299bbd674e9::t_de4cd03a0509d5 331-333
+  s_181299bbd674e9::t_4b444ae19a07c4 329-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fc485f451d74dbeab4955a302f6e2cfe28391284",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

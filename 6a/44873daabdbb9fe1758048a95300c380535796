@@ -1,0 +1,28 @@
+go.sum
+  ai_agent 262-263
+go.mod
+  s_ebfa96f9db32d9::t_832ccac4fbd4ef 90
+internal/observability/apm/apm.go
+  s_ebfa96f9db32d9::t_8ef0a3f588a58d 122-129
+  s_ebfa96f9db32d9::t_a69739dec76ef3 169-173,177-183
+  s_ebfa96f9db32d9::t_d8b5079a69ea92 24
+cmd/router/main.go
+  s_ebfa96f9db32d9::t_4e23c611b5e361 596-599
+  s_ebfa96f9db32d9::t_688d3259b9a666 653-662,667,672-674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "6a44873daabdbb9fe1758048a95300c380535796",
+  "prompts": {},
+  "sessions": {
+    "s_ebfa96f9db32d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82f09df5-4976-4e25-8c8a-84dea4f84240",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
