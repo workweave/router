@@ -80,7 +80,6 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		"message_count", feats.MessageCount,
 		"has_tools", feats.HasTools,
 		"total_input_tokens", feats.Tokens,
-		"prompt_preview", observability.Preview(promptText, 200),
 	)
 
 	logInboundRequestDiagnostics(log, env)
@@ -116,11 +115,6 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(ctx, routeRes)
-
-	p, provErr := s.provider(decision.Provider)
-	if provErr != nil {
-		return provErr
-	}
 
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
@@ -196,21 +190,43 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	var sink http.ResponseWriter = contentSink
-	if marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes)); marker != "" {
-		mw := translate.NewGeminiRoutingMarkerWriter(sink, marker)
-		// Flush marker + HTTP 200 immediately so TTFB is decoupled from
-		// upstream prefill. Locks status to 200.
-		if err := mw.Prelude(env.Stream()); err != nil {
-			log.Error("Gemini routing-marker prelude failed", "err", err)
+	// Native Gemini used to emit its marker before the provider had even
+	// accepted the request. Keep every prelude byte behind the same commitment
+	// boundary as the other protocol paths: the first upstream event releases
+	// it, while a 429/5xx/transport/empty stream can still retry cleanly.
+	preludeBuf := newPreludeBuffer(contentSink)
+	marker := suppressMarkerIfRequested(r.Header, routingMarkerFor(routeRes))
+	bindings := s.resolveBindingsForDispatch(ctx, decision)
+	attempt := func(actx context.Context, d router.Decision, p providers.Client) error {
+		attemptSink := http.ResponseWriter(preludeBuf)
+		if marker != "" {
+			mw := translate.NewGeminiRoutingMarkerWriter(attemptSink, marker)
+			mw.Prepare(env.Stream())
+			attemptSink = mw
 		}
-		sink = mw
+		proxySink := attemptSink
+		if s.usageRequired() {
+			extractor = otel.NewUsageExtractor(attemptSink, d.Provider)
+			proxySink = extractor
+		}
+		preludeBuf.Seal()
+		err := p.Proxy(actx, d, prep, proxySink, r)
+		if err == nil && env.Stream() && !preludeBuf.Committed() {
+			return translate.ErrStreamEmpty
+		}
+		if err != nil && env.Stream() && preludeBuf.Committed() {
+			emitGeminiSSEErrorEvent(contentSink)
+		}
+		return err
 	}
-	if s.usageRequired() {
-		extractor = otel.NewUsageExtractor(sink, decision.Provider)
-		sink = extractor
-	}
-	proxyErr := p.Proxy(ctx, decision, prep, sink, r)
+	_, proxyErr := s.dispatchWithFallback(ctx, failoverInputs{
+		w:               contentSink,
+		buf:             preludeBuf,
+		initialDecision: decision,
+		bindings:        bindings,
+		attempt:         attempt,
+		flushErr:        flushBufferedIfPresent,
+	})
 	proxyMs := time.Since(proxyStart).Milliseconds()
 
 	in, out := extractor.Tokens()

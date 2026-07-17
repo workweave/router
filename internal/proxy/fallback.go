@@ -69,9 +69,10 @@ func (b *preludeBuffer) WriteHeader(status int) {
 		return
 	}
 	if b.sealed {
-		// Non-stream error status from Finalize: buffer then commit.
+		// Adapters receive success headers before their first body byte. Keep
+		// those headers buffered so an empty stream remains retryable. Buffered
+		// non-2xx responses are rendered by flushErr, not this path.
 		b.bufStatus = status
-		_ = b.commit()
 		return
 	}
 	b.bufStatus = status
@@ -485,6 +486,16 @@ func emitOpenAISSEErrorEvent(sink http.ResponseWriter, err error) error {
 		f.Flush()
 	}
 	return &providers.UpstreamStatusError{Status: resp.Status}
+}
+
+// emitGeminiSSEErrorEvent terminates a committed native Gemini stream without
+// exposing an upstream response body. A buffered non-2xx never reaches this
+// path; it is for post-commit transport/truncation failures only.
+func emitGeminiSSEErrorEvent(sink http.ResponseWriter) {
+	_, _ = sink.Write([]byte("data: {\"error\":{\"code\":\"UNAVAILABLE\",\"message\":\"upstream stream failed\"}}\n\n"))
+	if f, ok := sink.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // flushUpstreamErrorAsAnthropic is ProxyMessages' flushErr: translates the

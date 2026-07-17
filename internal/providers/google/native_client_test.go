@@ -3,6 +3,7 @@ package google_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,4 +122,31 @@ func TestNativeClient_DefaultBaseURL(t *testing.T) {
 	c := google.NewNativeClient("k", "")
 	assert.Equal(t, "https://generativelanguage.googleapis.com", google.NativeBaseURL)
 	_ = c
+}
+
+func TestNativeClient_BuffersNon2xxBeforeTouchingDownstream(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Upstream-Request", "redacted-id")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"retry later"}}`))
+			}))
+			defer upstream.Close()
+
+			client := google.NewNativeClient("k", upstream.URL)
+			rec := httptest.NewRecorder()
+			err := client.Proxy(context.Background(), router.Decision{Model: "gemini-x"},
+				providers.PreparedRequest{Body: []byte(`{}`), Headers: make(http.Header)}, rec,
+				httptest.NewRequest(http.MethodPost, "/v1/x", nil))
+
+			var upstreamErr *providers.UpstreamErrorResponse
+			require.True(t, errors.As(err, &upstreamErr))
+			assert.Equal(t, status, upstreamErr.Status)
+			assert.Equal(t, "redacted-id", upstreamErr.Headers.Get("X-Upstream-Request"))
+			assert.Equal(t, 0, rec.Body.Len(), "retry classification must happen before downstream commitment")
+			assert.Empty(t, rec.Header().Get("X-Upstream-Request"))
+			assert.Equal(t, providers.IsRetryableStatus(status), providers.IsRetryable(err))
+		})
+	}
 }

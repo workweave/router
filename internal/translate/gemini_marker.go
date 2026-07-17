@@ -39,6 +39,15 @@ func (w *GeminiRoutingMarkerWriter) Write(data []byte) (int, error) {
 	return w.Inner.Write(data)
 }
 
+// Prepare marks a stream as eligible for marker injection without writing a
+// status or marker. Native Gemini uses this before dispatch so a retryable
+// upstream failure or empty stream cannot commit a synthetic HTTP 200.
+func (w *GeminiRoutingMarkerWriter) Prepare(streaming bool) {
+	if streaming && !w.markerEmitted {
+		w.Streaming = true
+	}
+}
+
 // Prelude commits headers and emits the routing marker immediately, before the
 // upstream provider has returned a single byte. See OpenAIRoutingMarkerWriter.Prelude.
 func (w *GeminiRoutingMarkerWriter) Prelude(streaming bool) error {

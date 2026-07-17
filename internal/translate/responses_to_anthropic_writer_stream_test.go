@@ -362,10 +362,12 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
-	require.NoError(t, w.Finalize())
+	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete)
 
 	assert.Contains(t, rec.Body.String(), `\"pages\":\"\"`,
 		"without a schema the writer must not strip anything")
+	assert.Contains(t, rec.Body.String(), "event: error")
+	assert.NotContains(t, rec.Body.String(), "event: message_stop")
 }
 
 func TestResponsesToAnthropicWriter_NoStripForUnknownToolSchema(t *testing.T) {
@@ -382,14 +384,16 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
-	require.NoError(t, w.Finalize())
+	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete)
 
 	assert.Contains(t, rec.Body.String(), `\"pages\":\"\"`,
 		"schema for a different tool must not authorize stripping this tool's args")
+	assert.Contains(t, rec.Body.String(), "event: error")
+	assert.NotContains(t, rec.Body.String(), "event: message_stop")
 }
 
-// Truncated before response.completed: still reconciles to stop_reason=tool_use
-// and flushes the partial tool args.
+// Truncated before response.completed terminates as an error instead of
+// fabricating a normal tool_use completion.
 func TestResponsesToAnthropicWriter_TruncatedToolStream(t *testing.T) {
 	const fixture = `event: response.output_item.added
 data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"Bash","arguments":"","status":"in_progress"}}
@@ -406,14 +410,12 @@ data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_
 	require.NoError(t, w.Prelude(true))
 	_, err := w.Write([]byte(fixture))
 	require.NoError(t, err)
-	require.NoError(t, w.Finalize()) // no response.completed arrived
+	require.ErrorIs(t, w.Finalize(), translate.ErrStreamIncomplete) // no response.completed arrived
 
 	body := rec.Body.String()
-	assert.Contains(t, body, `"partial_json":"{\"command\":\"ls\"}"`,
-		"buffered tool args flushed on early close")
-	assert.Contains(t, body, `"stop_reason":"tool_use"`,
-		"a tool_use block was emitted → invariant forces tool_use even with no terminal event")
-	assert.Contains(t, body, "event: message_stop")
+	assert.Contains(t, body, `"type":"tool_use"`, "already-delivered tool state is preserved")
+	assert.Contains(t, body, "event: error")
+	assert.NotContains(t, body, "event: message_stop")
 }
 
 // Content delivered only on output_item.done (no *.delta) still produces
