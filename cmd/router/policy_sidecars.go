@@ -23,10 +23,11 @@ const maxConfiguredPolicySidecars = 16
 var configuredPolicyStrategyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 var reservedPolicyStrategies = map[router.Strategy]struct{}{
-	router.StrategyCluster: {},
-	router.StrategyRL:      {},
-	router.StrategyHMM:     {},
-	router.StrategyBandit:  {},
+	router.StrategyCluster:      {},
+	router.StrategyRL:           {},
+	router.StrategyHMM:          {},
+	router.StrategyHMMEmbedding: {},
+	router.StrategyBandit:       {},
 }
 
 // buildConfiguredPolicySidecars turns a JSON strategy-to-URL map into policy.StrategySpec registrations; sidecars own model logic, the router owns candidate resolution and lifecycle.

@@ -1643,7 +1643,7 @@ func defaultStrategyUnavailable(strategy router.Strategy) error {
 	switch strategy {
 	case router.StrategyRL:
 		return rl.ErrPolicyUnavailable
-	case router.StrategyHMM:
+	case router.StrategyHMM, router.StrategyHMMEmbedding:
 		return hmm.ErrHMMUnavailable
 	case router.StrategyBandit:
 		return bandit.ErrBanditUnavailable

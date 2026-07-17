@@ -604,6 +604,7 @@ func main() {
 	// Wired only when ROUTER_HMM_SIDECAR_URL is set; x-weave-router-strategy:
 	// hmm then routes through it. Unset fails closed with 503.
 	var hmmRouter router.Router
+	var hmmEmbeddingRouter router.Router
 	var hmmCapabilities policy.Capabilities
 	var hmmReadinessChecker admin.HealthChecker
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
@@ -624,6 +625,13 @@ func main() {
 		}
 		hmmPolicyRouter := hmm.New(hmmClient, availableModels, availableProviders)
 		hmmPolicyRouter.WithCapabilities(hmmCapabilities)
+		hmmEmbeddingPolicyRouter := hmm.NewForStrategy(
+			router.StrategyHMMEmbedding,
+			hmmClient,
+			availableModels,
+			availableProviders,
+		)
+		hmmEmbeddingPolicyRouter.WithCapabilities(hmmCapabilities)
 		if capabilityErr != nil {
 			go func() {
 				retryErr := retryPolicyCapabilitiesUntilAvailable(
@@ -633,6 +641,7 @@ func main() {
 					hmmCapabilityRetryInterval,
 					func(capabilities policy.Capabilities) {
 						hmmPolicyRouter.WithCapabilities(capabilities)
+						hmmEmbeddingPolicyRouter.WithCapabilities(capabilities)
 					},
 				)
 				if retryErr != nil {
@@ -643,9 +652,17 @@ func main() {
 			}()
 		}
 		hmmRouter = hmmPolicyRouter
-		logger.Info("HMM policy router wired", "sidecar_url", hmmSidecarURL, "auth_mode", hmmAuthMode, "timeout_ms", hmmTimeout.Milliseconds(), "candidate_models", len(availableModels))
+		hmmEmbeddingRouter = hmmEmbeddingPolicyRouter
+		logger.Info(
+			"HMM policy routers wired",
+			"sidecar_url", hmmSidecarURL,
+			"auth_mode", hmmAuthMode,
+			"timeout_ms", hmmTimeout.Milliseconds(),
+			"candidate_models", len(availableModels),
+			"strategies", []router.Strategy{router.StrategyHMM, router.StrategyHMMEmbedding},
+		)
 	} else {
-		logger.Info("HMM policy router disabled (ROUTER_HMM_SIDECAR_URL unset); x-weave-router-strategy: hmm will return 503")
+		logger.Info("HMM policy routers disabled (ROUTER_HMM_SIDECAR_URL unset); HMM strategies will return 503")
 	}
 
 	// Wired only when ROUTER_BANDIT_POSTERIOR_FILE points at a ts_posterior.json;
@@ -687,6 +704,10 @@ func main() {
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
 		WithPolicyStrategy(policy.StrategySpec{
 			Strategy: router.StrategyHMM, Router: hmmRouter, Unavailable: hmm.ErrHMMUnavailable,
+			Capabilities: hmmCapabilities,
+		}).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy: router.StrategyHMMEmbedding, Router: hmmEmbeddingRouter, Unavailable: hmm.ErrHMMUnavailable,
 			Capabilities: hmmCapabilities,
 		}).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyBandit, Router: banditRouter, Unavailable: bandit.ErrBanditUnavailable}).

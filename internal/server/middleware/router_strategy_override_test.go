@@ -56,6 +56,11 @@ func TestRouterStrategyOverride_AppliesHMM(t *testing.T) {
 	assert.Equal(t, router.StrategyHMM, got, "hmm header must select the HMM strategy")
 }
 
+func TestRouterStrategyOverride_AppliesHMMEmbedding(t *testing.T) {
+	got := runStrategyOverride(t, overrideEnabledInstallation(), "hmm_embedding")
+	assert.Equal(t, router.StrategyHMMEmbedding, got)
+}
+
 func TestRouterStrategyOverride_CaseInsensitiveAndTrimmed(t *testing.T) {
 	got := runStrategyOverride(t, overrideEnabledInstallation(), "  RL  ")
 	assert.Equal(t, router.StrategyRL, got, "value must be lowercased and trimmed before matching")

@@ -245,7 +245,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	}
 	messages := routeMessages(query.ConversationMessages)
 	var trainingDelta []routeMessage
-	if query.Strategy == router.StrategyHMM && query.TrainingAllowed {
+	if router.IsHMMStrategy(query.Strategy) && query.TrainingAllowed {
 		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
 	}
 	body, err := json.Marshal(routeRequest{

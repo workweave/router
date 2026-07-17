@@ -23,11 +23,19 @@ const (
 	// StrategyHMM routes via an out-of-process policy sidecar. Opt-in only;
 	// never the silent default.
 	StrategyHMM Strategy = "hmm"
+	// StrategyHMMEmbedding uses the HMM sidecar with the embedding-quality-seeded bandit prior.
+	StrategyHMMEmbedding Strategy = "hmm_embedding"
 	// StrategyBandit routes via Thompson sampling over a frozen
 	// ts_posterior.json (cluster×model reward posterior). Opt-in only; wired
 	// when ROUTER_BANDIT_POSTERIOR_FILE is set at boot.
 	StrategyBandit Strategy = "bandit"
 )
+
+// IsHMMStrategy reports whether strategy uses the HMM policy contract and
+// lifecycle semantics.
+func IsHMMStrategy(strategy Strategy) bool {
+	return strategy == StrategyHMM || strategy == StrategyHMMEmbedding
+}
 
 type strategyContextKey struct{}
 
