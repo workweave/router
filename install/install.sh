@@ -577,11 +577,10 @@ write_opencode_config() {
     | (if $name  != "" then . + {"X-Weave-User-Name":  $name } else . end)
   ')"
 
-  # Headline models we surface in opencode's picker. The router re-routes
-  # each request anyway, so this list is mostly UX — what shows up when the
-  # user runs /models inside opencode. We list a mix of GPT + Claude so the
-  # picker reflects that the router spans families; whichever model serves the
-  # turn, its matching subscription (if connected) pays.
+  # Surface one Auto choice in opencode's picker. The router chooses the
+  # upstream model for every request, so presenting pinned model names would
+  # imply a choice that the router intentionally does not honor. Whichever
+  # model serves a turn uses its matching subscription when one is connected.
   #
   # npm is @ai-sdk/openai and baseURL KEEPS its /v1 here: opencode's
   # @ai-sdk/openai provider appends /responses, yielding the router's
@@ -601,14 +600,7 @@ write_opencode_config() {
       name: "Weave Router",
       options: { apiKey: $key, baseURL: $url, headers: $headers },
       models: {
-        "claude-sonnet-5":   { name: "Claude Sonnet 5 (via Weave Router)" },
-        "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (via Weave Router)" },
-        "claude-opus-4-8":   { name: "Claude Opus 4.8 (via Weave Router)" },
-        "claude-haiku-4-5":  { name: "Claude Haiku 4.5 (via Weave Router)" },
-        "gpt-5.6-sol":       { name: "GPT-5.6 Sol (via Weave Router)" },
-        "gpt-5.5":           { name: "GPT-5.5 (via Weave Router)" },
-        "gpt-5.4":           { name: "GPT-5.4 (via Weave Router)" },
-        "grok-4.5":          { name: "Grok 4.5 (via Weave Router)" }
+        auto: { name: "Auto" }
       }
     }
   ')"
@@ -658,8 +650,9 @@ write_opencode_config() {
 
   # Merge into any existing opencode.json. We always overwrite provider.weave
   # so re-install reflects the latest key/identity, but we leave the rest of the
-  # file (other providers, mcp, agent settings) untouched. Top-level `model` is
-  # only set when the user hasn't already picked one.
+  # file (other providers, mcp, agent settings) untouched. A previously
+  # installed `weave/*` model is migrated to `weave/auto`; unrelated provider
+  # choices stay untouched.
   #
   # The weave-claude login provider AND the plugin entry are written together
   # only when the bundled plugin was present and copied ($plugin non-empty): the
@@ -687,12 +680,12 @@ write_opencode_config() {
                    then (.plugin -= [$pluginspec]) | (if (.plugin | length) == 0 then del(.plugin) else . end)
                    else . end)
          end)
-      | (if (.model // "") == "" then .model = "weave/claude-sonnet-4-6" else . end)
-      # Reset the default model if it points at a provider we just removed: the
-      # retired weave-codex, or weave-claude on a plugin-less re-install (it has
-      # no models anyway). Otherwise opencode boots with a dangling model.
-      | (if (.model // "" | tostring | startswith("weave-codex/")) then .model = "weave/claude-sonnet-4-6" else . end)
-      | (if $plugin == "" and (.model // "" | tostring | startswith("weave-claude/")) then .model = "weave/claude-sonnet-4-6" else . end)
+      | (if (.model // "") == "" then .model = "weave/auto" else . end)
+      # Replace any legacy Weave model choice with the single auto-routing
+      # choice. Models from unrelated providers remain unchanged.
+      | (if (.model // "" | tostring) as $model
+           | ($model | startswith("weave/") or startswith("weave-codex/") or startswith("weave-claude/"))
+           then .model = "weave/auto" else . end)
       | (.["$schema"] //= "https://opencode.ai/config.json")
     ' "$config_file")"
   else
@@ -702,7 +695,7 @@ write_opencode_config() {
       --arg plugin "$plugin_arg" '
       {
         "$schema": "https://opencode.ai/config.json",
-        model: "weave/claude-sonnet-4-6",
+        model: "weave/auto",
         provider: { weave: $block }
       }
       | (if $plugin != "" then .provider["weave-claude"] = $claude | .plugin = [$plugin] else . end)
