@@ -3191,13 +3191,14 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 		return
 	}
 	usage := sessionpin.Usage{
-		InputTokens:       in,
-		CachedReadTokens:  cacheRead,
-		CachedWriteTokens: cacheCreation,
-		OutputTokens:      out,
-		EndedAt:           time.Now(),
-		ServedModel:       servedModel,
-		PriorServedModel:  res.PriorServedModel,
+		InputTokens:         in,
+		CachedReadTokens:    cacheRead,
+		CachedWriteTokens:   cacheCreation,
+		OutputTokens:        out,
+		EndedAt:             time.Now(),
+		ServedModel:         servedModel,
+		PriorServedModel:    res.PriorServedModel,
+		SessionEverSwitched: res.SessionEverSwitched,
 	}
 	role := res.PinRole
 	if role == "" {
@@ -3248,13 +3249,14 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	}
 	now := time.Now()
 	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
-		InputTokens:       in,
-		CachedReadTokens:  cacheRead,
-		CachedWriteTokens: cacheCreation,
-		OutputTokens:      out,
-		EndedAt:           now,
-		ServedModel:       servedModel,
-		PriorServedModel:  res.PriorServedModel,
+		InputTokens:         in,
+		CachedReadTokens:    cacheRead,
+		CachedWriteTokens:   cacheCreation,
+		OutputTokens:        out,
+		EndedAt:             now,
+		ServedModel:         servedModel,
+		PriorServedModel:    res.PriorServedModel,
+		SessionEverSwitched: res.SessionEverSwitched,
 	}); err != nil {
 		observability.Get().Error("HMM switch-history writeback failed", "err", err)
 	}

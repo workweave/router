@@ -79,6 +79,9 @@ type Usage struct {
 	// UpdateUsage uses it to latch HasEverSwitched when the stored row is new
 	// or has no last_served_model yet.
 	PriorServedModel string
+	// SessionEverSwitched carries an already-latched sibling-row verdict so a
+	// fresh role row preserves switch history even when its model is unchanged.
+	SessionEverSwitched bool
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)

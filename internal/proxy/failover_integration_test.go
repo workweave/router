@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"workweave/router/internal/providers"
+	"workweave/router/internal/providers/openai"
 	"workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
@@ -278,6 +279,59 @@ func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 		"routing marker discarded with the prelude buffer")
 	assert.Contains(t, respBody, `"type":"error"`, "Anthropic-shape error envelope")
 	assert.Contains(t, respBody, "upstream unavailable", "translated upstream message reaches the client")
+}
+
+func TestProxyMessages_ResponsesFailureBeforeOutputFallsBackToBaseline(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		openAICalls int
+	)
+	openAIUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		openAICalls++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "event: response.failed\n"+
+			`data: {"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"server_error","message":"request rejected before output"},"output":[]}}`+"\n\n")
+	}))
+	defer openAIUpstream.Close()
+
+	baseline := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_baseline\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-4-8\"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"recovered\"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n")
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}}
+
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-5.5", Reason: "test"}},
+		map[string]providers.Client{
+			providers.ProviderOpenAI:    openai.NewClient("test-key", openAIUpstream.URL),
+			providers.ProviderAnthropic: baseline,
+		},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{
+		providers.ProviderOpenAI:    {},
+		providers.ProviderAnthropic: {},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"]}}],"messages":[{"role":"user","content":"inspect this"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, req))
+	mu.Lock()
+	assert.GreaterOrEqual(t, openAICalls, 1)
+	mu.Unlock()
+	require.Len(t, baseline.proxyBodies, 1, "pre-output Responses failure must retry on the requested Anthropic model")
+	assert.Contains(t, rec.Body.String(), "recovered")
+	assert.Contains(t, rec.Body.String(), "event: message_stop")
+	assert.NotContains(t, rec.Body.String(), "event: error")
 }
 
 // sequencedGeminiClient is a providers.Client that returns a scripted result

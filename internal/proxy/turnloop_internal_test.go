@@ -108,7 +108,7 @@ func TestRecordTurnUsage_WritesToStore(t *testing.T) {
 	assert.False(t, store.lastUsage.EndedAt.IsZero(), "EndedAt must be stamped — the planner uses IsZero() as its no-prior-usage gate")
 }
 
-func TestRecordTurnUsage_ForwardsPriorServedModel(t *testing.T) {
+func TestRecordTurnUsage_ForwardsSwitchHistory(t *testing.T) {
 	store := newStubPinStore()
 	svc := NewService(
 		nil,
@@ -128,17 +128,19 @@ func TestRecordTurnUsage_ForwardsPriorServedModel(t *testing.T) {
 	}
 
 	res := turnLoopResult{
-		Decision:         router.Decision{Provider: "anthropic", Model: "claude-opus-4-7"},
-		SessionKey:       sessionKey,
-		PinRole:          sessionpin.DefaultRole,
-		PriorServedModel: "claude-sonnet-5",
+		Decision:            router.Decision{Provider: "anthropic", Model: "claude-opus-4-7"},
+		SessionKey:          sessionKey,
+		PinRole:             sessionpin.DefaultRole,
+		PriorServedModel:    "claude-opus-4-7",
+		SessionEverSwitched: true,
 	}
 	svc.recordTurnUsage(res, res.Decision.Provider, res.Decision.Model, 1200, 80, 200, 900)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.Equal(t, "claude-sonnet-5", store.lastUsage.PriorServedModel,
-		"recordTurnUsage must forward PriorServedModel so the SQL latch can set has_ever_switched on a fresh pin row")
+	assert.Equal(t, "claude-opus-4-7", store.lastUsage.PriorServedModel)
+	assert.True(t, store.lastUsage.SessionEverSwitched,
+		"a fresh role row must inherit an existing switch latch when the served model is unchanged")
 }
 
 func TestRecordTurnUsage_HMMDecisionWritesHistoryOnly(t *testing.T) {
