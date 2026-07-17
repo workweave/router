@@ -14,10 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// runForceEffort fires a request at the given path with the supplied
-// x-weave-effort header. Returns the response status + canonical level
-// captured off the request context (when the middleware lets the request
-// through) or the abort envelope when it 400s.
+// runForceEffort fires a request with the given x-weave-effort header and
+// returns the response status, body, and captured routing overrides.
 func runForceEffort(t *testing.T, path, header string) (status int, body any, captured *router.Overrides) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -77,10 +75,8 @@ func TestForceEffortOverride_AliasCanonicalizes(t *testing.T) {
 	}
 }
 
-// TestForceEffortOverride_InvalidValue verifies the middleware 400s
-// on an unknown level instead of letting it through to a provider that
-// would 400 with the wrong-shape envelope (Anthropic / OpenAI / Gemini
-// all parse their own error shapes — easier to fail at the boundary).
+// TestForceEffortOverride_InvalidValue verifies the middleware 400s on an
+// unknown level instead of forwarding it to a provider (fail at the boundary).
 func TestForceEffortOverride_InvalidValue(t *testing.T) {
 	status, _, captured := runForceEffort(t, "/v1/messages", "garbage")
 	assert.Equal(t, http.StatusBadRequest, status)

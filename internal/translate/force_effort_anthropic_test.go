@@ -12,44 +12,44 @@ import (
 	"workweave/router/internal/translate"
 )
 
-// TestForceEffort_AnthropicOverrides verifies ForceEffort overrides the
-// inbound output_config.effort on adaptive targets.
+// TestForceEffort_AnthropicOverrides verifies ForceEffort overrides inbound
+// output_config.effort on adaptive targets, with per-model xhigh cap applied.
 func TestForceEffort_AnthropicOverrides(t *testing.T) {
 	cases := []struct {
-		name      string
-		level     string
-		target    string
-		wantEff   string
-		noLower   bool // true when target accepts xhigh and shouldn't clamp
+		name    string
+		level   string
+		target  string
+		wantEff string
+		noLower bool // true when target accepts xhigh and shouldn't clamp
 	}{
 		{
-			name: "low_overrides_high_on_opus_xhigh",
-			level: "low",
-			target: "claude-opus-4-8",
+			name:    "low_overrides_high_on_opus_xhigh",
+			level:   "low",
+			target:  "claude-opus-4-8",
 			wantEff: "low",
 		},
 		{
-			name: "max_overrides_high_on_opus_xhigh",
-			level: "max",
-			target: "claude-opus-4-8",
+			name:    "max_overrides_high_on_opus_xhigh",
+			level:   "max",
+			target:  "claude-opus-4-8",
 			wantEff: "max",
 		},
 		{
-			name: "xhigh_passes_on_capable",
-			level: "xhigh",
-			target: "claude-opus-4-8",
+			name:    "xhigh_passes_on_capable",
+			level:   "xhigh",
+			target:  "claude-opus-4-8",
 			wantEff: "xhigh",
 		},
 		{
-			name: "xhigh_clamps_on_sonnet",
-			level: "xhigh",
-			target: "claude-sonnet-4-6",
+			name:    "xhigh_clamps_on_sonnet",
+			level:   "xhigh",
+			target:  "claude-sonnet-4-6",
 			wantEff: "max",
 		},
 		{
-			name: "ultra_alias_resolves_to_xhigh_pass",
-			level: "ultra",
-			target: "claude-opus-4-8",
+			name:    "ultra_alias_resolves_to_xhigh_pass",
+			level:   "ultra",
+			target:  "claude-opus-4-8",
 			wantEff: "xhigh",
 		},
 	}
@@ -59,7 +59,7 @@ func TestForceEffort_AnthropicOverrides(t *testing.T) {
 			env, err := translate.ParseAnthropic(body)
 			require.NoError(t, err)
 			prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{
-				TargetModel: tc.target,
+				TargetModel:  tc.target,
 				Capabilities: router.Lookup(tc.target),
 				ForceEffort:  tc.level,
 			})
@@ -73,10 +73,8 @@ func TestForceEffort_AnthropicOverrides(t *testing.T) {
 	}
 }
 
-// An ":" suffix on x-weave-force-model is parsed by the proxy and stashed as
-// Override_ForceEffort; the same value flows into EmitOptions and is verified
-// here at the emit layer. Validates the integration: header/suffix parser ->
-// overrides -> emit seam compose without further touching.
+// TestForceEffort_AnthropicPassesThroughAlias verifies alias forms (e.g. ultra)
+// flow end-to-end from ForceEffort into the wire output_config.effort.
 func TestForceEffort_AnthropicPassesThroughAlias(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-4-7","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
 	env, err := translate.ParseAnthropic(body)

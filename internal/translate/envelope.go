@@ -339,34 +339,35 @@ type EmitOverrides struct {
 	ClampMaxCompTokensValue int64
 	DefaultMaxTokensKey     string
 	DefaultMaxTokensValue   int64
-		InjectStreamUsage       bool
-		StripThinkingBlocks     bool
-		// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values outside
-		// ^[a-zA-Z0-9_-]+$. Always set for Anthropic targets: upstreams like
-		// Kimi-k2.6 emit IDs (e.g. "functions.Read:0") Anthropic rejects on replay.
-		SanitizeToolUseIDs bool
-		// StripThoughtSignature removes `thought_signature` from content blocks.
-		// Set for Anthropic targets: the field is Gemini-only and Anthropic 400s
-		// on unknown block fields.
-		StripThoughtSignature bool
-		// SanitizeAnthropicToolSchemas removes schema constraints Anthropic rejects
-		// from tools[].input_schema on same-format Anthropic requests.
-		SanitizeAnthropicToolSchemas bool
-		// RewriteThinkingAdaptive replaces the inbound thinking block with
-		// {"type":"adaptive"} and sets output_config.effort. Used when the target
-		// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
-		RewriteThinkingAdaptive bool
-		OutputConfigEffort      string
-		// ForceOutputConfigEffort, when set, overrides any inbound output_config.effort
-		// and the heuristic OutputConfigEffort — user knob beats request-derived default.
-		// Value is already cap-applied (xhigh→max) by resolveForceEffort upstream.
-		ForceOutputConfigEffort string
-		// ClampEffortXhighTo downgrades a caller-supplied "xhigh" effort (`effort`
-		// and `output_config.effort`) to this value. Set when the target lacks
-		// xhigh (router.CapXhighEffort) so a mid-session re-route doesn't forward
-		// an effort level Anthropic rejects with a session-killing 400.
-		ClampEffortXhighTo string
-	}
+	InjectStreamUsage       bool
+	StripThinkingBlocks     bool
+	// SanitizeToolUseIDs rewrites tool_use.id / tool_use_id values outside
+	// ^[a-zA-Z0-9_-]+$. Always set for Anthropic targets: upstreams like
+	// Kimi-k2.6 emit IDs (e.g. "functions.Read:0") Anthropic rejects on replay.
+	SanitizeToolUseIDs bool
+	// StripThoughtSignature removes `thought_signature` from content blocks.
+	// Set for Anthropic targets: the field is Gemini-only and Anthropic 400s
+	// on unknown block fields.
+	StripThoughtSignature bool
+	// SanitizeAnthropicToolSchemas removes schema constraints Anthropic rejects
+	// from tools[].input_schema on same-format Anthropic requests.
+	SanitizeAnthropicToolSchemas bool
+	// RewriteThinkingAdaptive replaces the inbound thinking block with
+	// {"type":"adaptive"} and sets output_config.effort. Used when the target
+	// model only accepts adaptive thinking (claude-opus-4-6+ / sonnet-4-6+).
+	RewriteThinkingAdaptive bool
+	OutputConfigEffort      string
+	// ForceOutputConfigEffort, when set, overrides any inbound output_config.effort
+	// and the heuristic OutputConfigEffort — user knob beats request-derived default.
+	// Value is already cap-applied (xhigh→max) by resolveForceEffort upstream.
+	ForceOutputConfigEffort string
+	// ClampEffortXhighTo downgrades a caller-supplied "xhigh" effort (`effort`
+	// and `output_config.effort`) to this value. Set when the target lacks
+	// xhigh (router.CapXhighEffort) so a mid-session re-route doesn't forward
+	// an effort level Anthropic rejects with a session-killing 400.
+	ClampEffortXhighTo string
+}
+
 func (e *RequestEnvelope) emitSameFormat(ov EmitOverrides) ([]byte, error) {
 	return applyOverrides(e.body, ov)
 }
@@ -470,7 +471,7 @@ func applyOverrides(body []byte, ov EmitOverrides) ([]byte, error) {
 		}
 	}
 
-		// ForceOutputConfigEffort wins over any request-derived or inbound
+	// ForceOutputConfigEffort wins over any request-derived or inbound
 	// effort; write both sibling fields so either form is overridden.
 	if ov.ForceOutputConfigEffort != "" {
 		out, err = sjson.SetBytes(out, "output_config.effort", ov.ForceOutputConfigEffort)
@@ -960,11 +961,11 @@ func resolveOpenAIOverrides(body []byte, opts EmitOptions) EmitOverrides {
 // Anthropic adaptive effort levels referenced by emit logic. Every adaptive
 // model accepts low/medium/high/max; xhigh requires router.CapXhighEffort.
 const (
-	effortLow     = "low"
-	effortMedium  = "medium"
-	effortHigh    = "high"
-	effortMax     = "max"
-	effortXhigh   = "xhigh"
+	effortLow    = "low"
+	effortMedium = "medium"
+	effortHigh   = "high"
+	effortMax    = "max"
+	effortXhigh  = "xhigh"
 )
 
 // CanonicalizeEffort maps user-facing values (incl. the force-model alias

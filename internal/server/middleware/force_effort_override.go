@@ -1,7 +1,3 @@
-// force_effort_override.go — WithForceEffortOverride middleware for x-weave-effort.
-// Accepts canonical levels (low/medium/high/max/xhigh) and aliases (fast/minimal/ultra);
-// invalid values → 400 via abortInvalidKnob.
-
 package middleware
 
 import (
@@ -14,9 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ForceEffortOverrideHeader is the request-header key. Lower-case is
-// conventional per the x-weave-* family; Envoy / most proxies case-fold
-// headers, so casing doesn't matter at the wire.
+// ForceEffortOverrideHeader is the request-header key for x-weave-effort.
 const ForceEffortOverrideHeader = "x-weave-effort"
 
 // WithForceEffortOverride parses x-weave-effort and stashes the canonical

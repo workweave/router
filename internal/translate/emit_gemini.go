@@ -1156,6 +1156,8 @@ func thinkingConfigRaw(effort, model string) string {
 		switch effort {
 		case "low", "medium", "high":
 			level = effort
+		case "max", "xhigh":
+			level = "high"
 		default:
 			// 3.x can't disable thinking — omit config rather than send an invalid value.
 			return ""
@@ -1176,7 +1178,7 @@ func thinkingConfigRaw(effort, model string) string {
 		budget = 1024
 	case "medium":
 		budget = 8192
-	case "high":
+	case "high", "max", "xhigh":
 		budget = 24576
 	default:
 		return ""

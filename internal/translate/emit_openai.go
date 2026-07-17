@@ -300,6 +300,12 @@ func (e *RequestEnvelope) buildOpenAIFromAnthropic(opts EmitOptions) ([]byte, pr
 	// Max tokens
 	writeOpenAIMaxTokensFromAnthropic(jw, body, opts)
 
+	// Write reasoning_effort for CapReasoning targets that accept it on chat/completions.
+	if forced := resolveReasoningEffortFor(opts); forced != "" && opts.Capabilities.Supports(router.CapReasoning) && reasoningEffortAcceptedOnChatCompletions(opts) {
+		jw.Key("reasoning_effort")
+		jw.Str(forced)
+	}
+
 	// Stream usage option
 	if opts.IncludeStreamUsage && gjson.GetBytes(body, "stream").Bool() {
 		jw.Key("stream_options")

@@ -86,6 +86,42 @@ func TestForceReasoningEffort_GeminiFromOpenAI(t *testing.T) {
 	assert.Equal(t, "low", tc["thinkingLevel"])
 }
 
+func TestForceEffort_CrossFormatOpenAI(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAI(http.Header{}, translate.EmitOptions{
+		TargetModel:  "openrouter/deepseek-r1",
+		Capabilities: router.NewSpec(router.CapReasoning),
+		ForceEffort:  "high",
+	})
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	assert.Equal(t, "high", out["reasoning_effort"])
+}
+
+func TestForceEffort_GeminiMaxLevel(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	for _, level := range []string{"max", "xhigh"} {
+		t.Run(level, func(t *testing.T) {
+			prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+				TargetModel:          "gemini-3.1-pro-preview",
+				Capabilities:         router.NewSpec(router.CapReasoning),
+				ForceReasoningEffort: level,
+			})
+			require.NoError(t, err)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(prep.Body, &out))
+			gc := out["generationConfig"].(map[string]any)
+			tc := gc["thinkingConfig"].(map[string]any)
+			assert.Equal(t, "high", tc["thinkingLevel"])
+		})
+	}
+}
+
 func itoaLocal(n int) string {
 	if n == 0 {
 		return "0"
@@ -108,10 +144,8 @@ func itoaLocal(n int) string {
 	return string(b[i:])
 }
 
-// CanonicalizeEffort maps alias forms to their canonical wire-format
-// counterparts and leaves unrecognized values alone. The latter is load-
-// bearing for IsValidEffort — caller can probe "Is this a known level
-// or did the user fat-finger the keyboard" without losing the original.
+// TestCanonicalizeEffort maps alias and canonical forms; unrecognized values
+// pass through unchanged so IsValidEffort can distinguish typos.
 func TestCanonicalizeEffort(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -157,15 +191,14 @@ func TestIsValidEffort(t *testing.T) {
 	}
 }
 
-// ResolveForceEffort applies per-model caps. xhigh on opus-4-7+/fable
-// passes through; xhigh on a sonnet-4-6 / opus-4-6 lands as max (the same
-// clamp the inbound effort field already had via ClampEffortXhighTo).
+// TestResolveForceEffort applies per-model xhigh cap (xhigh→max on
+// non-CapXhighEffort targets).
 func TestResolveForceEffort(t *testing.T) {
 	cases := []struct {
-		name    string
-		level   string
-		spec    router.ModelSpec
-		want    string
+		name  string
+		level string
+		spec  router.ModelSpec
+		want  string
 	}{
 		{"xhigh_capable_passes", "xhigh", router.NewSpec(router.CapAdaptiveThinking, router.CapXhighEffort), "xhigh"},
 		{"xhigh_incapable_clamps_to_max", "xhigh", router.NewSpec(router.CapAdaptiveThinking), "max"},
@@ -179,4 +212,3 @@ func TestResolveForceEffort(t *testing.T) {
 		})
 	}
 }
-
