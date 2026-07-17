@@ -1,0 +1,47 @@
+db/queries/session_pins.sql
+  s_82468180348c6f::t_87e4c266581a16 22-27,43-48,67-88
+db/migrations/0009_session_pin_consecutive_upstream_errors.down.sql
+  s_82468180348c6f::t_d20b11e5a39086 1-5
+internal/proxy/service.go
+  s_82468180348c6f::t_1d4028d2268fee 2087-2089
+  s_82468180348c6f::t_bacbeac7b521f1 1194-1200
+internal/proxy/pin_eviction.go
+  s_82468180348c6f::t_a5bfc936602eb8 1-142
+internal/proxy/pin_eviction_internal_test.go
+  s_82468180348c6f::t_8c0825c1662509 144
+  s_82468180348c6f::t_e2d198703362c1 9
+  s_82468180348c6f::t_321d5635a7bdb3 145
+  s_82468180348c6f::t_e49b1016084562 1-8,10-143,146-312
+db/migrations/0009_session_pin_consecutive_upstream_errors.up.sql
+  s_82468180348c6f::t_66b6762e8c9fec 1-12
+internal/sqlc/models.go
+  s_82468180348c6f::t_7a660501a09932 147-161
+internal/postgres/session_pin_repo.go
+  s_82468180348c6f::t_d0bfe8525d1124 80-110
+internal/sqlc/session_pins.sql.go
+  s_82468180348c6f::t_7a660501a09932 16,34,57,62-120,203-208,232-237,252-257
+internal/proxy/service_session_pin_test.go
+  s_82468180348c6f::t_6b59a1acbc8629 88-104
+  s_82468180348c6f::t_1740b9fb75be6c 29-40
+internal/proxy/turnloop_internal_test.go
+  s_82468180348c6f::t_a4a39b4f4770b1 51-58
+internal/router/sessionpin/store.go
+  s_82468180348c6f::t_d9971c34b49c95 65-73,78-79
+  s_82468180348c6f::t_3b1ec244408a42 28-35,37-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f27559c96973f68803ed0b6d359a52416b9ab7ad",
+  "prompts": {},
+  "sessions": {
+    "s_82468180348c6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c13c3d87-43dc-4a76-8a98-dfe5e4d5d041",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

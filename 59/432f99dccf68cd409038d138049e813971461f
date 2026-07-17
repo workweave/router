@@ -1,0 +1,50 @@
+db/migrations/0033_telemetry-planner-ev-shadow.down.sql
+  s_035d3d44682683::t_e25b146514d8f2 17-18
+db/migrations/0033_telemetry-planner-ev-shadow.up.sql
+  s_035d3d44682683::t_f390850f874f3f 16,18,20,22,24,26,28,31-32
+  s_035d3d44682683::t_581f112f437bd0 3-5
+internal/proxy/planner_telemetry_internal_test.go
+  s_035d3d44682683::t_869ad22d4ccc77 12
+  s_035d3d44682683::t_a10c39840dc123 28
+  s_035d3d44682683::t_72c2d87f07f8db 32
+  s_035d3d44682683::t_3a411a3e9c2070 47-48
+  s_035d3d44682683::t_161c9418a8440b 70
+  s_035d3d44682683::t_bd55f9677154d8 101-102
+internal/proxy/turnloop_internal_test.go
+  s_035d3d44682683::t_c31e83cea374a6 108-109
+  s_035d3d44682683::t_eba88af6c24ec7 122
+db/queries/model_router_request_telemetry.sql
+  s_035d3d44682683::t_30464aeb910ece 23-24
+internal/proxy/turnloop.go
+  s_035d3d44682683::t_1d551ce98752d8 661-662
+  s_035d3d44682683::t_365a66421f8d07 40-42,50-52
+internal/proxy/service.go
+  s_035d3d44682683::t_8815d891ab130d 2661-2663,2670-2672
+internal/router/planner/policy.go
+  s_035d3d44682683::t_9486ca3099faed 50-52
+  s_035d3d44682683::t_6f0446b14524fa 79-82
+internal/router/planner/policy_test.go
+  s_035d3d44682683::t_65932b978d351d 136
+internal/proxy/telemetry.go
+  s_035d3d44682683::t_a90e9fe25d33d1 106-109
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_035d3d44682683::t_9e758afafcaff6 1028-1029
+internal/sqlc/models.go
+  s_035d3d44682683::t_2a6835542e3cf8 154,156,158,160,162,164,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "59432f99dccf68cd409038d138049e813971461f",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

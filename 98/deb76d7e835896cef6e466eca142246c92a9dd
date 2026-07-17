@@ -1,0 +1,45 @@
+db/migrations/0016_telemetry-turn-type.down.sql
+  s_d6e921afe857c5::t_411d7cd4d871e2 1-6
+db/migrations/0016_telemetry-turn-type.up.sql
+  s_d6e921afe857c5::t_e532f96f44576b 1-6
+internal/proxy/telemetry.go
+  s_d6e921afe857c5::t_31bac8ca5bc19c 62
+  s_d6e921afe857c5::t_aea22d8c8cf72a 100
+frontend/src/lib/api.ts
+  s_d6e921afe857c5::t_68a10839c65729 73
+internal/api/admin/metrics.go
+  s_d6e921afe857c5::t_34af444d86212d 122
+  s_d6e921afe857c5::t_0d566748de07ca 184
+db/queries/model_router_request_telemetry.sql
+  s_d6e921afe857c5::t_a8c5c6f0762843 229
+  s_d6e921afe857c5::t_e16b066c3f33ee 261
+  s_d6e921afe857c5::t_783797b296c20b 47-48
+  s_d6e921afe857c5::t_fa366ed5bc5477 6-8
+  s_d6e921afe857c5::t_0b168dd76326fe 86
+  s_d6e921afe857c5::t_9f197b3675c7e7 87
+internal/postgres/telemetry.go
+  s_d6e921afe857c5::t_1fa0bf18d33563 91
+  s_d6e921afe857c5::t_68c610b4820960 328,366
+  s_d6e921afe857c5::t_2f9e74e5b8df4a 433
+  s_d6e921afe857c5::t_3b09bef7476eb9 393
+frontend/src/components/charts/DrillDownModal.tsx
+  s_d6e921afe857c5::t_e6ac9c709a0501 253-255
+  s_d6e921afe857c5::t_b7f1d24986396f 101-124
+  s_d6e921afe857c5::t_43d5322dc0818b 143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "98deb76d7e835896cef6e466eca142246c92a9dd",
+  "prompts": {},
+  "sessions": {
+    "s_d6e921afe857c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "578c8a68-2399-4dc9-b40e-d40fc435ccc9",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

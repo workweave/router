@@ -1,0 +1,34 @@
+internal/observability/logger.go
+  d4e86cf3fc46af92 8,62-76
+internal/server/middleware/auth.go
+  d4e86cf3fc46af92 68,70
+Makefile
+  d4e86cf3fc46af92 12,53-145,193-202
+docker-compose.yml
+  d4e86cf3fc46af92 87-92
+cmd/router/main.go
+  d4e86cf3fc46af92 169
+  6f5c0fee49cda77d 533-534
+cmd/seed/main.go
+  d4e86cf3fc46af92 117,119-121,126-137,142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "610c5d03e710756c3aa6d9a9897fab1c3daf2749",
+  "prompts": {
+    "d4e86cf3fc46af92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "538f43ee-b1ea-442f-ab9e-0a2e9a4b8432",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 300,
+      "total_deletions": 142,
+      "accepted_lines": 146,
+      "overriden_lines": 0
+    }
+  }
+}

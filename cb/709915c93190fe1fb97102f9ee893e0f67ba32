@@ -1,0 +1,61 @@
+internal/router/cluster/artifacts/v0.73/metadata.yaml
+  s_aec95a8ffbca65::t_c52be3e10ff71e 188-212
+  s_aec95a8ffbca65::t_aa780ade21efdf 1,5-6
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 2-4,7-187,213-245
+internal/router/catalog/family_test.go
+  s_aec95a8ffbca65::t_5f5fae3e57ddea 1-47,50-118
+  s_aec95a8ffbca65::t_d1027c15798425 48-49
+internal/router/cluster/artifacts/v0.71-rerank/metadata.yaml
+  s_6ac53b8de8c1dc::t_a1c6f3dddac7bc 1-221
+internal/router/cluster/artifacts/v0.73/quality_means.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-449
+internal/router/cluster/artifacts/v0.73/model_features.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-578
+internal/router/cluster/artifacts_test.go
+  s_aec95a8ffbca65::t_1b49bb2dc4d7b5 7
+  s_aec95a8ffbca65::t_c1c2f73eb10c49 225-252
+internal/router/cluster/artifacts/v0.71-rerank/rankings.json
+  s_6ac53b8de8c1dc::t_a1c6f3dddac7bc 1-432
+internal/router/cluster/artifacts/v0.71-rerank/model_axes.json
+  s_6ac53b8de8c1dc::t_cb4ab2fe788abb 1-214
+internal/router/cluster/artifacts/v0.73/model_axes.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-230
+internal/router/cluster/artifacts/v0.71-rerank/quality_means.json
+  s_6ac53b8de8c1dc::t_a1c6f3dddac7bc 1-428
+internal/router/cluster/artifacts/v0.73/rankings.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-455
+internal/router/catalog/family.go
+  s_aec95a8ffbca65::t_8be58c53f7eb33 8,14-23,47
+  s_aec95a8ffbca65::t_1499e0c334f687 1-7,9-13,24-46,48-117
+internal/router/cluster/artifacts/v0.71-rerank/model_features.json
+  s_6ac53b8de8c1dc::t_a1c6f3dddac7bc 1-535
+internal/router/cluster/artifacts/v0.73/model_registry.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-2,6-180
+  s_aec95a8ffbca65::t_f4fc0a37a5a226 3-5
+internal/router/cluster/artifacts/v0.71-rerank/model_registry.json
+  s_6ac53b8de8c1dc::t_52113c896e82e0 1-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb709915c93190fe1fb97102f9ee893e0f67ba32",
+  "prompts": {},
+  "sessions": {
+    "s_6ac53b8de8c1dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2aad668b-ef69-498d-b1eb-8c906cf85738",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

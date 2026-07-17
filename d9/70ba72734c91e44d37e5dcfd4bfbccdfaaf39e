@@ -1,0 +1,25 @@
+internal/translate/force_effort_test.go
+  s_fb5564a6d9d291::t_bf9a005bcbfaea 71-88
+internal/postgres/session_pin_repo.go
+  s_fb5564a6d9d291::t_5beadff51646df 133-135
+internal/translate/emit_gemini.go
+  s_fb5564a6d9d291::t_e8c95039b6dda7 293
+  s_fb5564a6d9d291::t_d8136990912987 563,565-571
+  s_fb5564a6d9d291::t_281c21f8168dc3 525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d970ba72734c91e44d37e5dcfd4bfbccdfaaf39e",
+  "prompts": {},
+  "sessions": {
+    "s_fb5564a6d9d291": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9abdf00e-8d42-41ca-ac69-95cf22ef5504",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

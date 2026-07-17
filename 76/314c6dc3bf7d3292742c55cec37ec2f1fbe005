@@ -1,0 +1,26 @@
+internal/translate/envelope.go
+  s_1f0150b349ee2c::t_02a82e3c80cc91 1047
+internal/translate/force_effort_test.go
+  s_1f0150b349ee2c::t_a9af376917737c 141
+internal/proxy/force_model.go
+  s_1f0150b349ee2c::t_9af5fef62e3dae 241
+internal/translate/force_effort_anthropic_test.go
+  s_1f0150b349ee2c::t_3b9ac258ae73c8 97-98
+  s_1f0150b349ee2c::t_d011add5edb154 15-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "76314c6dc3bf7d3292742c55cec37ec2f1fbe005",
+  "prompts": {},
+  "sessions": {
+    "s_1f0150b349ee2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b525f980-c9fc-4332-bbe9-8a627ee8612e",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

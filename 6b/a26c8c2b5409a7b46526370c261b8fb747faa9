@@ -1,0 +1,36 @@
+install/uninstall.sh
+  s_9129fe6128df7b::t_b7ca831802f92e 267-269,274-277
+install/pi-router/README.md
+  s_9129fe6128df7b::t_17c519ffdfb3f9 49-50
+install/pi-router/src/dispatch.ts
+  s_9129fe6128df7b::t_a098d52aaa764c 109
+  s_9129fe6128df7b::t_7a3ef13c3d4006 58
+  s_9129fe6128df7b::t_218df8699a5ec6 210-211,213
+  s_9129fe6128df7b::t_ba6dc674d1839b 126-145
+  s_9129fe6128df7b::t_0fedd8f3d80373 24
+  s_9129fe6128df7b::t_9a61895bc8b8d4 43
+  s_9129fe6128df7b::t_c7cddb2ccfe673 157-163
+  s_9129fe6128df7b::t_d41bd16dce1994 220
+  s_9129fe6128df7b::t_2405a73d4a8d63 234-248
+install/pi-router/test/e2e.sh
+  s_9129fe6128df7b::t_75d0c8134e4d5d 161
+  s_9129fe6128df7b::t_462d47cb01a182 147-149,151
+install/pi-router/src/config.ts
+  s_9129fe6128df7b::t_73154a0dcae809 244-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6ba26c8c2b5409a7b46526370c261b8fb747faa9",
+  "prompts": {},
+  "sessions": {
+    "s_9129fe6128df7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0357cf6f-142f-4aff-aa3a-40d22ec0f9b7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

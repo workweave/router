@@ -1,0 +1,20 @@
+install/uninstall.sh
+  s_fe48065ab9c24e::t_02a99bc8dca53b 9-12
+  s_fe48065ab9c24e::t_521b705f7cc84c 66-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6ac1d1798dfb5165bf5bb9d375e85268be30eb34",
+  "prompts": {},
+  "sessions": {
+    "s_fe48065ab9c24e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bd1dbb9-1990-4f2c-a177-0b963d614b27",
+        "model": "deepseek/deepseek-v4-pro-20260423"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
