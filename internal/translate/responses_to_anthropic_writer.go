@@ -91,6 +91,8 @@ type ResponsesToAnthropicWriter struct {
 	// Summary fields.
 	toolUseCount      int
 	emittedStopReason string
+	lifecycle         *StreamLifecycle
+	toolLedger        *ToolCallLedger
 }
 
 // NewResponsesToAnthropicWriter wraps w to translate a streaming Responses
@@ -111,6 +113,8 @@ func NewResponsesToAnthropicWriter(w http.ResponseWriter, requestModel string, s
 		reasoningSignatures: make(map[int]string),
 		suppressed:          make(map[int]struct{}),
 		toolName:            make(map[int]string),
+		lifecycle:           NewStreamLifecycle(),
+		toolLedger:          NewToolCallLedger(),
 	}
 }
 
@@ -199,6 +203,9 @@ func (t *ResponsesToAnthropicWriter) Prelude(streaming bool) error {
 	t.inner.WriteHeader(http.StatusOK)
 	t.headersEmitted = true
 	t.started = true
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
 	if err := t.emitMessageStart(); err != nil {
 		return err
 	}
@@ -212,6 +219,17 @@ func (t *ResponsesToAnthropicWriter) Finalize() error {
 	if t.streaming {
 		if t.closed {
 			return nil
+		}
+		if err := t.processFinalResponsesSSETail(); err != nil {
+			return err
+		}
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.State() == StreamStarted {
+				if emitErr := t.emitStreamErrorEvent("api_error", "upstream stream ended before a terminal event"); emitErr != nil {
+					return emitErr
+				}
+			}
+			return err
 		}
 		return t.finishStream()
 	}
@@ -243,6 +261,17 @@ func (t *ResponsesToAnthropicWriter) processResponsesSSEBuffer() error {
 			return err
 		}
 	}
+}
+
+// processFinalResponsesSSETail flushes any buffered SSE bytes that arrived
+// without a trailing blank separator before EOF is classified.
+func (t *ResponsesToAnthropicWriter) processFinalResponsesSSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateResponsesEvent(event)
 }
 
 func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
@@ -297,6 +326,14 @@ func (t *ResponsesToAnthropicWriter) translateResponsesEvent(raw []byte) error {
 	case "response.completed", "response.incomplete":
 		// Terminal envelope counts as progress; a post-trip cancel is moot anyway.
 		t.markOutputProgress()
+		resp := gjson.GetBytes(data, "response")
+		if responsesTerminalIsFailure(resp) {
+			errType, msg := responsesFailureFromResponse(resp)
+			return t.emitStreamErrorEvent(errType, msg)
+		}
+		if err := t.lifecycle.Terminal(); err != nil {
+			return err
+		}
 		t.captureFinalResponse(data)
 		return nil
 	}
@@ -313,6 +350,7 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 		return nil
 	}
 	name := item.Get("name").String()
+	entry := t.toolLedger.Upsert(oi, item.Get("call_id").String(), name)
 	if name == "" {
 		// Nameless call would make the client invoke tool "" and loop; drop it.
 		// reconciledStopReason demotes a terminal tool_use claim with no
@@ -328,16 +366,22 @@ func (t *ResponsesToAnthropicWriter) handleOutputItemAdded(data []byte) error {
 	idx := t.blockIdx
 	t.itemBlocks[oi] = idx
 	t.itemKind[oi] = "tool_use"
-	t.toolName[oi] = name
+	t.toolName[oi] = entry.Name
 	t.toolUseCount++
 	t.blockIdx++
+	if err := t.lifecycle.Output(idx); err != nil {
+		return err
+	}
 	// Anthropic tool_use.id maps from call_id (not the fc_ item id).
-	return t.emitContentBlockStartTool(idx, item.Get("call_id").String(), name)
+	return t.emitContentBlockStartTool(idx, entry.ExternalID, entry.Name)
 }
 
 func (t *ResponsesToAnthropicWriter) handleTextDelta(data []byte) error {
 	idx, err := t.openBlock(int(gjson.GetBytes(data, "output_index").Int()), "text")
 	if err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(idx); err != nil {
 		return err
 	}
 	return t.emitContentBlockDeltaText(idx, gjson.GetBytes(data, "delta").String())
@@ -346,6 +390,9 @@ func (t *ResponsesToAnthropicWriter) handleTextDelta(data []byte) error {
 func (t *ResponsesToAnthropicWriter) handleReasoningDelta(data []byte) error {
 	idx, err := t.openBlock(int(gjson.GetBytes(data, "output_index").Int()), "thinking")
 	if err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(idx); err != nil {
 		return err
 	}
 	return t.emitContentBlockDeltaThinking(idx, gjson.GetBytes(data, "delta").String())
@@ -517,7 +564,7 @@ func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
 	switch {
 	case hasToolCall:
 		t.finalStopReason = "tool_use"
-	case resp.Get("incomplete_details.reason").String() == "max_output_tokens" || resp.Get("status").String() == "incomplete":
+	case resp.Get("incomplete_details.reason").String() == "max_output_tokens":
 		t.finalStopReason = "max_tokens"
 	default:
 		t.finalStopReason = "end_turn"
@@ -595,15 +642,13 @@ func (t *ResponsesToAnthropicWriter) finalizeBuffered() error {
 		observability.Get().Error("ResponsesToAnthropic: no terminal response event in stream")
 		return t.finalizeError()
 	}
-	// A failed terminal response is an error, not an empty assistant turn.
-	// `incomplete` (max_output_tokens) is a valid truncated response, left to
-	// ResponsesToAnthropicResponse.
-	respErr := gjson.GetBytes(finalResp, "error")
-	if gjson.GetBytes(finalResp, "status").String() == "failed" || (respErr.Exists() && respErr.Type != gjson.Null) {
-		errType, errMsg := responsesFailureFromResponse(gjson.ParseBytes(finalResp))
+	// Only max_output_tokens is a valid incomplete terminal response.
+	resp := gjson.ParseBytes(finalResp)
+	if responsesTerminalIsFailure(resp) {
+		errType, errMsg := responsesFailureFromResponse(resp)
 		observability.Get().Error("ResponsesToAnthropic: upstream response failed",
 			"request_model", t.requestModel,
-			"upstream_status", gjson.GetBytes(finalResp, "status").String(),
+			"upstream_status", resp.Get("status").String(),
 			"upstream_error_type", errType,
 			"upstream_error_message", errMsg,
 		)
@@ -696,10 +741,8 @@ func (t *ResponsesToAnthropicWriter) anthropicErrorFromBuffer() []byte {
 			errType, msg := responsesFailureFromResponse(resp)
 			return responsesError(errType, msg)
 		case "response.incomplete":
-			// Only an error if it carries an error object; a plain
-			// max_output_tokens incomplete is valid and must not stop the scan.
 			resp := gjson.GetBytes(data, "response")
-			if e := resp.Get("error"); e.Exists() && e.Type != gjson.Null {
+			if responsesTerminalIsFailure(resp) {
 				errType, msg := responsesFailureFromResponse(resp)
 				return responsesError(errType, msg)
 			}
@@ -731,6 +774,19 @@ func responsesFailureFromResponse(resp gjson.Result) (errType, msg string) {
 		return errType, "upstream Responses request failed (status: failed)"
 	}
 	return errType, ""
+}
+
+func responsesTerminalIsFailure(resp gjson.Result) bool {
+	if !resp.Exists() {
+		return true
+	}
+	if resp.Get("status").String() == "failed" {
+		return true
+	}
+	if err := resp.Get("error"); err.Exists() && err.Type != gjson.Null {
+		return true
+	}
+	return resp.Get("status").String() == "incomplete" && resp.Get("incomplete_details.reason").String() != "max_output_tokens"
 }
 
 // responsesError builds an Anthropic error envelope from a Responses-style
@@ -907,18 +963,12 @@ func (t *ResponsesToAnthropicWriter) emitValidatedToolArgsDelta(oi, index int, f
 	if verdict.Issue != nil {
 		t.toolCallIssues = append(t.toolCallIssues, *verdict.Issue)
 		if verdict.Issue.Bucket == toolcheck.BucketInvalidJSON && !verdict.Issue.Repaired {
-			const previewMax = 200
-			preview := raw
-			if len(preview) > previewMax {
-				preview = preview[:previewMax]
-			}
 			observability.Get().Warn(
 				"ResponsesToAnthropic tool_use args failed JSON validation — substituting empty args",
 				"block_index", index,
 				"request_model", t.requestModel,
 				"buffered_len", len(buffered),
 				"fallback_len", len(fallback),
-				"args_preview", preview,
 			)
 		}
 	}
@@ -970,6 +1020,11 @@ func (t *ResponsesToAnthropicWriter) emitMessageStop() error {
 // emitStreamErrorEvent writes an `event: error` frame for a stream-level
 // failure and marks the stream closed so finishStream skips the success trailer.
 func (t *ResponsesToAnthropicWriter) emitStreamErrorEvent(errType, msg string) error {
+	if t.lifecycle.State() == StreamStarted {
+		if err := t.lifecycle.Fail(); err != nil {
+			return err
+		}
+	}
 	t.bw.WriteString("event: error\ndata: ")
 	t.bw.Write(responsesError(errType, msg))
 	t.bw.WriteString("\n\n")

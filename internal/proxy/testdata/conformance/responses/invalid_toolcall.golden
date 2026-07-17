@@ -58,7 +58,8 @@
       },
       "type": "message_delta",
       "usage": {
-        "output_tokens": 0
+        "input_tokens": 120,
+        "output_tokens": 20
       }
     }
   },

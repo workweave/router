@@ -25,13 +25,14 @@ type GeminiToOpenAISSETranslator struct {
 	statusCode int
 	buf        bytes.Buffer
 
-	model    string
-	chatID   string
-	created  int64
-	started  bool
-	closed   bool
-	toolIdx  int
-	finished bool
+	model     string
+	chatID    string
+	created   int64
+	started   bool
+	closed    bool
+	toolIdx   int
+	finished  bool
+	lifecycle *StreamLifecycle
 	// pendingSig is a thoughtSignature from a text part with no functionCall
 	// sibling, held for the next tool_call chunk.
 	pendingSig string
@@ -55,6 +56,7 @@ func NewGeminiToOpenAISSETranslator(w http.ResponseWriter, model string, sink Us
 		chatID:    generateChatCmplID(),
 		created:   time.Now().Unix(),
 		usageSink: sink,
+		lifecycle: NewStreamLifecycle(),
 	}
 }
 
@@ -112,18 +114,25 @@ func (t *GeminiToOpenAISSETranslator) Flush() {
 	}
 }
 
-// Finalize flushes non-streaming responses or emits trailing [DONE] for streams.
+// Finalize flushes non-streaming responses. Streaming success requires an
+// explicit Gemini finishReason; EOF alone is an incomplete upstream stream.
 func (t *GeminiToOpenAISSETranslator) Finalize() error {
 	if t.streaming {
 		if t.closed {
 			return nil
 		}
-		if !t.finished {
-			if err := t.emitFinalChunk("stop", nil); err != nil {
-				return err
-			}
+		if err := t.processFinalSSETail(); err != nil {
+			return err
 		}
-		return t.emitDone()
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.OutputStarted() {
+				if emitErr := t.emitStreamFailure(); emitErr != nil {
+					return emitErr
+				}
+			}
+			return err
+		}
+		return nil
 	}
 
 	body := t.buf.Bytes()
@@ -174,17 +183,19 @@ func (t *GeminiToOpenAISSETranslator) processSSEBuffer() error {
 	}
 }
 
+func (t *GeminiToOpenAISSETranslator) processFinalSSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateEvent(event)
+}
+
 func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 	_, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
 		return nil
-	}
-
-	if !t.started {
-		if err := t.emitFirstChunk(); err != nil {
-			return err
-		}
-		t.started = true
 	}
 
 	candidate := gjson.GetBytes(data, "candidates.0")
@@ -270,13 +281,16 @@ func geminiUsageFromBytes(data []byte) map[string]int {
 }
 
 func (t *GeminiToOpenAISSETranslator) emitFirstChunk() error {
-	t.writeChunkHeader()
-	t.bw.WriteString(`"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`)
-	t.bw.WriteString("\n\n")
-	return t.flushEvent()
+	return t.ensureStarted()
 }
 
 func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
+	if err := t.ensureStarted(); err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
 	t.markOutputProgress()
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{"content":`)
@@ -291,6 +305,12 @@ func (t *GeminiToOpenAISSETranslator) emitTextDelta(text string) error {
 // id (embedSignatureInID) so it replays on the next request without an
 // off-spec field that typed SDKs drop and Anthropic upstreams reject.
 func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, sig string) error {
+	if err := t.ensureStarted(); err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
 	t.markOutputProgress()
 	id := embedSignatureInID(generateToolCallID(), sig)
 	t.writeChunkHeader()
@@ -309,6 +329,12 @@ func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, 
 }
 
 func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage map[string]int) error {
+	if err := t.ensureStarted(); err != nil {
+		return err
+	}
+	if err := t.lifecycle.Terminal(); err != nil {
+		return err
+	}
 	t.markOutputProgress()
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{},"finish_reason":`)
@@ -360,6 +386,32 @@ func (t *GeminiToOpenAISSETranslator) recordUsageOnSink(usage map[string]int) {
 
 func (t *GeminiToOpenAISSETranslator) emitDone() error {
 	t.bw.WriteString("data: [DONE]\n\n")
+	t.closed = true
+	return t.flushEvent()
+}
+
+func (t *GeminiToOpenAISSETranslator) ensureStarted() error {
+	if t.started {
+		return nil
+	}
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
+	t.started = true
+	t.writeChunkHeader()
+	t.bw.WriteString(`"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`)
+	t.bw.WriteString("\n\n")
+	return t.flushEvent()
+}
+
+func (t *GeminiToOpenAISSETranslator) emitStreamFailure() error {
+	if err := t.lifecycle.Fail(); err != nil {
+		return err
+	}
+	t.bw.WriteString("data: {\"error\":{\"message\":\"upstream stream ended before a terminal event\",\"type\":\"api_error\"}}\n\n")
 	t.closed = true
 	return t.flushEvent()
 }

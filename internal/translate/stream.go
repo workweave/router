@@ -39,6 +39,7 @@ type SSETranslator struct {
 
 	usageSink   UsageSink
 	inputTokens int // persists input token count from message_start for use in handleMessageDelta
+	lifecycle   *StreamLifecycle
 }
 
 // NewSSETranslator wraps w. Call Finalize after upstream returns.
@@ -51,6 +52,7 @@ func NewSSETranslator(w http.ResponseWriter, model string, sink UsageSink) *SSET
 		model:     model,
 		created:   time.Now().Unix(),
 		usageSink: sink,
+		lifecycle: NewStreamLifecycle(),
 	}
 }
 
@@ -96,6 +98,17 @@ func (t *SSETranslator) Flush() {
 // Finalize writes the buffered body for non-streaming responses.
 func (t *SSETranslator) Finalize() error {
 	if t.streaming {
+		if err := t.processFinalSSETail(); err != nil {
+			return err
+		}
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.OutputStarted() {
+				if emitErr := t.emitStreamFailure(); emitErr != nil {
+					return emitErr
+				}
+			}
+			return err
+		}
 		return nil
 	}
 
@@ -148,6 +161,15 @@ func (t *SSETranslator) processSSEBuffer() error {
 	}
 }
 
+func (t *SSETranslator) processFinalSSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateEvent(event)
+}
+
 func (t *SSETranslator) translateEvent(raw []byte) error {
 	eventType, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
@@ -166,12 +188,26 @@ func (t *SSETranslator) translateEvent(raw []byte) error {
 	case "message_delta":
 		return t.handleMessageDelta(data)
 	case "message_stop":
+		if t.lifecycle.State() == StreamIdle {
+			if err := t.lifecycle.Start(); err != nil {
+				return err
+			}
+		}
+		if err := t.lifecycle.Terminal(); err != nil {
+			return err
+		}
 		return t.emitDone()
 	}
 	return nil
 }
 
 func (t *SSETranslator) handleMessageStart(data []byte) error {
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
 	// strings.Clone: gjson returns strings backed by the buffer via unsafe;
 	// these fields outlive the event, so copy to survive buffer compaction.
 	if id := gjson.GetBytes(data, "message.id").Str; id != "" {
@@ -215,6 +251,9 @@ func (t *SSETranslator) handleContentBlockStart(data []byte) error {
 	if !t.currentIsTool {
 		return nil
 	}
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
 
 	id := gjson.GetBytes(data, "content_block.id").Str
 	name := gjson.GetBytes(data, "content_block.name").Str
@@ -236,6 +275,9 @@ func (t *SSETranslator) handleContentBlockDelta(data []byte) error {
 
 	switch deltaType {
 	case "text_delta":
+		if err := t.lifecycle.Output(0); err != nil {
+			return err
+		}
 		text := gjson.GetBytes(data, "delta.text").Str
 		t.writeChunkHeader()
 		t.bw.WriteString(`"choices":[{"index":0,"delta":{"content":`)
@@ -245,6 +287,9 @@ func (t *SSETranslator) handleContentBlockDelta(data []byte) error {
 		return t.flushEvent()
 
 	case "input_json_delta":
+		if err := t.lifecycle.Output(0); err != nil {
+			return err
+		}
 		partial := gjson.GetBytes(data, "delta.partial_json").Str
 		t.writeChunkHeader()
 		t.bw.WriteString(`"choices":[{"index":0,"delta":{"tool_calls":[{"index":`)
@@ -275,6 +320,9 @@ func (t *SSETranslator) handleMessageDelta(data []byte) error {
 	}
 
 	finishReason := mapStopReason(delta.Get("stop_reason").Str)
+	if err := t.lifecycle.Output(0); err != nil {
+		return err
+	}
 
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[{"index":0,"delta":{},"finish_reason":`)
@@ -312,6 +360,14 @@ func (t *SSETranslator) writeChunkHeader() {
 
 func (t *SSETranslator) emitDone() error {
 	t.bw.WriteString("data: [DONE]\n\n")
+	return t.flushEvent()
+}
+
+func (t *SSETranslator) emitStreamFailure() error {
+	if err := t.lifecycle.Fail(); err != nil {
+		return err
+	}
+	t.bw.WriteString("data: {\"error\":{\"message\":\"upstream stream ended before a terminal event\",\"type\":\"api_error\"}}\n\n")
 	return t.flushEvent()
 }
 
@@ -461,6 +517,8 @@ type AnthropicSSETranslator struct {
 	// tool_use.id so deterministic upstreams don't repeat ids across turns
 	// (see uniqueToolUseIDWithNonce). Lazily seeded on first use.
 	toolIDNonce string
+	lifecycle   *StreamLifecycle
+	toolLedger  *ToolCallLedger
 }
 
 // upstreamErrorBodyCap bounds how much of an upstream error body is retained
@@ -481,6 +539,8 @@ func NewAnthropicSSETranslator(w http.ResponseWriter, requestModel string, sink 
 		toolArgsInvalid: make(map[int]struct{}),
 		toolNames:       make(map[int]string),
 		usageSink:       sink,
+		lifecycle:       NewStreamLifecycle(),
+		toolLedger:      NewToolCallLedger(),
 	}
 }
 
@@ -660,6 +720,9 @@ func (t *AnthropicSSETranslator) Prelude(streaming bool) error {
 	t.streaming = true
 	t.inner.WriteHeader(http.StatusOK)
 	t.headersEmitted = true
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
 	if err := t.emitMessageStart(); err != nil {
 		return err
 	}
@@ -713,10 +776,26 @@ func (t *AnthropicSSETranslator) Finalize() error {
 		if t.closed {
 			return nil
 		}
-		if t.started {
+		if err := t.processFinalOpenAISSETail(); err != nil {
+			return err
+		}
+		if t.upstreamErrorStatus != 0 {
+			if t.lifecycle.State() == StreamStarted {
+				if err := t.lifecycle.Fail(); err != nil {
+					return err
+				}
+			}
 			return t.finishStream()
 		}
-		return nil
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.State() == StreamStarted {
+				if emitErr := t.emitIncompleteErrorEvent(); emitErr != nil {
+					return emitErr
+				}
+			}
+			return err
+		}
+		return t.finishStream()
 	}
 
 	body := t.buf.Bytes()
@@ -769,12 +848,33 @@ func (t *AnthropicSSETranslator) processOpenAISSEBuffer() error {
 	}
 }
 
+func (t *AnthropicSSETranslator) processFinalOpenAISSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateOpenAIEvent(event)
+}
+
 func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 	_, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
 		return nil
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if t.lifecycle.State() == StreamIdle {
+			if err := t.lifecycle.Start(); err != nil {
+				return err
+			}
+		}
+		if t.lifecycle.State() == StreamStarted {
+			if err := t.lifecycle.Terminal(); err != nil {
+				return err
+			}
+		} else if t.lifecycle.State() != StreamTerminal {
+			return ErrStreamOrder
+		}
 		return t.finishStream()
 	}
 
@@ -803,6 +903,9 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 	}
 
 	if !t.started {
+		if err := t.lifecycle.Start(); err != nil {
+			return err
+		}
 		if err := t.emitMessageStart(); err != nil {
 			return err
 		}
@@ -821,6 +924,9 @@ func (t *AnthropicSSETranslator) translateOpenAIEvent(raw []byte) error {
 
 	if fr := firstChoice.Get("finish_reason").Str; fr != "" {
 		t.finishReason = strings.Clone(fr)
+		if err := t.lifecycle.Terminal(); err != nil {
+			return err
+		}
 		// Terminal output: the upstream signaled the turn is ending.
 		t.markOutputProgress()
 	}
@@ -913,6 +1019,9 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		reasoning = delta.Get("reasoning").Str
 	}
 	if reasoning != "" {
+		if err := t.lifecycle.Output(t.blockIdx); err != nil {
+			return err
+		}
 		// Streamed reasoning is real upstream output (rendered as a thinking
 		// block), so it counts as output progress and resets the stall watchdog.
 		t.markOutputProgress()
@@ -922,6 +1031,9 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	}
 
 	if content := delta.Get("content").Str; content != "" {
+		if err := t.lifecycle.Output(t.blockIdx); err != nil {
+			return err
+		}
 		// Even whitespace-only content is real output, distinct from a keepalive.
 		t.markOutputProgress()
 		if t.thinkTagReasoning {
@@ -958,6 +1070,10 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 	var emitErr error
 	toolCalls.ForEach(func(_, tc gjson.Result) bool {
 		idx := int(tc.Get("index").Int())
+		if err := t.lifecycle.Output(t.blockIdx); err != nil {
+			emitErr = err
+			return false
+		}
 		if _, suppressed := t.suppressedTools[idx]; suppressed {
 			// Argument fragments of a tool_call we refused to open. Drop them
 			// so they don't stream into a stale/zero block index.
@@ -965,8 +1081,9 @@ func (t *AnthropicSSETranslator) emitDelta(delta gjson.Result) error {
 		}
 		blockIdx, ok := t.toolBlocks[idx]
 		if !ok {
-			id := tc.Get("id").Str
-			name := tc.Get("function.name").Str
+			entry := t.toolLedger.Upsert(idx, tc.Get("id").Str, tc.Get("function.name").Str)
+			id := entry.ExternalID
+			name := entry.Name
 			// A tool_call with no function name (GLM/Qwen/Kimi/gpt-oss
 			// occasionally emit one) would make the client invoke tool "" and
 			// loop. Drop it before closing text/thinking so it can't truncate
@@ -1037,17 +1154,11 @@ func (t *AnthropicSSETranslator) emitValidatedToolArgsDelta(blockIdx int) error 
 		t.toolCallIssues = append(t.toolCallIssues, *verdict.Issue)
 		if verdict.Issue.Bucket == toolcheck.BucketInvalidJSON && !verdict.Issue.Repaired {
 			t.toolArgsInvalid[blockIdx] = struct{}{}
-			preview := payload
-			const previewMax = 200
-			if len(preview) > previewMax {
-				preview = preview[:previewMax]
-			}
 			observability.Get().Error(
 				"AnthropicSSE tool_use args failed JSON validation — substituting empty args",
 				"block_index", blockIdx,
 				"upstream_model", t.modelFromUpstream,
 				"args_len", len(payload),
-				"args_preview", preview,
 			)
 		}
 	}
@@ -1246,9 +1357,6 @@ func (t *AnthropicSSETranslator) finishStream() error {
 		if err := t.emitErrorEvent(); err != nil {
 			return err
 		}
-		if err := t.emitMessageStop(); err != nil {
-			return err
-		}
 		t.closed = true
 		return nil
 	}
@@ -1265,6 +1373,15 @@ func (t *AnthropicSSETranslator) finishStream() error {
 	}
 	t.closed = true
 	return nil
+}
+
+func (t *AnthropicSSETranslator) emitIncompleteErrorEvent() error {
+	if err := t.lifecycle.Fail(); err != nil {
+		return err
+	}
+	t.bw.WriteString("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream ended before a terminal event\"}}\n\n")
+	t.closed = true
+	return t.flushEvent()
 }
 
 // emitErrorEvent emits an Anthropic `error` event from the captured upstream

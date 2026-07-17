@@ -349,6 +349,8 @@ type ResponsesWriter struct {
 	toolItems        map[int]*responsesToolItem
 	finishReason     string
 	usage            *responsesUsage
+	lifecycle        *StreamLifecycle
+	toolLedger       *ToolCallLedger
 }
 
 type responsesTextItem struct {
@@ -395,6 +397,8 @@ func NewResponsesWriter(w http.ResponseWriter, model string) *ResponsesWriter {
 		responseID:     newResponsesID("resp"),
 		createdAt:      time.Now().Unix(),
 		toolItems:      map[int]*responsesToolItem{},
+		lifecycle:      NewStreamLifecycle(),
+		toolLedger:     NewToolCallLedger(),
 	}
 }
 
@@ -485,6 +489,9 @@ func (t *ResponsesWriter) Write(data []byte) (int, error) {
 		return n, nil
 	}
 	if !t.headersEmitted {
+		if err := t.lifecycle.Start(); err != nil {
+			return n, err
+		}
 		if err := t.emitCreated(); err != nil {
 			return n, err
 		}
@@ -513,6 +520,9 @@ func (t *ResponsesWriter) Prelude(streaming bool) error {
 		t.httpHeadersSent = true
 	}
 	t.headersEmitted = true
+	if err := t.lifecycle.Start(); err != nil {
+		return err
+	}
 	return t.emitCreated()
 }
 
@@ -533,21 +543,18 @@ func (t *ResponsesWriter) Finalize() error {
 		return t.bw.Flush()
 	}
 	if t.streaming {
-		// Upstream may have produced zero chunks; still emit a clean completed envelope.
-		if !t.headersEmitted {
-			if err := t.emitCreated(); err != nil {
-				return err
-			}
-			t.headersEmitted = true
+		if err := t.processFinalSSETail(); err != nil {
+			return err
 		}
-		t.closeOpenItems()
-		if !t.completedEmitted {
-			if err := t.emitCompleted(); err != nil {
-				return err
+		if err := t.lifecycle.EOF(); err != nil {
+			if t.lifecycle.State() == StreamStarted {
+				if emitErr := t.emitIncompleteFailure(); emitErr != nil {
+					return emitErr
+				}
 			}
-			t.completedEmitted = true
+			return err
 		}
-		return t.bw.Flush()
+		return nil
 	}
 
 	body := t.buf.Bytes()
@@ -579,6 +586,11 @@ func (t *ResponsesWriter) FinalizeError(_ error) error {
 	if t.passthrough || !t.streaming || !t.headersEmitted || t.completedEmitted {
 		return nil
 	}
+	if t.lifecycle.State() == StreamStarted {
+		if err := t.lifecycle.Fail(); err != nil {
+			return err
+		}
+	}
 	t.closeOpenItems()
 	if err := t.emitFailed(); err != nil {
 		return err
@@ -602,15 +614,30 @@ func (t *ResponsesWriter) processSSEBuffer() error {
 	}
 }
 
+func (t *ResponsesWriter) processFinalSSETail() error {
+	if t.buf.Len() == 0 {
+		return nil
+	}
+	event := append([]byte(nil), t.buf.Bytes()...)
+	t.buf.Reset()
+	return t.translateChunk(event)
+}
+
 func (t *ResponsesWriter) translateChunk(raw []byte) error {
 	_, data := sse.ParseEvent(raw)
 	if len(data) == 0 {
 		return nil
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if !t.lifecycle.OutputStarted() {
+			return nil
+		}
 		t.closeOpenItems()
 		if t.completedEmitted {
 			return nil
+		}
+		if err := t.lifecycle.Terminal(); err != nil {
+			return err
 		}
 		t.completedEmitted = true
 		return t.emitCompleted()
@@ -655,6 +682,13 @@ func (t *ResponsesWriter) translateChunk(raw []byte) error {
 	if fr := choice.Get("finish_reason"); fr.Type == gjson.String && fr.Str != "" {
 		t.finishReason = fr.Str
 		t.closeOpenItems()
+		if !t.completedEmitted {
+			if err := t.lifecycle.Terminal(); err != nil {
+				return err
+			}
+			t.completedEmitted = true
+			return t.emitCompleted()
+		}
 	}
 	return nil
 }
@@ -675,6 +709,9 @@ func (t *ResponsesWriter) appendText(s string) error {
 		}
 		t.textItem.openedPart = true
 	}
+	if err := t.lifecycle.Output(t.textItem.outputIndex); err != nil {
+		return err
+	}
 
 	// Prepend the badge to the first text delta: Codex desktop drops
 	// reasoning-summary items from custom providers, so text is the only
@@ -694,6 +731,7 @@ func (t *ResponsesWriter) appendText(s string) error {
 }
 
 func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
+	entry := t.toolLedger.Upsert(idx, tc.Get("id").Str, tc.Get("function.name").Str)
 	item, ok := t.toolItems[idx]
 	if !ok {
 		item = &responsesToolItem{
@@ -701,14 +739,8 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 		}
 		t.toolItems[idx] = item
 		item.outputIndex = t.nextOutputIndex()
-		if id := tc.Get("id").Str; id != "" {
-			item.callID = strings.Clone(id)
-		} else {
-			item.callID = newResponsesID("call")
-		}
-		if name := tc.Get("function.name").Str; name != "" {
-			item.name = strings.Clone(name)
-		}
+		item.callID = entry.ExternalID
+		item.name = entry.Name
 		if err := t.emitFunctionCallItemAdded(item); err != nil {
 			return err
 		}
@@ -716,11 +748,13 @@ func (t *ResponsesWriter) appendToolCall(idx int, tc gjson.Result) error {
 	// Later chunks may carry name/id only on first delta; pick up any later
 	// arrivals defensively.
 	if item.name == "" {
-		if name := tc.Get("function.name").Str; name != "" {
-			item.name = strings.Clone(name)
-		}
+		item.name = entry.Name
+	}
+	if err := t.lifecycle.Output(item.outputIndex); err != nil {
+		return err
 	}
 	if args := tc.Get("function.arguments").Str; args != "" {
+		t.toolLedger.AppendArguments(idx, tc.Get("id").Str, tc.Get("function.name").Str, args)
 		item.arguments.WriteString(args)
 		return t.emitFunctionArgsDelta(item, args)
 	}
@@ -768,6 +802,20 @@ func (t *ResponsesWriter) closeOpenItems() {
 		_ = t.emitFunctionCallItemDone(item)
 		item.closed = true
 	}
+}
+
+// emitIncompleteFailure terminates a committed translated stream without
+// fabricating a response.completed event after upstream EOF.
+func (t *ResponsesWriter) emitIncompleteFailure() error {
+	if err := t.lifecycle.Fail(); err != nil {
+		return err
+	}
+	t.closeOpenItems()
+	if err := t.emitFailed(); err != nil {
+		return err
+	}
+	t.completedEmitted = true
+	return t.bw.Flush()
 }
 
 // ---------- event emitters ----------
