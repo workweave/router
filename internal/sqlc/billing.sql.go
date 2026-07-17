@@ -99,6 +99,9 @@ user_month_spend AS (
     -- Month-bucketed per-engineer spend counter for monthly limit
     -- enforcement. Same gating and sign convention as key_spend; no-ops when
     -- the request carried no resolvable user identity (router_user_id NULL).
+    -- Also no-ops when the user row no longer exists (stale cached id after a
+    -- cascade delete mid-request) so a dangling FK can't roll back the debit
+    -- after inference was already served.
     INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
     SELECT
         $8::uuid,
@@ -107,6 +110,10 @@ user_month_spend AS (
         NOW()
     WHERE $8::uuid IS NOT NULL
       AND EXISTS (SELECT 1 FROM updated)
+      AND EXISTS (
+          SELECT 1 FROM router.model_router_users
+          WHERE id = $8::uuid
+      )
     ON CONFLICT (router_user_id, month) DO UPDATE
     SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
         updated_at = NOW()
@@ -203,6 +210,9 @@ type DebitOrgCreditsParams struct {
 //	    -- Month-bucketed per-engineer spend counter for monthly limit
 //	    -- enforcement. Same gating and sign convention as key_spend; no-ops when
 //	    -- the request carried no resolvable user identity (router_user_id NULL).
+//	    -- Also no-ops when the user row no longer exists (stale cached id after a
+//	    -- cascade delete mid-request) so a dangling FK can't roll back the debit
+//	    -- after inference was already served.
 //	    INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
 //	    SELECT
 //	        $8::uuid,
@@ -211,6 +221,10 @@ type DebitOrgCreditsParams struct {
 //	        NOW()
 //	    WHERE $8::uuid IS NOT NULL
 //	      AND EXISTS (SELECT 1 FROM updated)
+//	      AND EXISTS (
+//	          SELECT 1 FROM router.model_router_users
+//	          WHERE id = $8::uuid
+//	      )
 //	    ON CONFLICT (router_user_id, month) DO UPDATE
 //	    SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
 //	        updated_at = NOW()
