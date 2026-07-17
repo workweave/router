@@ -10,8 +10,6 @@ filename key for manual lookups in the router dashboard.
 The router carries this id as `X-Claude-Code-Session-Id` on every request and
 stores it in `model_router_users.SessionID` for analytics joins.
 
-1. Run `echo "$CLAUDE_CODE_SESSION_ID"`.
-2. If empty, the transcript filename under `~/.claude/projects/` for this
-   session also carries the id — check the most recently written file.
+Run `echo "$CLAUDE_CODE_SESSION_ID"`.
 
 Then tell me the session id in one line, formatted as inline code so I can copy it.
