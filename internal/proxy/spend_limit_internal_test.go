@@ -88,3 +88,11 @@ func TestCheckUserMonthlySpendLimit_ReadErrorFailsClosed(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, billing.ErrSpendLimitCheckUnavailable)
 }
+
+func TestCheckUserMonthlySpendLimit_OverrideSkips(t *testing.T) {
+	// Even over the limit (and with a repo that would error), a billing-override
+	// request bypasses engineer enforcement — WithBalanceCheck already let it in.
+	s := &Service{billing: billing.NewService(&spendLimitRepo{spent: 1_000_000, limit: micros(1_000_000), err: errors.New("must not be called")})}
+	ctx := context.WithValue(spendLimitCtx("u1", "org-1"), billing.HasOverrideContextKey, true)
+	assert.NoError(t, s.checkUserMonthlySpendLimit(ctx))
+}

@@ -1,6 +1,7 @@
 package middleware_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -75,5 +76,29 @@ func TestOrgMonthlySpendCap_ReadErrorFailsClosed(t *testing.T) {
 func TestOrgMonthlySpendCap_NoInstallationPassesThrough(t *testing.T) {
 	w, reached := runOrgMonthlyCap(t, "", &stubBillingRepo{orgMonthSpent: 2_500_000, orgMonthLimit: capPtr(1_000_000)})
 	assert.True(t, reached, "requests without an installation skip the gate")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestOrgMonthlySpendCap_OverridePassesThrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// Over cap AND a repo that would error: an override org must bypass both the
+	// 402 and the 503 fail-closed, matching the balance gate's escape hatch.
+	svc := billing.NewService(&stubBillingRepo{orgMonthErr: errors.New("pg down")})
+	engine := gin.New()
+	reached := false
+	engine.GET("/probe", func(c *gin.Context) {
+		withInstallation(c, "org-override")
+		ctx := context.WithValue(c.Request.Context(), billing.HasOverrideContextKey, true)
+		c.Request = c.Request.WithContext(ctx)
+		middleware.WithOrgMonthlySpendCap(svc)(c)
+		if c.IsAborted() {
+			return
+		}
+		reached = true
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	assert.True(t, reached, "billing-override orgs bypass the monthly cap")
 	assert.Equal(t, http.StatusOK, w.Code)
 }

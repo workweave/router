@@ -16,6 +16,11 @@ func (s *Service) checkUserMonthlySpendLimit(ctx context.Context) error {
 	if s.billing == nil {
 		return nil
 	}
+	// Billing override is the org-wide escape hatch (WithBalanceCheck stamps it
+	// and passes those orgs through), so engineer limits don't apply either.
+	if billing.HasOverrideFromContext(ctx) {
+		return nil
+	}
 	userID := auth.UserIDFrom(ctx)
 	if userID == "" {
 		return nil

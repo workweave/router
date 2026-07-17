@@ -24,6 +24,14 @@ func WithOrgMonthlySpendCap(svc *billing.Service) gin.HandlerFunc {
 		}
 		orgID := installation.ExternalID
 
+		// Billing override is the org-wide escape hatch: WithBalanceCheck runs
+		// first and lets these orgs through (delta-0 debits), so the monthly cap
+		// must not 402/503 them either.
+		if billing.HasOverrideFromContext(c.Request.Context()) {
+			c.Next()
+			return
+		}
+
 		result, err := svc.CheckOrgMonthlySpend(c.Request.Context(), orgID)
 		if err != nil {
 			log.Error("Org monthly spend cap check failed; refusing request", "err", err, "organization_id", orgID)
