@@ -28,9 +28,9 @@ const (
 // oauthRejectThenDeployOK returns a buffered error while an OAuth subscription
 // credential is present, then succeeds with no credential (deploy-key path).
 type oauthRejectThenDeployOK struct {
-	mu       sync.Mutex
-	onOAuth  error
-	calls    []oauthCallSnap
+	mu      sync.Mutex
+	onOAuth error
+	calls   []oauthCallSnap
 }
 
 type oauthCallSnap struct {

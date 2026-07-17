@@ -4582,6 +4582,12 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		baselineModel != decision.Model &&
 		baselineKnown && baselineCatalog.PrimaryProvider() == providers.ProviderAnthropic
 
+	// Subscription-credit failover eligibility — same predicates as ProxyMessages.
+	subscriptionRetryEligible := decision.Provider == providers.ProviderAnthropic &&
+		servedOnSubscription(ctx) &&
+		!billing.SubscriptionOnlyFromContext(ctx) &&
+		s.anthropicFallbackKeyAvailable(ctx)
+
 	primaryProvider := decision.Provider
 	var winnerIdx int
 	winnerIdx, proxyErr = s.dispatchWithFallback(ctx, failoverInputs{
@@ -4592,7 +4598,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		bindings:               bindings,
 		attempt:                attempt,
 		flushErr:               flushBufferedIfPresent,
-		deferFlushOnExhaustion: baselineEligible,
+		deferFlushOnExhaustion: baselineEligible || subscriptionRetryEligible,
 	})
 
 	baselineFailoverUsed := false
@@ -4649,6 +4655,59 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		flushBufferedIfPresent(contentSink, proxyErr)
 	}
 
+	// Subscription-credit failover: suppress the OAuth token and retry the SAME
+	// model once on the Weave/BYOK key when a subscription-served Anthropic turn
+	// hit a transient fault (429/timeout) or an OAuth rejection (401/403),
+	// pre-commit. Skipped when baseline failover already ran (non-Anthropic).
+	subscriptionFailoverUsed := false
+	subscriptionRetryRan := false
+	if subscriptionRetryEligible && !baselineAttempted && proxyErr != nil &&
+		!preludeBuf.Committed() &&
+		(providers.IsRetryable(proxyErr) || anthropicOAuthCredentialRejected(proxyErr)) {
+		subscriptionRetryRan = true
+		subCtx := withSuppressedClaudeSubscription(ctx)
+		subCtx = resolveAndInjectCredentials(subCtx, providers.ProviderAnthropic, r.Header)
+		subOpts := opts
+		subOpts.TargetProvider = providers.ProviderAnthropic
+		subOpts.TargetModel = decision.Model
+		subOpts.Capabilities = router.Lookup(decision.Model)
+		subPrep, subEmitErr := env.PrepareAnthropic(r.Header, subOpts)
+		if subEmitErr != nil {
+			log.Error("Subscription failover: emit Anthropic body failed; surfacing original error", "err", subEmitErr, "model", decision.Model)
+			flushBufferedIfPresent(contentSink, proxyErr)
+		} else if subBindings := s.resolveBindingsForDispatch(subCtx, decision); len(subBindings) == 0 {
+			log.Warn("Subscription failover: no fallback Anthropic binding available; surfacing original error",
+				"model", decision.Model,
+				"err", proxyErr,
+				"upstream_status", upstreamStatus(proxyErr))
+			flushBufferedIfPresent(contentSink, proxyErr)
+		} else {
+			log.Warn("Subscription failover: subscription throttled/timed out, retrying requested model on Weave key",
+				"model", decision.Model,
+				"err", proxyErr,
+				"upstream_status", upstreamStatus(proxyErr))
+			subMarker := marker
+			if billing.SubscriptionOnlyFromContext(ctx) {
+				subMarker = subscriptionOnlyWarningMarkerCodex
+			}
+			crossFormat = true
+			logUpstreamBody(log, routeRes.SessionKey, decision, feats, subPrep.Body)
+			winnerIdx, proxyErr = s.dispatchWithFallback(subCtx, failoverInputs{
+				w:               contentSink,
+				buf:             preludeBuf,
+				initialDecision: decision,
+				bindings:        subBindings,
+				attempt:         openaiAnthropicAttempt(subPrep, subMarker),
+				flushErr:        flushBufferedIfPresent,
+			})
+			bindings = subBindings
+			subscriptionFailoverUsed = proxyErr == nil
+		}
+	}
+	if subscriptionRetryEligible && !baselineAttempted && !subscriptionRetryRan && proxyErr != nil && !preludeBuf.Committed() {
+		flushBufferedIfPresent(contentSink, proxyErr)
+	}
+
 	finalProvider := primaryProvider
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
@@ -4658,7 +4717,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	decision.Provider = finalProvider
 
 	// Re-resolve credentials for the binding that actually served — each
-	// failover attempt gets its own context with potentially different creds.
+	// failover attempt gets its own context. Carry suppression forward only
+	// when the Weave retry actually succeeded.
+	if subscriptionFailoverUsed {
+		ctx = withSuppressedClaudeSubscription(ctx)
+	}
 	ctx = resolveAndInjectCredentials(ctx, finalProvider, r.Header)
 
 	// Re-resolve pricing for the binding that actually served (see ProxyMessages).
@@ -4711,8 +4774,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		String("dispatch.primary_provider", primaryProvider).
 		String("dispatch.final_provider", finalProvider).
 		Int64("dispatch.fallback_attempts", int64(winnerIdx)).
-		Bool("dispatch.failover_used", finalProvider != primaryProvider).
-		Bool("dispatch.baseline_failover", baselineFailoverUsed)
+		Bool("dispatch.failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed).
+		Bool("dispatch.baseline_failover", baselineFailoverUsed).
+		Bool("dispatch.subscription_failover", subscriptionFailoverUsed)
 	applyPlannerAttrs(openaiUpstreamBuilder, routeRes)
 	applyRoutingStateAttrs(openaiUpstreamBuilder, routeRes, decision.Model, sessionKey)
 	addTimingAttrs(ctx, openaiUpstreamBuilder)
@@ -4811,7 +4875,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			ClientApp:              clientID.ClientApp,
 			TurnType:               string(routeRes.TurnType),
 			RolloutID:              openaiObs.RolloutID,
-			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider),
+			FailoverUsed:           boolPtrTrue(finalProvider != primaryProvider || subscriptionFailoverUsed),
 			// (session_key, role) join key — see the Anthropic-path write site.
 			SessionKey: sessionKey[:],
 			Role:       routeRes.PinRole,
@@ -4829,7 +4893,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		})
 	}
 
-	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider, "baseline_failover", baselineFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
+	log.Info("ProxyOpenAIChatCompletion complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "primary_provider", primaryProvider, "fallback_attempts", winnerIdx, "failover_used", finalProvider != primaryProvider || subscriptionFailoverUsed, "baseline_failover", baselineFailoverUsed, "subscription_failover", subscriptionFailoverUsed, "decision_reason", decision.Reason, "requested_tier", routeRes.RequestedTier.String(), "decision_tier", catalog.TierFor(decision.Model).String(), "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "cross_format", crossFormat, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
 
 	// Subscription-only mode disables paid failover by pinning dispatch to the
