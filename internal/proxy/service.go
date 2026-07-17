@@ -2711,6 +2711,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 				"err", proxyErr)
 			baselineCtx := ctx
 			if s.claudeSubscriptionExhausted(ctx, r.Header) {
+				ctx = withSuppressedClaudeSubscription(ctx)
 				baselineCtx = withSuppressedClaudeSubscription(baselineCtx)
 			}
 			baselineCtx = resolveAndInjectCredentials(baselineCtx, providers.ProviderAnthropic, r.Header)

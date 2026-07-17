@@ -198,3 +198,30 @@ func TestAnthropicFallbackKeyAvailable(t *testing.T) {
 		assert.False(t, s.anthropicFallbackKeyAvailable(context.Background()))
 	})
 }
+
+// TestBaselineFailoverCtxSuppression covers the baseline-failover path: the
+// primary dispatch went to a non-Anthropic provider, so no Anthropic
+// credential is on ctx, and the exhausted subscription arrives only as the
+// inbound OAuth bearer. Suppression must be stamped on ctx (not just
+// baselineCtx) so the later re-resolution drops the bearer and the turn does
+// not bill against the spent subscription.
+func TestBaselineFailoverCtxSuppression(t *testing.T) {
+	headers := http.Header{"Authorization": []string{"Bearer " + exhaustedSubToken}}
+	base := context.Background()
+
+	t.Run("unsuppressed ctx resolves the inbound bearer", func(t *testing.T) {
+		out := resolveAndInjectCredentials(base, providers.ProviderAnthropic, headers)
+		assert.True(t, servedOnSubscription(out),
+			"without suppression the OAuth bearer is injected and the turn bills the subscription")
+	})
+
+	t.Run("suppressed ctx drops the bearer", func(t *testing.T) {
+		suppressed := withSuppressedClaudeSubscription(base)
+		out := resolveAndInjectCredentials(suppressed, providers.ProviderAnthropic, headers)
+		assert.False(t, servedOnSubscription(out),
+			"with suppression the OAuth bearer is dropped and the turn bills at full cost")
+		creds := CredentialsFromContext(out)
+		assert.True(t, creds == nil || !creds.OAuth,
+			"no Anthropic OAuth credential must be present: deployment key serves the turn")
+	})
+}
