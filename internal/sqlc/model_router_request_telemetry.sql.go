@@ -1297,7 +1297,8 @@ INSERT INTO router.model_router_request_telemetry (
     tool_result_bytes,
     credential_key_prefix,
     credential_key_suffix,
-    credential_source
+    credential_source,
+    unified_limit_headers
 ) VALUES (
     $1::uuid,
     $2::uuid,
@@ -1363,7 +1364,8 @@ INSERT INTO router.model_router_request_telemetry (
     $62::int,
     $63::varchar,
     $64::varchar,
-    $65::varchar
+    $65::varchar,
+    $66::jsonb
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 `
@@ -1434,6 +1436,7 @@ type InsertRequestTelemetryParams struct {
 	CredentialKeyPrefix    *string
 	CredentialKeySuffix    *string
 	CredentialSource       *string
+	UnifiedLimitHeaders    []byte
 }
 
 // Records a completed proxied request for the dashboard UI and routing
@@ -1458,6 +1461,10 @@ type InsertRequestTelemetryParams struct {
 // the upstream credential; credential_source names the precedence branch it came
 // from. All NULL on deployment-key turns. Matching prefix/suffix values across
 // distinct router_user_ids reveal one subscription paying for many seats.
+// unified_limit_headers is the verbatim anthropic-ratelimit-unified-* header
+// set observed on this turn (Claude Code cost-observing-proxy Phase 0
+// instrumentation). NULL on non-subscription turns and on rows written before
+// the column existed. Nothing reads it yet.
 //
 //	INSERT INTO router.model_router_request_telemetry (
 //	    installation_id,
@@ -1524,7 +1531,8 @@ type InsertRequestTelemetryParams struct {
 //	    tool_result_bytes,
 //	    credential_key_prefix,
 //	    credential_key_suffix,
-//	    credential_source
+//	    credential_source,
+//	    unified_limit_headers
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::uuid,
@@ -1590,7 +1598,8 @@ type InsertRequestTelemetryParams struct {
 //	    $62::int,
 //	    $63::varchar,
 //	    $64::varchar,
-//	    $65::varchar
+//	    $65::varchar,
+//	    $66::jsonb
 //	)
 //	ON CONFLICT (installation_id, request_id, span_type) DO NOTHING
 func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestTelemetryParams) error {
@@ -1660,6 +1669,7 @@ func (q *Queries) InsertRequestTelemetry(ctx context.Context, arg InsertRequestT
 		arg.CredentialKeyPrefix,
 		arg.CredentialKeySuffix,
 		arg.CredentialSource,
+		arg.UnifiedLimitHeaders,
 	)
 	return err
 }

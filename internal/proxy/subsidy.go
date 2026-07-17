@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router/catalog"
@@ -153,17 +154,37 @@ func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Heade
 }
 
 // withUsageObserver installs a context header observer that records the present
-// subscription's rate-limit headroom from upstream response headers. No-op
-// (returns ctx) when the feature is off or no subscription is present.
+// subscription's rate-limit headroom from upstream response headers, AND
+// (independently — see below) captures the raw anthropic-ratelimit-unified-*
+// header set for the Claude Code cost-observing-proxy Phase 0 instrumentation
+// (docs/internal/claude-code-cost-proxy-design.md). No-op (returns ctx) when
+// neither has anything to do: the subsidy feature is off/no subscription
+// present AND no Anthropic subscription token was detected.
+//
+// providers.WithUpstreamHeaderObserver only holds one observer per context, so
+// both concerns are composed into a single callback here rather than installed
+// separately. The raw-header capture is wrapped in its own recover so a bug in
+// brand-new Phase 0 code can never take down the production subsidy/
+// usage-bypass observer it now shares a call site with.
 func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) context.Context {
-	if s.usageObserver == nil {
-		return ctx
-	}
 	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
-	if codexTok == "" && anthroTok == "" {
+	if s.usageObserver == nil && anthroTok == "" {
 		return ctx
 	}
+	ctx = withUnifiedLimitCapture(ctx)
 	obs := func(callCtx context.Context, h http.Header) {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					observability.FromContext(callCtx).Error("weave-capture Phase 0: recovered from panic capturing unified limit headers", "recover", r)
+				}
+			}()
+			captureUnifiedLimitHeaders(callCtx, h)
+		}()
+
+		if s.usageObserver == nil || (codexTok == "" && anthroTok == "") {
+			return
+		}
 		// Record only when the call's RESOLVED credential is one of THIS request's
 		// detected subscription tokens — not any incidental OAuth credential — and
 		// key by that token so subsidyFactors reads the same key. Gating on the

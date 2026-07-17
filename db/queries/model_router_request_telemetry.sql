@@ -20,6 +20,10 @@
 -- the upstream credential; credential_source names the precedence branch it came
 -- from. All NULL on deployment-key turns. Matching prefix/suffix values across
 -- distinct router_user_ids reveal one subscription paying for many seats.
+-- unified_limit_headers is the verbatim anthropic-ratelimit-unified-* header
+-- set observed on this turn (Claude Code cost-observing-proxy Phase 0
+-- instrumentation). NULL on non-subscription turns and on rows written before
+-- the column existed. Nothing reads it yet.
 -- name: InsertRequestTelemetry :exec
 INSERT INTO router.model_router_request_telemetry (
     installation_id,
@@ -86,7 +90,8 @@ INSERT INTO router.model_router_request_telemetry (
     tool_result_bytes,
     credential_key_prefix,
     credential_key_suffix,
-    credential_source
+    credential_source,
+    unified_limit_headers
 ) VALUES (
     @installation_id::uuid,
     sqlc.narg('api_key_id')::uuid,
@@ -152,7 +157,8 @@ INSERT INTO router.model_router_request_telemetry (
     sqlc.narg('tool_result_bytes')::int,
     sqlc.narg('credential_key_prefix')::varchar,
     sqlc.narg('credential_key_suffix')::varchar,
-    sqlc.narg('credential_source')::varchar
+    sqlc.narg('credential_source')::varchar,
+    sqlc.narg('unified_limit_headers')::jsonb
 )
 ON CONFLICT (installation_id, request_id, span_type) DO NOTHING;
 

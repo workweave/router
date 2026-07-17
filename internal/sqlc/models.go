@@ -170,6 +170,7 @@ type RouterModelRouterRequestTelemetry struct {
 	TrainingAllowed      *bool
 	CaptureMode          *string
 	DebugRef             *string
+	UnifiedLimitHeaders  []byte
 }
 
 // End-user identities seen on inbound requests, scoped to an installation. Replaces the per-user API key pattern.
