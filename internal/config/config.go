@@ -4,7 +4,22 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 )
+
+// TranslationCompatibilityMode parses the global translation-compatibility
+// rollout control. Broad checks ship in shadow mode; callers must reject an
+// invalid value during startup rather than changing request behavior at
+// runtime.
+func TranslationCompatibilityMode() (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(GetOr("ROUTER_TRANSLATION_COMPATIBILITY_MODE", "shadow")))
+	switch mode {
+	case "off", "shadow", "enforce":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid ROUTER_TRANSLATION_COMPATIBILITY_MODE %q (expected off, shadow, or enforce)", mode)
+	}
+}
 
 // MustGet returns the env var value for key, panicking if it is unset or empty.
 func MustGet(key string) string {

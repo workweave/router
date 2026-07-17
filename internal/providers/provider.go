@@ -379,6 +379,41 @@ type RequestMutationStats struct {
 	// tool schema; the proxy uses this to decide if an AUTO-mode retry is worth
 	// attempting. See translate/emit_gemini.go.
 	GeminiValidatedToolMode bool
+	// Transformations carries stable, structured request transformation
+	// outcomes. Aggregate fields above remain during the migration for existing
+	// dashboards and callers.
+	Transformations []RequestTransformation
+}
+
+// TransformationAction identifies how a request semantic was handled.
+type TransformationAction string
+
+const (
+	TransformationPreserved TransformationAction = "preserved"
+	TransformationRewritten TransformationAction = "rewritten"
+	TransformationRejected  TransformationAction = "rejected"
+	TransformationDropped   TransformationAction = "dropped"
+)
+
+// TransformationSeverity identifies whether a transformation changes request
+// semantics. Paths and reasons are intended only for logs/traces, never metric
+// labels.
+type TransformationSeverity string
+
+const (
+	TransformationInfo  TransformationSeverity = "info"
+	TransformationWarn  TransformationSeverity = "warning"
+	TransformationError TransformationSeverity = "error"
+)
+
+// RequestTransformation is one structured request-conversion outcome. Code
+// must be a stable low-cardinality identifier.
+type RequestTransformation struct {
+	Code     string
+	Action   TransformationAction
+	Severity TransformationSeverity
+	Path     string
+	Reason   string
 }
 
 // OutputProgressArmer is implemented by a streaming writer that can

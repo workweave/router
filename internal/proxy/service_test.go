@@ -32,9 +32,10 @@ func (f *fakeRouter) Route(ctx context.Context, req router.Request) (router.Deci
 }
 
 type fakeProvider struct {
-	proxyBodies   [][]byte
-	proxyResponse func(w http.ResponseWriter)
-	proxyErr      error
+	proxyBodies    [][]byte
+	proxyEndpoints []providers.Endpoint
+	proxyResponse  func(w http.ResponseWriter)
+	proxyErr       error
 	// proxyCreds records the resolved credential per dispatch; nil means
 	// deployment-key fallback (no credential set).
 	proxyCreds []*proxy.Credentials
@@ -44,11 +45,36 @@ func (f *fakeProvider) Proxy(ctx context.Context, decision router.Decision, prep
 	saved := make([]byte, len(prep.Body))
 	copy(saved, prep.Body)
 	f.proxyBodies = append(f.proxyBodies, saved)
+	f.proxyEndpoints = append(f.proxyEndpoints, prep.Endpoint)
 	f.proxyCreds = append(f.proxyCreds, proxy.CredentialsFromContext(ctx))
 	if f.proxyResponse != nil {
 		f.proxyResponse(w)
 	}
 	return f.proxyErr
+}
+
+func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testing.T) {
+	provider := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","output":[]}`)
+	}}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderOpenAI, Model: "gpt-5.5", Reason: "test"}}
+	svc := proxy.NewService(fr, map[string]providers.Client{
+		providers.ProviderAnthropic: &fakeProvider{},
+		providers.ProviderOpenAI:    provider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+
+	body := []byte(`{"model":"gpt-5.5","input":"apply a patch","tools":[{"type":"custom","name":"apply_patch"}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIResponses(context.Background(), body, rec, req))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, map[string]struct{}{providers.ProviderOpenAI: {}}, fr.capturedReq.EnabledProviders)
+	require.Len(t, provider.proxyBodies, 1)
+	assert.JSONEq(t, `{"model":"gpt-5.5","input":"apply a patch","tools":[{"type":"custom","name":"apply_patch"}]}`, string(provider.proxyBodies[0]))
+	assert.Equal(t, providers.EndpointResponses, provider.proxyEndpoints[0])
+	assert.JSONEq(t, `{"id":"resp_1","object":"response","output":[]}`, rec.Body.String())
 }
 
 func (f *fakeProvider) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

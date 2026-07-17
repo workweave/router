@@ -37,6 +37,8 @@ const (
 	DispatchErrorPolicyUnavailable
 	DispatchErrorClusterUnavailable
 	DispatchErrorCreditsExhausted
+	DispatchErrorTranslationIntrinsicallyIncompatible
+	DispatchErrorTranslationProviderUnavailable
 )
 
 // DispatchErrorClass is the format-agnostic classification of a dispatch
@@ -92,6 +94,23 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			Kind:    DispatchErrorRequestNotJSONObject,
 			Status:  http.StatusBadRequest,
 			Message: "Request body must be a JSON object.",
+		}, true
+	case errors.Is(err, ErrTranslationIntrinsicallyIncompatible):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorTranslationIntrinsicallyIncompatible,
+			Status:     http.StatusBadRequest,
+			Message:    "This request requires a native compatibility path that the router does not support.",
+			LogLevel:   "warn",
+			LogMessage: "Translation requirements are intrinsically incompatible",
+		}, true
+	case errors.Is(err, ErrTranslationCompatibleProviderUnavailable):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorTranslationProviderUnavailable,
+			Status:     http.StatusServiceUnavailable,
+			Message:    "No compatible provider is currently available for this request.",
+			RetryAfter: true,
+			LogLevel:   "warn",
+			LogMessage: "Compatible translation provider unavailable",
 		}, true
 	case errors.Is(err, cluster.ErrNoEligibleProvider):
 		return DispatchErrorClass{
@@ -181,7 +200,7 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 // rather than "api_error".
 func (k DispatchErrorKind) IsClientError() bool {
 	switch k {
-	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorContextWindowExceeded, DispatchErrorInvalidRoutingKnobs:
+	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorContextWindowExceeded, DispatchErrorInvalidRoutingKnobs, DispatchErrorTranslationIntrinsicallyIncompatible:
 		return true
 	default:
 		return false

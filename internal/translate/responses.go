@@ -12,10 +12,31 @@ import (
 	"sync/atomic"
 	"time"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/sse"
 
 	"github.com/tidwall/gjson"
 )
+
+// ResponsesConversion is the typed ingress result for a Responses request.
+// OriginalBody remains byte-for-byte client input so native OpenAI-family
+// dispatch can preserve extensions that Chat Completions cannot represent.
+type ResponsesConversion struct {
+	Body         []byte
+	OriginalBody []byte
+	Stream       bool
+	Model        string
+	Requirements router.TranslationRequirements
+	Report       []ResponseTransform
+}
+
+// ResponseTransform reports an ingress conversion outcome with a stable code.
+// Details stay out of metric labels; callers may emit them in structured logs.
+type ResponseTransform struct {
+	Code   string
+	Action string
+	Path   string
+}
 
 // ResponsesToChatCompletions converts an OpenAI Responses API request into a
 // Chat Completions request so the existing proxy path can dispatch it
@@ -32,19 +53,45 @@ import (
 // alongside tools, both causing an upstream 400 mid-stream. Per-provider
 // reasoning is still driven downstream from the request's own signals.
 func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
-	if err := validateJSONObject(body); err != nil {
+	result, err := ConvertResponsesToChatCompletions(body)
+	if err != nil {
 		return nil, false, "", err
+	}
+	return result.Body, result.Stream, result.Model, nil
+}
+
+// ConvertResponsesToChatCompletions creates the routing-compatible Chat
+// projection of a Responses request. Any extension that cannot be faithfully
+// represented is marked native-only before conversion, so proxy can retain the
+// original bytes for OpenAI-family dispatch instead of silently dropping it.
+func ConvertResponsesToChatCompletions(body []byte) (ResponsesConversion, error) {
+	if err := validateJSONObject(body); err != nil {
+		return ResponsesConversion{}, err
 	}
 
 	root := gjson.ParseBytes(body)
+	result := ResponsesConversion{
+		OriginalBody: body,
+		Requirements: router.TranslationRequirements{
+			SourceFormat: router.WireFormatOpenAI,
+			Endpoint:     router.EndpointOpenAIResponses,
+		},
+	}
+	result.Requirements.Images = gjson.GetBytes(body, "input").Exists() && containsAnyKey(body, "image_url", "input_image")
+	result.Requirements.Audio, result.Requirements.Files = openAIMediaRequirements(body)
+	result.Requirements.CitationsOrSearch = containsAnyKey(body, "web_search", "web_search_preview", "file_search", "computer_use")
+	result.Requirements.StructuredOutput = root.Get("text.format").Exists() || root.Get("response_format").Exists()
 	out := map[string]any{}
 
 	model := root.Get("model").Str
+	result.Model = model
 	if model != "" {
 		out["model"] = model
 	}
 
 	stream := root.Get("stream").Bool()
+	result.Stream = stream
+	result.Requirements.UsageDetail = stream && root.Get("stream_options.include_usage").Bool()
 	out["stream"] = stream
 	if stream {
 		out["stream_options"] = map[string]any{"include_usage": true}
@@ -61,10 +108,22 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	input := root.Get("input")
 	switch {
 	case input.IsArray():
-		for _, item := range input.Array() {
+		for index, item := range input.Array() {
+			itemType := item.Get("type").Str
+			if itemType == "function_call" || itemType == "function_call_output" {
+				result.Requirements.FunctionTools = true
+			}
+			if itemType == "reasoning" {
+				result.Requirements.ReasoningReplay = true
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_reasoning_native_only", Action: "preserved", Path: "input." + strconv.Itoa(index)})
+				continue
+			}
 			msgs, err := responsesInputItemToMessages(item)
 			if err != nil {
-				return nil, false, "", err
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_unknown_input_native_only", Action: "preserved", Path: "input." + strconv.Itoa(index)})
+				continue
 			}
 			messages = append(messages, msgs...)
 		}
@@ -79,12 +138,16 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 	hasTools := false
 	if tools := root.Get("tools"); tools.IsArray() {
 		converted := make([]map[string]any, 0, len(tools.Array()))
-		for _, t := range tools.Array() {
+		for index, t := range tools.Array() {
 			// Responses tools are flat: {type, name, description, parameters, strict}.
 			// Chat Completions nest under {type:"function", function:{...}}.
 			if t.Get("type").Str != "function" {
+				result.Requirements.CustomTools = true
+				result.Requirements.NativeOnly = true
+				result.Report = append(result.Report, ResponseTransform{Code: "responses_non_function_tool_native_only", Action: "preserved", Path: "tools." + strconv.Itoa(index)})
 				continue
 			}
+			result.Requirements.FunctionTools = true
 			fn := map[string]any{}
 			if name := t.Get("name").Str; name != "" {
 				fn["name"] = name
@@ -136,14 +199,16 @@ func ResponsesToChatCompletions(body []byte) ([]byte, bool, string, error) {
 
 	bodyOut, err := json.Marshal(out)
 	if err != nil {
-		return nil, false, "", fmt.Errorf("marshal chat completions: %w", err)
+		return ResponsesConversion{}, fmt.Errorf("marshal chat completions: %w", err)
 	}
-	return bodyOut, stream, model, nil
+	result.Body = bodyOut
+	return result, nil
 }
 
 // responsesInputItemToMessages flattens a single Responses input item into one
 // or more Chat Completions messages. Returns ([], nil) for item types we don't
-// recognize so unknown future shapes don't fail the whole request.
+// recognize. Unknown shapes are rejected from the Chat projection; callers
+// may still retain them through a native Responses route.
 func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 	itemType := item.Get("type").Str
 	// Some Responses clients omit "type" and send a bare chat-style {role, content}.
@@ -199,11 +264,9 @@ func responsesInputItemToMessages(item gjson.Result) ([]map[string]any, error) {
 		return []map[string]any{out}, nil
 
 	case "reasoning":
-		// Drop reasoning items on the inbound path; assistant summaries aren't
-		// re-fed to chat-completions providers in a portable way.
-		return nil, nil
+		return nil, fmt.Errorf("responses reasoning item requires native Responses routing")
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unsupported Responses input item type %q", itemType)
 }
 
 // responsesBadgePattern matches the routing badge ResponsesWriter prepends to

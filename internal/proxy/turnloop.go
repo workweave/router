@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"workweave/router/internal/observability"
+	"workweave/router/internal/observability/apm"
+	"workweave/router/internal/observability/otel"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
@@ -206,6 +208,39 @@ func (s *Service) runTurnLoop(
 	req router.Request,
 ) (turnLoopResult, error) {
 	log := observability.FromContext(ctx)
+	if requirements, ok := translationRequirementsFromContext(ctx); ok {
+		req.TranslationRequirements = requirements
+	} else if req.TranslationRequirements.IsZero() {
+		req.TranslationRequirements = env.TranslationRequirements(translationEndpointFor(env))
+	}
+	var compatibilityErr error
+	req, compatibilityErr = s.applyTranslationPlan(ctx, req)
+	if compatibilityErr != nil {
+		return turnLoopResult{}, compatibilityErr
+	}
+	ctx = context.WithValue(ctx, translationPlanAppliedContextKey{}, true)
+	if transforms, ok := ctx.Value(responsesTransformsContextKey{}).([]translate.ResponseTransform); ok {
+		for _, transform := range transforms {
+			apm.RecordTranslationTransform(
+				ctx,
+				transform.Code,
+				transform.Action,
+				string(req.TranslationRequirements.SourceFormat),
+				string(s.translationCompatibilityMode),
+			)
+			otel.RecordLog(ctx, otel.LogRecord{
+				Name: "translation.transform",
+				Time: time.Now(),
+				Attrs: otel.NewAttrBuilder(5).
+					String("translation.code", transform.Code).
+					String("translation.action", transform.Action).
+					String("translation.source_format", string(req.TranslationRequirements.SourceFormat)).
+					String("translation.mode", string(s.translationCompatibilityMode)).
+					String("translation.path", transform.Path).
+					Build(),
+			})
+		}
+	}
 	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
 	if installationID != uuid.Nil {
 		req.InstallationID = installationID.String()
@@ -272,14 +307,15 @@ func (s *Service) runTurnLoop(
 				return res, fmt.Errorf("hard-pin: no eligible provider for %s: %w", res.TurnType, cluster.ErrClusterUnavailable)
 			}
 			provider, model = p, m
-		} else if _, excluded := req.ExcludedModels[model]; excluded {
-			// No resolver wired (bundle load failed at boot), so we can't
-			// pick an alternative. Serve the pin anyway but log the misroute.
-			log.Warn(
-				"Hard-pin: boot-time pin is in excluded_models but no resolver is wired to pick an alternative; serving pin anyway",
-				"turn_type", string(res.TurnType),
-				"model", model,
-			)
+		} else {
+			if req.EnabledProviders != nil {
+				if _, enabled := req.EnabledProviders[provider]; !enabled {
+					return res, fmt.Errorf("hard-pin provider %q is ineligible for %s: %w", provider, res.TurnType, cluster.ErrNoEligibleProvider)
+				}
+			}
+			if _, excluded := req.ExcludedModels[model]; excluded {
+				return res, fmt.Errorf("hard-pin model %q is ineligible for %s: %w", model, res.TurnType, cluster.ErrNoEligibleProvider)
+			}
 		}
 		// Operator hard-pins (ROUTER_HARD_PIN_MODEL) bypass the tier ceiling
 		// by design; clamping would silently defeat an explicit operator opt-in.
@@ -473,7 +509,9 @@ func (s *Service) runTurnLoop(
 				// operator/installation policy exclusion (a hard constraint
 				// that must not be bypassed just because context happens to fit).
 				policyExcluded := s.excludedModelsForRequest(ctx)
-				if _, policyExcludes := policyExcluded[pin.Model]; !policyExcludes {
+				_, policyExcludes := policyExcluded[pin.Model]
+				compatibilityExcludes := req.TranslationRequirements.Images && !catalog.AcceptsImages(pin.Model)
+				if !policyExcludes && !compatibilityExcludes {
 					if len(req.ExcludedModels) > 0 {
 						pruned := make(map[string]struct{}, len(req.ExcludedModels)-1)
 						for k := range req.ExcludedModels {

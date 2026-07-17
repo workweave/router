@@ -51,11 +51,12 @@ type Service struct {
 	router router.Router
 	// strategies contains every non-default router and its optional lifecycle
 	// reporters. Adding a strategy does not require another Service field.
-	strategies           map[router.Strategy]registeredStrategy
-	providers            map[string]providers.Client
-	emitter              TelemetryEmitter
-	embedOnlyUserMessage bool
-	semanticCache        *cache.Cache
+	strategies                   map[router.Strategy]registeredStrategy
+	providers                    map[string]providers.Client
+	translationCompatibilityMode TranslationCompatibilityMode
+	emitter                      TelemetryEmitter
+	embedOnlyUserMessage         bool
+	semanticCache                *cache.Cache
 	// pinStore persists session-sticky routing decisions. Nil when the feature
 	// flag is off; the orchestrator then runs the scorer every turn.
 	pinStore sessionpin.Store
@@ -896,22 +897,23 @@ const DefaultPlannerColdPinFollowFresh = false
 
 func NewService(r router.Router, providerMap map[string]providers.Client, emitter TelemetryEmitter, embedOnlyUserMessage bool, semanticCache *cache.Cache, pinStore sessionpin.Store, hardPinExplore bool, hardPinProvider, hardPinModel string, telemetry TelemetryRepository) *Service {
 	return &Service{
-		router:                     r,
-		providers:                  providerMap,
-		emitter:                    emitter,
-		embedOnlyUserMessage:       embedOnlyUserMessage,
-		semanticCache:              semanticCache,
-		pinStore:                   pinStore,
-		noProgress:                 newNoProgressTracker(),
-		compaction:                 newCompactionTracker(),
-		prefixTrimFreeSwitch:       true,
-		spiralTracker:              newSpiralTracker(),
-		spiralShadowEnabled:        true,
-		textRepetitionBreakEnabled: true,
-		hardPinExplore:             hardPinExplore,
-		hardPinProvider:            hardPinProvider,
-		hardPinModel:               hardPinModel,
-		telemetry:                  telemetry,
+		router:                       r,
+		providers:                    providerMap,
+		translationCompatibilityMode: TranslationCompatibilityShadow,
+		emitter:                      emitter,
+		embedOnlyUserMessage:         embedOnlyUserMessage,
+		semanticCache:                semanticCache,
+		pinStore:                     pinStore,
+		noProgress:                   newNoProgressTracker(),
+		compaction:                   newCompactionTracker(),
+		prefixTrimFreeSwitch:         true,
+		spiralTracker:                newSpiralTracker(),
+		spiralShadowEnabled:          true,
+		textRepetitionBreakEnabled:   true,
+		hardPinExplore:               hardPinExplore,
+		hardPinProvider:              hardPinProvider,
+		hardPinModel:                 hardPinModel,
+		telemetry:                    telemetry,
 		planner: planner.EVConfig{
 			ThresholdUSD:           DefaultPlannerThresholdUSD,
 			ExpectedRemainingTurns: DefaultPlannerExpectedRemainingTurns,
@@ -924,6 +926,17 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		cyberRefusalRepin:             false,
 		cyberRefusalFallbackModel:     "claude-sonnet-5",
 	}
+}
+
+// WithTranslationCompatibilityMode injects the startup-validated rollout
+// setting. Invalid values are ignored here because configuration validation is
+// owned by the composition root.
+func (s *Service) WithTranslationCompatibilityMode(mode TranslationCompatibilityMode) *Service {
+	switch mode {
+	case TranslationCompatibilityOff, TranslationCompatibilityShadow, TranslationCompatibilityEnforce:
+		s.translationCompatibilityMode = mode
+	}
+	return s
 }
 
 // WithPlanner overrides the EV-policy configuration. ThresholdUSD is assigned
@@ -1575,6 +1588,11 @@ func (s *Service) WithBanditRouter(r router.Router) *Service {
 // ErrPolicyUnavailable (→ HTTP 503) — never a silent fallback that would mask
 // which strategy actually served the turn.
 func (s *Service) routeFor(ctx context.Context, req router.Request) (router.Decision, error) {
+	var err error
+	req, err = s.applyTranslationPlan(ctx, req)
+	if err != nil {
+		return router.Decision{}, err
+	}
 	req = s.withPolicyRequestContext(ctx, req)
 	strategy := router.StrategyFromContext(ctx)
 	return s.routeWithStrategy(ctx, strategy, req)
@@ -1665,16 +1683,17 @@ func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decis
 	}
 
 	decision, err = s.Route(ctx, router.Request{
-		RequestedModel:       feats.Model,
-		EstimatedInputTokens: feats.Tokens,
-		HasTools:             feats.HasTools,
-		PromptText:           promptText,
-		ConversationMessages: conversationMessagesForRouting(env),
-		AvailableTools:       availableToolsForRouting(env),
-		OrganizationID:       organizationID,
-		InstallationID:       installationID,
-		ClientSessionID:      env.ClientSessionID(),
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RequestedModel:          feats.Model,
+		EstimatedInputTokens:    feats.Tokens,
+		HasTools:                feats.HasTools,
+		TranslationRequirements: env.TranslationRequirements(router.EndpointAnthropicMessages),
+		PromptText:              promptText,
+		ConversationMessages:    conversationMessagesForRouting(env),
+		AvailableTools:          availableToolsForRouting(env),
+		OrganizationID:          organizationID,
+		InstallationID:          installationID,
+		ClientSessionID:         env.ClientSessionID(),
+		RoutingKnobs:            router.RoutingKnobsFromContext(ctx),
 	})
 	return decision, err
 }
@@ -4073,15 +4092,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
 	// caller's original Responses body. Such turns skip the routing marker +
 	// semantic cache below, and dispatch the verbatim body to the Codex
-	// backend when routed to an OpenAI model (see codexPassthrough branch).
+	// backend when routed to an OpenAI model (see responsesPassthrough branch).
 	//
 	// Deliberately not forcing OpenAI-only routing: enabledProviders already
 	// scopes to providers the caller can pay for, so a dual Codex+Claude
 	// subscription routes freely across both, each billing its own plan.
 	// Subscriptions are credentials scoped to the routed model, not a pinned
 	// provider.
-	codexBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
-	codexPassthrough := len(codexBody) > 0
+	responsesBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
+	responsesPassthrough := len(responsesBody) > 0
 
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
@@ -4097,7 +4116,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Proactive context-window compaction, as in ProxyMessages. Skipped for
 	// Codex passthrough bodies, which are forwarded verbatim.
 	var compResOAI compactionResult
-	if !codexPassthrough {
+	if !responsesPassthrough {
 		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI, env.SignatureTokenSavings())
 		var compErrOAI error
 		compResOAI, compErrOAI = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, subAgentHint), outputReserveOAI, maxEligibleWindowOAI, r.Header)
@@ -4172,7 +4191,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
 	// semantic cache (the key doesn't capture headroom-dependent model choice).
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !codexPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !responsesPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -4299,7 +4318,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// Inject verbose routing marker when policy debug is enabled; gated on
 	// verbatimPassthrough (verbatim OpenAI frames can't have chunks injected).
-	verbatimPassthrough := codexPassthrough && decision.Provider == providers.ProviderOpenAI
+	verbatimPassthrough := responsesPassthrough && providers.IsOpenAICompat(decision.Provider)
 	debugEnabled, _ := ctx.Value(PolicyDebugEnabledContextKey{}).(bool)
 	if rw, ok := w.(*translate.ResponsesWriter); ok && marker != "" && !verbatimPassthrough && (debugEnabled || billing.SubscriptionOnlyFromContext(ctx)) {
 		rw.SetBadgeText(marker)
@@ -4311,15 +4330,15 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// (Codex client sees response.created via ResponsesWriter's lazy
 	// emitCreated on the first upstream byte instead).
 	if rw, ok := w.(*translate.ResponsesWriter); ok {
-		// A Codex-sub turn routed to OpenAI streams Responses SSE natively
-		// (verbatim); routed elsewhere it stays in translate mode.
+		// A native OpenAI-family Responses route streams the original Responses
+		// bytes verbatim; cross-family routes stay in translation mode.
 		//
 		// Set once here (before Prelude), not per-attempt: response.created
 		// suppression depends on passthrough being engaged before the first
 		// write. Safe because decision.Provider == OpenAI is always a
 		// single-binding GPT model with no cross-format fallback to retry
 		// into. If a GPT model ever gains a fallback, gate this per-attempt.
-		if codexPassthrough && decision.Provider == providers.ProviderOpenAI {
+		if responsesPassthrough && providers.IsOpenAICompat(decision.Provider) {
 			rw.SetPassthrough()
 		}
 		if len(bindings) <= 1 {
@@ -4336,7 +4355,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		sink = captureW
 	}
 
-	if codexPassthrough {
+	if responsesPassthrough {
 		// The client receives raw Responses SSE from the Codex backend; a
 		// chat-completions routing-marker chunk would corrupt that stream.
 		marker = ""
@@ -4354,7 +4373,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// Codex passthrough streams raw Responses SSE; wrapping it in a
 		// chat-completions marker writer would inject a foreign frame (and the
 		// output-progress scan reads choices[].delta, which Responses lacks).
-		if isResponses || codexPassthrough {
+		if isResponses || responsesPassthrough {
 			return sink
 		}
 		mw := translate.NewOpenAIRoutingMarkerWriter(sink, decision.Model, marker)
@@ -4380,17 +4399,23 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		// should not see. On failover to OpenRouter the body must be re-emitted.
 		attempt = func(actx context.Context, d router.Decision, p providers.Client) error {
 			var prep providers.PreparedRequest
-			if codexPassthrough && d.Provider == providers.ProviderOpenAI {
+			if responsesPassthrough && providers.IsOpenAICompat(d.Provider) {
 				// Dispatch the caller's ORIGINAL Responses body (untranslated) to
-				// the Codex backend, rewriting only the model. Gated on
-				// d.Provider == OpenAI: a Codex-sub turn routed to an OSS
-				// provider gets the translated chat body below instead.
-				outBody, setErr := sjson.SetBytes(codexBody, "model", d.Model)
+				// an OpenAI-family endpoint, rewriting only the model. This keeps
+				// native Responses extensions lossless.
+				outBody, setErr := sjson.SetBytes(responsesBody, "model", d.Model)
 				if setErr != nil {
 					log.Error("Failed to set routed model on Codex Responses body", "err", setErr, "decision_model", d.Model)
 					return fmt.Errorf("set codex model: %w", setErr)
 				}
-				prep = providers.PreparedRequest{Body: outBody, Endpoint: providers.EndpointResponses, Headers: make(http.Header)}
+				prep = providers.PreparedRequest{
+					Body:     outBody,
+					Endpoint: providers.EndpointResponses,
+					Headers:  make(http.Header),
+					Stats: providers.RequestMutationStats{
+						Transformations: responseTransformationsFromContext(actx),
+					},
+				}
 			} else {
 				attemptOpts := opts
 				attemptOpts.TargetProvider = d.Provider
@@ -4414,11 +4439,11 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			// Post-commit: bytes already on the wire, render as an in-stream
 			// frame instead of a corrupting envelope (pre-commit goes through
 			// dispatchWithFallback). Gate on THIS attempt being the verbatim
-			// Codex backend, not codexPassthrough alone: a Codex-sub turn can
+			// Codex backend, not responsesPassthrough alone: a native request can
 			// still route to Claude/OSS through the translating ResponsesWriter,
 			// which needs its own error frame — only the verbatim Codex attempt
 			// already delivered the upstream's own Responses error event.
-			verbatimCodex := codexPassthrough && d.Provider == providers.ProviderOpenAI
+			verbatimCodex := responsesPassthrough && providers.IsOpenAICompat(d.Provider)
 			if err != nil && !verbatimCodex && env.Stream() && preludeBuf.Committed() {
 				err = emitOpenAISSEErrorEvent(sink, err)
 			}
@@ -4713,20 +4738,22 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 // pricing, and translation matrix unchanged.
 func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	ctx = s.withUsageObserver(ctx, r.Header)
-	chatBody, _, model, err := translate.ResponsesToChatCompletions(body)
+	conversion, err := translate.ConvertResponsesToChatCompletions(body)
 	if err != nil {
 		return fmt.Errorf("translate responses request: %w", err)
 	}
-	// Codex (ChatGPT) subscription: stash the caller's ORIGINAL Responses body.
-	// A turn that resolves a Codex sub and routes to OpenAI is dispatched
-	// verbatim (passthrough mode, set post-routing) so reasoning/tool/encrypted
-	// content is never lossily re-translated. Routed elsewhere, it falls
-	// through to normal chat->Responses translation like any Responses turn.
-	// Routing, billing, and telemetry are reused via ProxyOpenAIChatCompletion
-	// (chatBody feeds routing only).
-	if codexResponsesRequest(ctx, r.Header) {
-		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, body)
+	chatBody, model := conversion.Body, conversion.Model
+	// Keep original bytes only when the request must remain native (an
+	// unrepresentable Responses union) or a Codex subscription is using its
+	// direct Responses endpoint. Ordinary portable Responses requests retain the
+	// existing Chat-projection path and its cache/compaction behavior.
+	if conversion.Requirements.NativeOnly || codexResponsesRequest(ctx, r.Header) {
+		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, conversion.OriginalBody)
 	}
+	ctx = context.WithValue(ctx, responsesRequirementsContextKey{}, conversion.Requirements)
+	ctx = context.WithValue(ctx, responsesTransformsContextKey{}, conversion.Report)
+	// Routing, billing, and telemetry are reused via
+	// ProxyOpenAIChatCompletion; chatBody is used only for routing features.
 	wrapper := translate.NewResponsesWriter(w, model)
 	// Defer the high-fidelity call-log emission until after Finalize: the
 	// ResponsesWriter buffers (non-streaming) and emits tail events only in

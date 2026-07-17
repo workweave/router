@@ -54,6 +54,30 @@ func TestProxyGeminiGenerateContent_RoutesToGoogleProvider(t *testing.T) {
 		"streaming is signalled via GeminiStreamHintHeader")
 }
 
+func TestProxyGeminiGenerateContent_RestrictsRoutingToGeminiFamily(t *testing.T) {
+	store := newFakePinStore()
+	googleProv := &fakeProvider{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderGoogle, Model: "gemini-2.5-pro", Reason: "cluster"}}
+	svc := proxy.NewService(
+		fr,
+		map[string]providers.Client{
+			providers.ProviderAnthropic: &fakeProvider{},
+			providers.ProviderGoogle:    googleProv,
+		},
+		nil, false, nil,
+		store,
+		false, providers.ProviderGoogle, "gemini-2.5-flash",
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-1.5-pro:generateContent", strings.NewReader(""))
+	require.NoError(t, svc.ProxyGeminiGenerateContent(authedCtx("00000000-0000-0000-0000-000000000001"), []byte(geminiInjectedBody), rec, req))
+
+	require.NotNil(t, fr.capturedReq)
+	assert.Equal(t, map[string]struct{}{providers.ProviderGoogle: {}}, fr.capturedReq.EnabledProviders)
+}
+
 func TestProxyGeminiGenerateContent_CrossFormatReturnsSentinel(t *testing.T) {
 	store := newFakePinStore()
 	// Cross-format from a Gemini envelope is deferred; handler maps to HTTP 501.

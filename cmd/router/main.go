@@ -101,6 +101,13 @@ func main() {
 	}
 	logger.Info("Router deployment mode", "mode", deploymentMode)
 
+	translationCompatibilityMode, err := config.TranslationCompatibilityMode()
+	if err != nil {
+		logger.Error("Invalid translation compatibility mode", "err", err)
+		panic(err)
+	}
+	logger.Info("Translation compatibility configured", "mode", translationCompatibilityMode)
+
 	// EXTERNAL_KEY_ENCRYPTION_KEY is optional: unset falls back to a no-op
 	// encryptor (BYOK secrets stored unencrypted, fine for self-hosted/local).
 	// A malformed keyset still fails closed — only a genuinely absent var bypasses.
@@ -672,6 +679,7 @@ func main() {
 	}
 
 	proxySvc := proxy.NewService(routeEntry, providerMap, telemetryEmitter, embedOnlyUser, semanticCache, pinStore, hardPinExplore, hardPinProvider, hardPinModel, repo.Telemetry).
+		WithTranslationCompatibilityMode(proxy.TranslationCompatibilityMode(translationCompatibilityMode)).
 		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlRouter, Unavailable: rl.ErrPolicyUnavailable}).
 		WithPolicyStrategy(policy.StrategySpec{
 			Strategy: router.StrategyHMM, Router: hmmRouter, Unavailable: hmm.ErrHMMUnavailable,
