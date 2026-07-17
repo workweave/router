@@ -24,9 +24,8 @@ type Repo interface {
 	// deleted mid-request, treated as "no cap to enforce".
 	GetAPIKeySpend(ctx context.Context, apiKeyID string) (spentMicros int64, capMicros *int64, found bool, err error)
 
-	// GetUserMonthlySpendAndLimit returns the engineer's current UTC-month
-	// spend and effective monthly limit: the per-user override when an
-	// override row exists (NULL override = explicitly uncapped), else the org default.
+	// GetUserMonthlySpendAndLimit returns the engineer's current UTC-month spend
+	// and effective monthly limit: per-user override when set (NULL = explicitly uncapped), else org default.
 	GetUserMonthlySpendAndLimit(ctx context.Context, organizationID, routerUserID string) (spentMicros int64, limitMicros *int64, err error)
 
 	// GetOrgMonthlySpendAndLimit returns the org's current UTC-month spend
