@@ -250,8 +250,8 @@ func TestModel_ImageInputDefaultsToUnknown(t *testing.T) {
 }
 
 func TestContextWindowFor_KnownModels(t *testing.T) {
-	// Anthropic models report 200K in the catalog; they support 1M via context-1m-2025-08-07
-	// beta when explicitly requested by the client (see contextWindowForRequest in proxy/service.go).
+	// Anthropic models report 200K in the catalog; CapExtendedContext models
+	// expand to 1M via EffectiveContextWindowFor (not this accessor).
 	assert.Equal(t, 200_000, ContextWindowFor("claude-opus-4-8"))
 	assert.Equal(t, 200_000, ContextWindowFor("claude-sonnet-4-6"))
 	assert.Equal(t, 200_000, ContextWindowFor("claude-haiku-4-5"))
@@ -276,6 +276,22 @@ func TestContextWindowFor_KnownModels(t *testing.T) {
 	assert.Equal(t, 204_800, ContextWindowFor("minimax/minimax-m2.7"))
 	// Unknown model falls back to DefaultContextWindow.
 	assert.Equal(t, DefaultContextWindow, ContextWindowFor("not-a-real-model"))
+}
+
+// TestEffectiveContextWindowFor_ExtendedContextModelsReport1M is the catalog-side
+// contract for CapExtendedContext models: catalog.ContextWindowFor stays at the
+// base 200K row, but EffectiveContextWindowFor must report 1M because dispatch
+// unconditionally injects the context-1m beta for those models.
+func TestEffectiveContextWindowFor_ExtendedContextModelsReport1M(t *testing.T) {
+	assert.Equal(t, 200_000, ContextWindowFor("claude-opus-4-8"), "base catalog window must stay 200K")
+	assert.Equal(t, 1_000_000, EffectiveContextWindowFor("claude-opus-4-8"))
+	assert.Equal(t, 1_000_000, EffectiveContextWindowFor("claude-sonnet-5"))
+	assert.Equal(t, 1_000_000, EffectiveContextWindowFor("claude-sonnet-4-6"))
+	assert.Equal(t, 1_000_000, EffectiveContextWindowFor("claude-opus-4-6"))
+	// fable-5 is CapExtendedContext but already 1M in the catalog.
+	assert.Equal(t, 1_000_000, EffectiveContextWindowFor("claude-fable-5"))
+	// Non-extended models keep their catalog window.
+	assert.Equal(t, 200_000, EffectiveContextWindowFor("claude-haiku-4-5"))
 }
 
 func TestValidateDeployed_FlagsMissingAndUntiered(t *testing.T) {

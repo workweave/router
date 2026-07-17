@@ -647,10 +647,7 @@ func shouldEnableExtendedContext(est, outputReserve int) bool {
 // client's beta header or the token estimate instead would let a large
 // request slip onto 200K and overflow on the first turn.
 func contextWindowForRequest(modelID string) int {
-	if router.Lookup(modelID).Supports(router.CapExtendedContext) {
-		return 1_000_000
-	}
-	return catalog.ContextWindowFor(modelID)
+	return catalog.EffectiveContextWindowFor(modelID)
 }
 
 // modelStripsAnthropicSignatures reports whether dispatching to model drops

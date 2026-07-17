@@ -147,6 +147,24 @@ func ContextWindowFor(id string) int {
 	return m.ContextWindow
 }
 
+// EffectiveContextWindowFor returns the dispatch-eligible context window for a
+// model. CapExtendedContext models (Opus 4.6+, Sonnet 4.6+) always report 1M
+// because the proxy unconditionally injects the context-1m beta when dispatching
+// them — gating on the client's beta header or the token estimate instead would
+// let a large request slip onto the catalog's 200K row and overflow on the first
+// turn. Non-extended models keep their catalog window via ContextWindowFor.
+//
+// Use this for eligibility / overflow decisions (policy candidate filtering,
+// proxy pre-filter). Prefer ContextWindowFor when the base catalog row is what
+// you need (pricing docs, install scripts, summarizer rosters that already list
+// native-1M models).
+func EffectiveContextWindowFor(id string) int {
+	if router.Lookup(id).Supports(router.CapExtendedContext) {
+		return 1_000_000
+	}
+	return ContextWindowFor(id)
+}
+
 // ToolUseLowSet returns model IDs with ToolUseLow quality. The cluster scorer
 // excludes these when req.HasTools, falling back to the unfiltered pool if
 // that would empty the eligible set.
