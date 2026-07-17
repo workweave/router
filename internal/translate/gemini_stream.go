@@ -146,13 +146,7 @@ func (t *GeminiToOpenAISSETranslator) Finalize() error {
 	if t.usageSink != nil {
 		usage := gjson.GetBytes(body, "usageMetadata")
 		if usage.Exists() {
-			t.usageSink.RecordUsageValues(UsageValues{
-				InputTokens:  usageResultInt(usage.Get("promptTokenCount")),
-				OutputTokens: usageResultInt(usage.Get("candidatesTokenCount")),
-			})
-			if cached := int(usage.Get("cachedContentTokenCount").Int()); cached > 0 {
-				t.usageSink.RecordCacheUsage(0, cached)
-			}
+			t.usageSink.RecordUsageValues(geminiUsageValues(usage))
 		}
 	}
 
@@ -260,23 +254,19 @@ func (t *GeminiToOpenAISSETranslator) translateEvent(raw []byte) error {
 	return nil
 }
 
-func geminiUsageFromBytes(data []byte) map[string]int {
-	r := gjson.GetBytes(data, "usageMetadata")
-	if !r.Exists() {
+type geminiUsage struct {
+	values      UsageValues
+	totalTokens *int
+}
+
+func geminiUsageFromBytes(data []byte) *geminiUsage {
+	metadata := gjson.GetBytes(data, "usageMetadata")
+	if !metadata.Exists() {
 		return nil
 	}
-	prompt := int(r.Get("promptTokenCount").Int())
-	completion := int(r.Get("candidatesTokenCount").Int())
-	total := int(r.Get("totalTokenCount").Int())
-	cached := int(r.Get("cachedContentTokenCount").Int())
-	if total == 0 {
-		total = prompt + completion
-	}
-	return map[string]int{
-		"prompt_tokens":     prompt,
-		"completion_tokens": completion,
-		"total_tokens":      total,
-		"cached_tokens":     cached,
+	return &geminiUsage{
+		values:      geminiUsageValues(metadata),
+		totalTokens: usageResultInt(metadata.Get("totalTokenCount")),
 	}
 }
 
@@ -328,7 +318,7 @@ func (t *GeminiToOpenAISSETranslator) emitToolCallChunk(idx int, name, argsRaw, 
 	return t.flushEvent()
 }
 
-func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage map[string]int) error {
+func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage *geminiUsage) error {
 	if err := t.ensureStarted(); err != nil {
 		return err
 	}
@@ -348,7 +338,7 @@ func (t *GeminiToOpenAISSETranslator) emitFinalChunk(finishReason string, usage 
 	return t.flushEvent()
 }
 
-func (t *GeminiToOpenAISSETranslator) emitUsageOnlyChunk(usage map[string]int) error {
+func (t *GeminiToOpenAISSETranslator) emitUsageOnlyChunk(usage *geminiUsage) error {
 	t.writeChunkHeader()
 	t.bw.WriteString(`"choices":[]`)
 	t.writeUsageJSON(usage)
@@ -359,14 +349,18 @@ func (t *GeminiToOpenAISSETranslator) emitUsageOnlyChunk(usage map[string]int) e
 
 // writeUsageJSON serializes an OpenAI-shape usage object, matching the nested
 // shape AnthropicSSETranslator reads so cache numbers propagate through.
-func (t *GeminiToOpenAISSETranslator) writeUsageJSON(usage map[string]int) {
+func (t *GeminiToOpenAISSETranslator) writeUsageJSON(usage *geminiUsage) {
 	t.bw.WriteString(`,"usage":{"prompt_tokens":`)
-	sse.WriteJSONInt(t.bw, int64(usage["prompt_tokens"]))
+	sse.WriteJSONInt(t.bw, int64(usageIntValue(usage.values.InputTokens)))
 	t.bw.WriteString(`,"completion_tokens":`)
-	sse.WriteJSONInt(t.bw, int64(usage["completion_tokens"]))
+	sse.WriteJSONInt(t.bw, int64(usageIntValue(usage.values.OutputTokens)))
 	t.bw.WriteString(`,"total_tokens":`)
-	sse.WriteJSONInt(t.bw, int64(usage["total_tokens"]))
-	if cached := usage["cached_tokens"]; cached > 0 {
+	totalTokens := usageIntValue(usage.totalTokens)
+	if usage.totalTokens == nil {
+		totalTokens = usageIntValue(usage.values.InputTokens) + usageIntValue(usage.values.OutputTokens)
+	}
+	sse.WriteJSONInt(t.bw, int64(totalTokens))
+	if cached := usageIntValue(usage.values.CacheReadInputTokens); cached > 0 {
 		t.bw.WriteString(`,"prompt_tokens_details":{"cached_tokens":`)
 		sse.WriteJSONInt(t.bw, int64(cached))
 		t.bw.WriteByte('}')
@@ -374,23 +368,11 @@ func (t *GeminiToOpenAISSETranslator) writeUsageJSON(usage map[string]int) {
 	t.bw.WriteByte('}')
 }
 
-func (t *GeminiToOpenAISSETranslator) recordUsageOnSink(usage map[string]int) {
+func (t *GeminiToOpenAISSETranslator) recordUsageOnSink(usage *geminiUsage) {
 	if t.usageSink == nil {
 		return
 	}
-	inputTokens, hasInput := usage["prompt_tokens"]
-	outputTokens, hasOutput := usage["completion_tokens"]
-	values := UsageValues{}
-	if hasInput {
-		values.InputTokens = &inputTokens
-	}
-	if hasOutput {
-		values.OutputTokens = &outputTokens
-	}
-	t.usageSink.RecordUsageValues(values)
-	if cached := usage["cached_tokens"]; cached > 0 {
-		t.usageSink.RecordCacheUsage(0, cached)
-	}
+	t.usageSink.RecordUsageValues(usage.values)
 }
 
 func (t *GeminiToOpenAISSETranslator) emitDone() error {

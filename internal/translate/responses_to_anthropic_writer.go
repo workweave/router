@@ -576,11 +576,7 @@ func (t *ResponsesToAnthropicWriter) captureFinalResponse(data []byte) {
 		t.usageOutput = int(usage.Get("output_tokens").Int())
 		t.usageCacheRead = int(usage.Get("input_tokens_details.cached_tokens").Int())
 		if t.usageSink != nil {
-			t.usageSink.RecordUsageValues(UsageValues{
-				InputTokens:  usageResultInt(usage.Get("input_tokens")),
-				OutputTokens: usageResultInt(usage.Get("output_tokens")),
-			})
-			t.usageSink.RecordCacheUsage(0, t.usageCacheRead)
+			t.usageSink.RecordUsageValues(openAIUsageValues(usage))
 		}
 	}
 }
@@ -695,11 +691,11 @@ func (t *ResponsesToAnthropicWriter) recordBufferedUsage(usage gjson.Result) {
 	if t.usageSink == nil || !usage.Exists() {
 		return
 	}
-	t.usageSink.RecordUsageValues(UsageValues{
-		InputTokens:  usageResultInt(usage.Get("input_tokens")),
-		OutputTokens: usageResultInt(usage.Get("output_tokens")),
-	})
-	t.usageSink.RecordCacheUsage(0, int(usage.Get("cache_read_input_tokens").Int()))
+	values := openAIUsageValues(usage)
+	if values.CacheReadInputTokens == nil {
+		values.CacheReadInputTokens = usageResultInt(usage.Get("cache_read_input_tokens"))
+	}
+	t.usageSink.RecordUsageValues(values)
 }
 
 // finalizeError renders a one-shot Anthropic error body. Streaming errors are

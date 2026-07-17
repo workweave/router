@@ -91,7 +91,7 @@ func (u *UsageExtractor) ArmOutputProgress(mark func()) (armed bool) {
 // RecordUsage sets token counts directly, bypassing SSE parsing. Called by
 // translators that have already parsed usage from the upstream event stream.
 func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
-	u.usage.Observe(translate.UsageObservation{
+	u.RecordUsageObservation(translate.UsageObservation{
 		Phase: translate.UsagePhaseTerminal,
 		Values: translate.UsageValues{
 			InputTokens:  positiveUsageInt(inputTokens),
@@ -103,10 +103,15 @@ func (u *UsageExtractor) RecordUsage(inputTokens, outputTokens int) {
 // RecordUsageValues records a complete usage report while retaining explicit
 // zero counters as distinct from fields omitted by incremental translators.
 func (u *UsageExtractor) RecordUsageValues(values translate.UsageValues) {
-	u.usage.Observe(translate.UsageObservation{
+	u.RecordUsageObservation(translate.UsageObservation{
 		Phase:  translate.UsagePhaseTerminal,
 		Values: values,
 	})
+}
+
+// RecordUsageObservation records usage with its source-stream phase preserved.
+func (u *UsageExtractor) RecordUsageObservation(observation translate.UsageObservation) {
+	u.usage.Observe(observation)
 }
 
 // RecordCacheUsage sets cache token counts directly. OpenAI has no cache-creation

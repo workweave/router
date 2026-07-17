@@ -34,6 +34,16 @@ func (f *fakeUsageSink) RecordUsageValues(values translate.UsageValues) {
 	if values.OutputTokens != nil {
 		f.output = *values.OutputTokens
 	}
+	if values.CacheCreationInputTokens != nil {
+		f.cacheCreation = *values.CacheCreationInputTokens
+	}
+	if values.CacheReadInputTokens != nil {
+		f.cacheRead = *values.CacheReadInputTokens
+	}
+}
+
+func (f *fakeUsageSink) RecordUsageObservation(observation translate.UsageObservation) {
+	f.RecordUsageValues(observation.Values)
 }
 
 func (f *fakeUsageSink) RecordCacheUsage(creation, read int) {

@@ -58,6 +58,24 @@ func TestUsageExtractor_RecordUsageValuesPreservesExplicitTerminalZero(t *testin
 	assert.Equal(t, translate.UsageAuthorityAuthoritative, snapshot.Authority)
 }
 
+func TestUsageExtractor_StartObservationStaysPartialUntilTerminalUsage(t *testing.T) {
+	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
+	input, output := 9, 0
+
+	ext.RecordUsageObservation(translate.UsageObservation{
+		Phase:       translate.UsagePhaseStart,
+		Placeholder: true,
+		Values: translate.UsageValues{
+			InputTokens:  &input,
+			OutputTokens: &output,
+		},
+	})
+	assert.Equal(t, translate.UsageAuthorityPartial, ext.Usage().Authority)
+
+	ext.RecordUsageValues(translate.UsageValues{OutputTokens: &output})
+	assert.Equal(t, translate.UsageAuthorityAuthoritative, ext.Usage().Authority)
+}
+
 func TestUsageExtractor_LegacySinkObservationsDoNotTreatOmittedFieldsAsZeros(t *testing.T) {
 	ext := otel.NewUsageExtractor(nil, providers.UsageSourceForProvider(providers.ProviderAnthropic))
 
