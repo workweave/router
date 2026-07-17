@@ -242,12 +242,8 @@ const qualityBiasCalibrationGrid = 401
 // dialToAlpha interpolates across the breakpoints instead, so equal dial
 // travel crosses an equal number of mix changes.
 //
-// The sweep applies the bundle's AlphaFloor via applyAlphaFloor — the same
-// per-cluster max(raw, floor[i]) that applyDialAlpha uses at request time —
-// so breakpoints only mark mix changes that are reachable under floors. An
-// unfloored sweep would record phantom low-alpha crossovers and reintroduce
-// dial dead zones on floored bundles (see #779).
-//
+// The sweep applies AlphaFloor via applyAlphaFloor (same as applyDialAlpha)
+// so breakpoints exclude unreachable low-alpha mix changes (#779).
 // Returns nil when fewer than two distinct mixes exist, so dialToAlpha falls
 // back to the identity.
 func (s *Scorer) computeDialCalibration() []float64 {
@@ -327,11 +323,8 @@ func (s *Scorer) dialToAlpha(t float64) float64 {
 	return bp[i] + frac*(bp[i+1]-bp[i])
 }
 
-// applyAlphaFloor writes alpha[i] = max(raw, floor[i]) in place. floor==nil
-// disables flooring (every slot gets raw). Shared by computeDialCalibration
-// (sweep raw uniform alpha) and applyDialAlpha (raw = dialToAlpha(t)) so the
-// dial's mix breakpoints and live/request alphas obey the same floor policy.
-// Caller guarantees len(floor)==len(alpha) when floor is non-nil.
+// applyAlphaFloor writes alpha[i] = max(raw, floor[i]). floor==nil disables
+// flooring. Shared by computeDialCalibration and applyDialAlpha (#779).
 func applyAlphaFloor(alpha []float64, raw float64, floor []float64) {
 	for i := range alpha {
 		if floor != nil && floor[i] > raw {

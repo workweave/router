@@ -128,16 +128,12 @@ func TestRoutingDistribution_DefaultGridAndV1Guard(t *testing.T) {
 func TestRoutingDistribution_NoDeadZone(t *testing.T) {
 	// Regression guard: a run of identical mixes across adjacent dial steps is
 	// what made "50% look like 20%" — the calibration must keep steps live.
-	// v0.67 ships no alpha_floor (backward-compat path); floored bundles are
-	// covered by TestRoutingDistribution_NoDeadZone_FlooredBundle.
+	// Floored bundles: TestRoutingDistribution_NoDeadZone_FlooredBundle.
 	assertNoDeadZone(t, loadV0_67(t))
 }
 
 func TestRoutingDistribution_NoDeadZone_FlooredBundle(t *testing.T) {
-	// #779: calibration must apply AlphaFloor, or floored bundles (latest)
-	// reintroduce a half-dial dead zone that CI on v0.67 cannot see.
-	// Floored bundles still have sparse adjacent ties (same mix at two
-	// neighboring grid steps); what matters is no long consecutive run.
+	// #779: unfloored calibration left a long consecutive dead zone on v0.73.
 	points, err := loadV0_73(t).RoutingDistribution(21, nil, nil)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, maxIdenticalMixRun(points), 2,
@@ -161,9 +157,7 @@ func assertNoDeadZone(t *testing.T, s *Scorer) {
 		"too many adjacent dial positions route an identical mix (%d) — dial has a dead zone", identicalRuns)
 }
 
-// maxIdenticalMixRun returns the longest streak of identical adjacent mixes
-// (number of consecutive equal pairs). A real dead zone is a long streak;
-// sparse one-off ties across the dial are not.
+// maxIdenticalMixRun is the longest streak of identical adjacent mixes.
 func maxIdenticalMixRun(points []DistributionPoint) int {
 	maxRun, cur := 0, 0
 	for i := 1; i < len(points); i++ {
@@ -186,9 +180,7 @@ func TestRoutingDistribution_MidDialIsPricierThanLowDial(t *testing.T) {
 }
 
 func TestRoutingDistribution_MidDialIsPricierThanLowDial_FlooredBundle(t *testing.T) {
-	// #779: on floored latest, an unfloored calibration left cost(0.5)==cost(0.2).
-	// Floors compress the low-dial cost span vs v0.67, so require a clear rise
-	// (1.2×) rather than v0.67's 1.5× — the bug symptom was equality, not ratio.
+	// #779: pre-fix cost(0.5)==cost(0.2); 1.2× (not v0.67's 1.5×) fits floored span.
 	assertMidDialPricierThanLow(t, loadV0_73(t), 1.2)
 }
 
@@ -224,7 +216,7 @@ func loadV0_70(t *testing.T) *Scorer {
 	return s
 }
 
-// loadV0_73 loads the committed floored latest-era bundle used to pin #779.
+// loadV0_73 loads the floored bundle used to pin #779.
 func loadV0_73(t *testing.T) *Scorer {
 	t.Helper()
 	bundle, err := LoadBundle("v0.73")
@@ -250,9 +242,7 @@ func TestApplyAlphaFloor_NilAndHeterogeneous(t *testing.T) {
 }
 
 func TestComputeDialCalibration_NoBreakpointsBelowMinFloor(t *testing.T) {
-	// Structural #779 guard: after flooring the sweep, no interior breakpoint
-	// can sit below min(AlphaFloor) — those alphas are unreachable at request
-	// time, so recording them wastes dial travel on a dead zone.
+	// #779: no interior breakpoint below min(AlphaFloor) — those alphas are unreachable.
 	s := loadV0_73(t)
 	floor := s.defaultActiveKnobs().AlphaFloor
 	require.NotEmpty(t, floor)
@@ -272,8 +262,7 @@ func TestComputeDialCalibration_NoBreakpointsBelowMinFloor(t *testing.T) {
 }
 
 func TestComputeDialCalibration_HeterogeneousFloorSynthetic(t *testing.T) {
-	// Two clusters, deliberately different floors. Calibration must not record
-	// mix changes in (0, minFloor) even when an unfloored sweep would.
+	// Heterogeneous floors: no breakpoint in (0, minFloor).
 	const lo, hi = 0.45, 0.70
 	s := newV2BundleForTest(t, &fakeEmbedder{vec: makeOpusVec()}, v2BundleOpts{
 		defaultKnobs: &DefaultRoutingKnobs{
