@@ -84,6 +84,35 @@ key_spend AS (
     SET spent_usd_micros = spent_usd_micros - $1::bigint
     WHERE id = $7::uuid
       AND EXISTS (SELECT 1 FROM updated)
+),
+user_month_spend AS (
+    -- Month-bucketed per-engineer spend counter for monthly limit
+    -- enforcement. Same gating and sign convention as key_spend; no-ops when
+    -- the request carried no resolvable user identity (router_user_id NULL).
+    INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
+    SELECT
+        $8::uuid,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -($1::bigint),
+        NOW()
+    WHERE $8::uuid IS NOT NULL
+      AND EXISTS (SELECT 1 FROM updated)
+    ON CONFLICT (router_user_id, month) DO UPDATE
+    SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
+),
+org_month_spend AS (
+    -- Month-bucketed org spend counter for the org-wide monthly cap.
+    INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, updated_at)
+    SELECT
+        $2::varchar,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -($1::bigint),
+        NOW()
+    WHERE EXISTS (SELECT 1 FROM updated)
+    ON CONFLICT (organization_id, month) DO UPDATE
+    SET spent_usd_micros = router.organization_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
 )
 SELECT balance_after_micros FROM ledger
 `
@@ -96,6 +125,7 @@ type DebitOrgCreditsParams struct {
 	RouterRequestID    *string
 	RouterModel        *string
 	APIKeyID           pgtype.UUID
+	RouterUserID       pgtype.UUID
 }
 
 // Atomic debit: decrement the balance and append a matching ledger row in a
@@ -158,6 +188,35 @@ type DebitOrgCreditsParams struct {
 //	    SET spent_usd_micros = spent_usd_micros - $1::bigint
 //	    WHERE id = $7::uuid
 //	      AND EXISTS (SELECT 1 FROM updated)
+//	),
+//	user_month_spend AS (
+//	    -- Month-bucketed per-engineer spend counter for monthly limit
+//	    -- enforcement. Same gating and sign convention as key_spend; no-ops when
+//	    -- the request carried no resolvable user identity (router_user_id NULL).
+//	    INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
+//	    SELECT
+//	        $8::uuid,
+//	        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+//	        -($1::bigint),
+//	        NOW()
+//	    WHERE $8::uuid IS NOT NULL
+//	      AND EXISTS (SELECT 1 FROM updated)
+//	    ON CONFLICT (router_user_id, month) DO UPDATE
+//	    SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+//	        updated_at = NOW()
+//	),
+//	org_month_spend AS (
+//	    -- Month-bucketed org spend counter for the org-wide monthly cap.
+//	    INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, updated_at)
+//	    SELECT
+//	        $2::varchar,
+//	        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+//	        -($1::bigint),
+//	        NOW()
+//	    WHERE EXISTS (SELECT 1 FROM updated)
+//	    ON CONFLICT (organization_id, month) DO UPDATE
+//	    SET spent_usd_micros = router.organization_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+//	        updated_at = NOW()
 //	)
 //	SELECT balance_after_micros FROM ledger
 func (q *Queries) DebitOrgCredits(ctx context.Context, arg DebitOrgCreditsParams) (int64, error) {
@@ -169,6 +228,7 @@ func (q *Queries) DebitOrgCredits(ctx context.Context, arg DebitOrgCreditsParams
 		arg.RouterRequestID,
 		arg.RouterModel,
 		arg.APIKeyID,
+		arg.RouterUserID,
 	)
 	var balance_after_micros int64
 	err := row.Scan(&balance_after_micros)

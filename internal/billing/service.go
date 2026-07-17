@@ -176,6 +176,10 @@ type DebitInferenceParams struct {
 	// APIKeyID attributes the debit to the authenticating key for
 	// spend-cap tracking; empty leaves per-key spend untouched.
 	APIKeyID string
+	// RouterUserID attributes the debit to the resolved engineer identity
+	// for monthly spend-limit tracking; empty leaves per-user spend
+	// untouched.
+	RouterUserID string
 }
 
 // DebitForInference writes one ledger row at cost — no markup math here;
@@ -202,6 +206,7 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		RouterRequestID:    p.RouterRequestID,
 		RouterModel:        p.Model,
 		APIKeyID:           p.APIKeyID,
+		RouterUserID:       p.RouterUserID,
 	})
 	if err != nil {
 		return balanceAfter, err

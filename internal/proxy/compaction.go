@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router/catalog"
@@ -196,6 +197,7 @@ func (s *Service) billCompactionSummary(ctx context.Context, requestID, external
 		Pricing:         sumPricing,
 		HasOverride:     billing.HasOverrideFromContext(ctx),
 		APIKeyID:        apiKeyID,
+		RouterUserID:    auth.UserIDFrom(ctx),
 	})
 }
 

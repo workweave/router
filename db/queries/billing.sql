@@ -80,6 +80,35 @@ key_spend AS (
     SET spent_usd_micros = spent_usd_micros - @delta_usd_micros::bigint
     WHERE id = sqlc.narg('api_key_id')::uuid
       AND EXISTS (SELECT 1 FROM updated)
+),
+user_month_spend AS (
+    -- Month-bucketed per-engineer spend counter for monthly limit
+    -- enforcement. Same gating and sign convention as key_spend; no-ops when
+    -- the request carried no resolvable user identity (router_user_id NULL).
+    INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
+    SELECT
+        sqlc.narg('router_user_id')::uuid,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -(@delta_usd_micros::bigint),
+        NOW()
+    WHERE sqlc.narg('router_user_id')::uuid IS NOT NULL
+      AND EXISTS (SELECT 1 FROM updated)
+    ON CONFLICT (router_user_id, month) DO UPDATE
+    SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
+),
+org_month_spend AS (
+    -- Month-bucketed org spend counter for the org-wide monthly cap.
+    INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, updated_at)
+    SELECT
+        @organization_id::varchar,
+        DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+        -(@delta_usd_micros::bigint),
+        NOW()
+    WHERE EXISTS (SELECT 1 FROM updated)
+    ON CONFLICT (organization_id, month) DO UPDATE
+    SET spent_usd_micros = router.organization_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
+        updated_at = NOW()
 )
 SELECT balance_after_micros FROM ledger;
 
