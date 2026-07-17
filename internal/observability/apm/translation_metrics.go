@@ -45,9 +45,7 @@ func RecordTranslationCompatibility(ctx context.Context, requirement, sourceForm
 	))
 }
 
-// RecordTranslationTransform increments one counter per explicit ingress
-// transform. action and source_format are fixed values; the transform's path
-// is intentionally excluded from the metric and remains available in logs.
+// RecordTranslationTransform increments one counter per explicit ingress transform.
 func RecordTranslationTransform(ctx context.Context, code, action, sourceFormat, mode string) {
 	translationMetricsOnce.Do(initTranslationMetrics)
 	if transformCounter == nil {

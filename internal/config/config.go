@@ -7,10 +7,9 @@ import (
 	"strings"
 )
 
-// TranslationCompatibilityMode parses the global translation-compatibility
-// rollout control. Broad checks ship in shadow mode; callers must reject an
-// invalid value during startup rather than changing request behavior at
-// runtime.
+// TranslationCompatibilityMode parses ROUTER_TRANSLATION_COMPATIBILITY_MODE.
+// Callers must reject an invalid value at startup; the error must not silently
+// change request behavior at runtime.
 func TranslationCompatibilityMode() (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(GetOr("ROUTER_TRANSLATION_COMPATIBILITY_MODE", "shadow")))
 	switch mode {
