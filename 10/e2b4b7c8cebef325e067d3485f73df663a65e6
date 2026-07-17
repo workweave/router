@@ -1,0 +1,21 @@
+internal/proxy/turnloop.go
+  s_59e1ca6b60b3f5::t_9c51dcd307af5f 213-214,223-224
+internal/proxy/usage_bypass.go
+  s_59e1ca6b60b3f5::t_9c51dcd307af5f 97-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "10e2b4b7c8cebef325e067d3485f73df663a65e6",
+  "prompts": {},
+  "sessions": {
+    "s_59e1ca6b60b3f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5f02-9c2d-7912-948d-e0085b87d7ef",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
