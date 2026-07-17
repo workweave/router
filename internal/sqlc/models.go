@@ -203,20 +203,23 @@ type RouterModelRouterUserSpendLimit struct {
 }
 
 type RouterOrganizationAutopayConfig struct {
-	OrganizationID      string
-	Enabled             bool
-	ThresholdUsdMicros  int64
-	RechargeUsdMicros   int64
-	HasPaymentMethod    bool
-	State               string
-	ConsecutiveFailures int32
-	LastAttemptID       pgtype.UUID
-	LastAttemptAt       pgtype.Timestamptz
-	LastSuccessAt       pgtype.Timestamptz
-	CooldownUntil       pgtype.Timestamptz
-	CreatedBy           *string
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
+	OrganizationID              string
+	Enabled                     bool
+	ThresholdUsdMicros          int64
+	RechargeUsdMicros           int64
+	HasPaymentMethod            bool
+	State                       string
+	ConsecutiveFailures         int32
+	LastAttemptID               pgtype.UUID
+	LastAttemptAt               pgtype.Timestamptz
+	LastSuccessAt               pgtype.Timestamptz
+	CooldownUntil               pgtype.Timestamptz
+	CreatedBy                   *string
+	CreatedAt                   pgtype.Timestamptz
+	UpdatedAt                   pgtype.Timestamptz
+	MonthlyRechargeCapUsdMicros *int64
+	RechargedMonth              pgtype.Date
+	RechargedMonthUsdMicros     int64
 }
 
 type RouterOrganizationBillingOverride struct {

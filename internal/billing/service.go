@@ -155,6 +155,38 @@ func (s *Service) CheckBalance(ctx context.Context, orgID string) (CheckResult, 
 	return CheckResult{BalanceMicros: balance}, nil
 }
 
+// MonthlySpendResult carries a current-UTC-month spend counter alongside the
+// limit that applies to it. LimitMicros nil means no limit is configured.
+type MonthlySpendResult struct {
+	SpentMicros int64
+	LimitMicros *int64
+}
+
+// LimitReached reports whether a configured limit has been met or exceeded.
+func (r MonthlySpendResult) LimitReached() bool {
+	return r.LimitMicros != nil && r.SpentMicros >= *r.LimitMicros
+}
+
+// CheckUserMonthlySpend reads the engineer's current-month spend and
+// effective monthly limit fresh from Postgres.
+func (s *Service) CheckUserMonthlySpend(ctx context.Context, organizationID, routerUserID string) (MonthlySpendResult, error) {
+	spent, limit, err := s.repo.GetUserMonthlySpendAndLimit(ctx, organizationID, routerUserID)
+	if err != nil {
+		return MonthlySpendResult{}, err
+	}
+	return MonthlySpendResult{SpentMicros: spent, LimitMicros: limit}, nil
+}
+
+// CheckOrgMonthlySpend reads the org's current-month spend and configured
+// monthly cap fresh from Postgres.
+func (s *Service) CheckOrgMonthlySpend(ctx context.Context, organizationID string) (MonthlySpendResult, error) {
+	spent, limit, err := s.repo.GetOrgMonthlySpendAndLimit(ctx, organizationID)
+	if err != nil {
+		return MonthlySpendResult{}, err
+	}
+	return MonthlySpendResult{SpentMicros: spent, LimitMicros: limit}, nil
+}
+
 // DebitInferenceParams is the input to DebitForInference. Token counts
 // and pricing come from the proxy's usage extractor; HasOverride is
 // carried from the context flag middleware already stamped, so the

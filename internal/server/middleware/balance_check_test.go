@@ -31,6 +31,10 @@ type stubBillingRepo struct {
 	capMicros   *int64
 	spendFound  bool
 	spendErr    error
+	// Org monthly spend-cap fields, exercised by WithOrgMonthlySpendCap.
+	orgMonthSpent int64
+	orgMonthLimit *int64
+	orgMonthErr   error
 }
 
 func (r *stubBillingRepo) GetBalance(_ context.Context, _ string) (int64, error) {
@@ -44,6 +48,12 @@ func (r *stubBillingRepo) DebitInference(_ context.Context, _ billing.DebitParam
 }
 func (r *stubBillingRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
 	return r.spendMicros, r.capMicros, r.spendFound, r.spendErr
+}
+func (r *stubBillingRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, *int64, error) {
+	return 0, nil, nil
+}
+func (r *stubBillingRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, *int64, error) {
+	return r.orgMonthSpent, r.orgMonthLimit, r.orgMonthErr
 }
 func (r *stubBillingRepo) BillingTablesExist(_ context.Context) (bool, error) {
 	return true, nil

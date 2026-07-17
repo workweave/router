@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"workweave/router/internal/billing"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router/bandit"
@@ -112,4 +113,29 @@ func TestClassifyDispatchError_TranslationCompatibleProviderUnavailableIs503(t *
 	assert.Equal(t, http.StatusServiceUnavailable, cls.Status)
 	assert.False(t, cls.Kind.IsClientError())
 	assert.True(t, cls.RetryAfter)
+}
+
+func TestClassifyDispatchError_UserSpendLimitReachedIs402(t *testing.T) {
+	err := fmt.Errorf("%w: spent 5 of 5 usd micros", billing.ErrUserMonthlySpendLimitReached)
+
+	cls, ok := proxy.ClassifyDispatchError(err)
+
+	require.True(t, ok)
+	assert.Equal(t, proxy.DispatchErrorUserSpendLimitReached, cls.Kind)
+	assert.Equal(t, http.StatusPaymentRequired, cls.Status)
+	assert.False(t, cls.RetryAfter)
+	assert.Equal(t, "warn", cls.LogLevel)
+	assert.False(t, cls.Kind.IsClientError())
+}
+
+func TestClassifyDispatchError_SpendLimitUnavailableFailsClosed503(t *testing.T) {
+	err := fmt.Errorf("%w: %v", billing.ErrSpendLimitCheckUnavailable, errors.New("pg down"))
+
+	cls, ok := proxy.ClassifyDispatchError(err)
+
+	require.True(t, ok)
+	assert.Equal(t, proxy.DispatchErrorSpendLimitUnavailable, cls.Kind)
+	assert.Equal(t, http.StatusServiceUnavailable, cls.Status)
+	assert.True(t, cls.RetryAfter)
+	assert.Equal(t, "error", cls.LogLevel)
 }

@@ -1934,6 +1934,9 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 }
 
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	if err := s.checkUserMonthlySpendLimit(ctx); err != nil {
+		return err
+	}
 	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
@@ -3975,6 +3978,9 @@ func finalizeAfterProxy(proxyErr error, fn func() error) error {
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
+	if err := s.checkUserMonthlySpendLimit(ctx); err != nil {
+		return err
+	}
 	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
