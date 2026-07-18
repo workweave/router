@@ -103,6 +103,24 @@ func TestRouterMapsSidecarRosterModelBackToCatalogDecision(t *testing.T) {
 	assert.False(t, candidate.Capabilities.SupportsImages)
 }
 
+func TestRouterUsesSeparatelySelectableEmbeddingStrategy(t *testing.T) {
+	decider := &fakeDecider{res: Result{Model: "moonshotai/kimi-k2.7-code"}}
+	r := NewForStrategy(
+		router.StrategyHMMEmbedding,
+		decider,
+		map[string]struct{}{"moonshotai/kimi-k2.7": {}},
+		map[string]struct{}{providers.ProviderFireworks: {}},
+	)
+
+	decision, err := r.Route(context.Background(), router.Request{PromptText: "hello"})
+
+	require.NoError(t, err)
+	assert.Equal(t, router.StrategyHMMEmbedding, decider.query.Strategy)
+	require.NotNil(t, decision.Metadata)
+	assert.Equal(t, string(router.StrategyHMMEmbedding), decision.Metadata.Strategy)
+	assert.Contains(t, decision.Reason, "hmm_policy")
+}
+
 func TestRouterKeepsGeneratedRouteIDWhenSidecarOmitsIt(t *testing.T) {
 	decider := &fakeDecider{res: Result{
 		Model: "moonshotai/kimi-k2.7-code",

@@ -1,0 +1,50 @@
+package middleware
+
+import (
+	"strings"
+
+	"workweave/router/internal/observability"
+	"workweave/router/internal/router"
+	"workweave/router/internal/translate"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ForceEffortOverrideHeader is the request-header key for x-weave-effort.
+const ForceEffortOverrideHeader = "x-weave-effort"
+
+// WithForceEffortOverride parses x-weave-effort and stashes the canonical
+// level on the request context. Invalid values abort with 400.
+func WithForceEffortOverride() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := strings.TrimSpace(c.GetHeader(ForceEffortOverrideHeader))
+		if raw == "" {
+			c.Next()
+			return
+		}
+		if !translate.IsValidEffort(raw) {
+			abortInvalidKnob(c, ForceEffortOverrideHeader+" must be one of: low, medium, high, max, xhigh (or aliases fast/minimal/ultra).")
+			return
+		}
+		canonical := translate.CanonicalizeEffort(raw)
+		// Merge with any existing routing knobs (e.g. from WithRoutingKnobsOverride)
+		// so ForceEffort doesn't silently drop a separately-configured Alpha/QualityBias.
+		merged := router.Overrides{ForceEffort: canonical}
+		if existing := router.RoutingKnobsFromContext(c.Request.Context()); existing != nil {
+			merged.Alpha = existing.Alpha
+			merged.QualityBias = existing.QualityBias
+			merged.SpeedWeight = existing.SpeedWeight
+			merged.OutputCostRatio = existing.OutputCostRatio
+			merged.ExpectedOutputTokens = existing.ExpectedOutputTokens
+			merged.PerModelVerbosity = existing.PerModelVerbosity
+		}
+		ctx := router.WithRoutingKnobs(c.Request.Context(), &merged)
+		c.Request = c.Request.WithContext(ctx)
+		log := observability.FromGin(c)
+		log.Debug(
+			"Force-effort override applied",
+			"override_force_effort", canonical,
+		)
+		c.Next()
+	}
+}

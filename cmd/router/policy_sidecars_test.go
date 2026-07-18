@@ -72,6 +72,7 @@ func TestBuildConfiguredPolicySidecarsRejectsReservedAndInvalidConfiguration(t *
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for _, raw := range []string{
 		`{"hmm":"https://sidecar.internal"}`,
+		`{"hmm_embedding":"https://sidecar.internal"}`,
 		`{"future":"not-a-url"}`,
 		`{"future policy":"https://sidecar.internal"}`,
 		`{"Future":"https://one.internal","future":"https://two.internal"}`,

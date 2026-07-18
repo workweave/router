@@ -28,7 +28,12 @@ func WithRouterStrategyDefault(defaultStrategy router.Strategy, available ...rou
 	allowed := make(map[router.Strategy]struct{}, len(available)+1)
 	allowed[router.StrategyCluster] = struct{}{}
 	if len(available) == 0 {
-		available = []router.Strategy{router.StrategyRL, router.StrategyHMM, router.StrategyBandit}
+		available = []router.Strategy{
+			router.StrategyRL,
+			router.StrategyHMM,
+			router.StrategyHMMEmbedding,
+			router.StrategyBandit,
+		}
 	}
 	for _, strategy := range available {
 		allowed[strategy] = struct{}{}

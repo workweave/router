@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy/usage"
 	"workweave/router/internal/router/catalog"
@@ -153,17 +154,30 @@ func RequestPresentsCoveringSubscription(ctx context.Context, headers http.Heade
 }
 
 // withUsageObserver installs a context header observer that records the present
-// subscription's rate-limit headroom from upstream response headers. No-op
-// (returns ctx) when the feature is off or no subscription is present.
+// subscription's rate-limit headroom and captures raw unified-limit headers for
+// Phase 0 telemetry. Both concerns share one observer slot
+// (providers.WithUpstreamHeaderObserver holds only one per ctx); the capture is
+// wrapped in recover so a Phase 0 bug can never take down the subsidy observer.
+// No-op when usageObserver is nil AND no Anthropic subscription token is present.
 func (s *Service) withUsageObserver(ctx context.Context, headers http.Header) context.Context {
-	if s.usageObserver == nil {
-		return ctx
-	}
 	codexTok, anthroTok := presentSubscriptionTokens(ctx, headers)
-	if codexTok == "" && anthroTok == "" {
+	if s.usageObserver == nil && anthroTok == "" {
 		return ctx
 	}
+	ctx = withUnifiedLimitCapture(ctx)
 	obs := func(callCtx context.Context, h http.Header) {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					observability.FromContext(callCtx).Error("weave-capture Phase 0: recovered from panic capturing unified limit headers", "recover", r)
+				}
+			}()
+			captureUnifiedLimitHeaders(callCtx, h)
+		}()
+
+		if s.usageObserver == nil || (codexTok == "" && anthroTok == "") {
+			return
+		}
 		// Record only when the call's RESOLVED credential is one of THIS request's
 		// detected subscription tokens — not any incidental OAuth credential — and
 		// key by that token so subsidyFactors reads the same key. Gating on the

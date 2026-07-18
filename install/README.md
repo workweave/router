@@ -134,7 +134,7 @@ profiles, alternate providers, comments — stays untouched.
 
 | Path                                       | Purpose                                                       |
 | ------------------------------------------ | ------------------------------------------------------------- |
-| `~/.config/opencode/opencode.json`         | Merges a `provider.weave` entry backed by opencode's `@ai-sdk/anthropic`, pointed at `<base-url>/v1`. Headers carry `X-Weave-Router-Key` plus the identity headers (`X-Weave-User-Email`, `X-Weave-User-Name`, `X-App: opencode`). Top-level `model` is set to `weave/claude-sonnet-4-6` when no model is already configured. |
+| `~/.config/opencode/opencode.json`         | Merges a `provider.weave` entry backed by opencode's `@ai-sdk/openai`, pointed at `<base-url>/v1`. Headers carry `X-Weave-Router-Key` plus the identity headers (`X-Weave-User-Email`, `X-Weave-User-Name`, `X-App: opencode`). The single `weave/auto` choice delegates upstream-model selection to Weave Router. |
 
 **Project scope (`--scope project`):**
 
@@ -143,12 +143,13 @@ profiles, alternate providers, comments — stays untouched.
 | `<repo>/opencode.json`     | ❌ ignored | Per-teammate config (holds the router key). Each teammate runs the installer for their own key. |
 | `<repo>/.gitignore`        | ✅ commit  | Adds `opencode.json` to the ignore list.                       |
 
-The router speaks the Anthropic Messages API natively, so opencode talks to
-it through its bundled `@ai-sdk/anthropic` provider without any patching.
-Re-running the installer rewrites only the managed `provider.weave` block;
-other providers, MCP servers, agents, and your top-level model choice stay
-untouched. `--uninstall --opencode` strips the block (and `model` only when
-it points at `weave/...`).
+OpenCode sends Responses requests through its bundled `@ai-sdk/openai`
+provider, while Weave Router selects and translates to the upstream model.
+Re-running the installer rewrites only the managed `provider.weave` block and
+migrates legacy `weave/*` choices to `weave/auto`; other providers, MCP
+servers, agents, and unrelated top-level model choices stay untouched.
+`--uninstall --opencode` strips the block (and `model` only when it points at
+`weave/...`).
 
 **Onboarding flow for a new teammate (any target):**
 
@@ -237,7 +238,8 @@ errors invoking `cc-statusline.sh`. The script needs `jq` on PATH.
 1. Open `~/.config/opencode/opencode.json` (or `<repo>/opencode.json` for
    project scope) and confirm `provider.weave` exists with your
    `X-Weave-Router-Key` in `options.headers`.
-2. Run `opencode` and pick one of the `weave/...` models. Issue a turn.
+2. Run `opencode` and select `weave/auto`. Issue a turn; Weave Router picks
+   the upstream model for that turn.
 3. Check the router's dashboard at `<base-url>/ui/dashboard` — traffic
    should be tagged `X-App: opencode`.
 

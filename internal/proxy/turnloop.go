@@ -118,7 +118,7 @@ func (r turnLoopResult) modelSwitched() bool {
 }
 
 func isHMMDecision(dec router.Decision) bool {
-	if dec.Metadata != nil && dec.Metadata.Strategy == string(router.StrategyHMM) {
+	if dec.Metadata != nil && router.IsHMMStrategy(router.Strategy(dec.Metadata.Strategy)) {
 		return true
 	}
 	return strings.HasPrefix(strings.TrimSpace(dec.Reason), "hmm_policy")
@@ -164,7 +164,7 @@ func (s *Service) isHardPinnedTurn(ctx context.Context, tt turntype.TurnType) bo
 	case turntype.Compaction, turntype.Probe, turntype.TitleGen, turntype.Classifier:
 		return true
 	case turntype.SubAgentDispatch:
-		if router.StrategyFromContext(ctx) == router.StrategyHMM {
+		if router.IsHMMStrategy(router.StrategyFromContext(ctx)) {
 			return false
 		}
 		return s.hardPinExplore

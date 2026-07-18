@@ -28,10 +28,16 @@ type Router struct {
 }
 
 func New(decider Decider, deployed, available map[string]struct{}) *Router {
+	return NewForStrategy(router.StrategyHMM, decider, deployed, available)
+}
+
+// NewForStrategy constructs an HMM adapter with a separately selectable
+// strategy ID while preserving the HMM roster mapping and lifecycle behavior.
+func NewForStrategy(strategy router.Strategy, decider Decider, deployed, available map[string]struct{}) *Router {
 	resolver := policy.NewResolver(deployed, available, rosterIDFor, policy.ManagedProviderPolicy())
 	return &Router{
 		SidecarRouter: policy.NewSidecarRouter(policy.SidecarRouterConfig{
-			Strategy:    router.StrategyHMM,
+			Strategy:    strategy,
 			Unavailable: ErrHMMUnavailable,
 			Reason:      reasonFor,
 		}, decider, resolver),

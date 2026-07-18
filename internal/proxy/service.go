@@ -1643,7 +1643,7 @@ func defaultStrategyUnavailable(strategy router.Strategy) error {
 	switch strategy {
 	case router.StrategyRL:
 		return rl.ErrPolicyUnavailable
-	case router.StrategyHMM:
+	case router.StrategyHMM, router.StrategyHMMEmbedding:
 		return hmm.ErrHMMUnavailable
 	case router.StrategyBandit:
 		return bandit.ErrBanditUnavailable
@@ -2166,7 +2166,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// On a retryable 429 the bypass falls through to re-routing; rate-limit
 	// headers prime the observer so the retry discounts Anthropic.
 	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
-		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, r, w)
+		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, routeRes.TurnType, r, w)
 		if !errors.Is(err, errBypassRetryable) {
 			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
 			return err
@@ -2368,7 +2368,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ModelSwitched:         routeRes.modelSwitched(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
 	}
-	if s.effortEscalation {
+	// User-forced effort wins over effortEscalation; also pre-populate
+	// ForceReasoningEffort so the gpt-5.x/gemini-3.x emit seams honor it.
+	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+		opts.ForceEffort = knobs.ForceEffort
+		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	} else if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 
@@ -2696,7 +2701,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// OSS id — otherwise PrepareAnthropic may leave stale signed thinking
 		// blocks the baseline model rejects (400).
 		baselineOpts.ModelSwitched = routeRes.PriorServedModel != baselineModel || routeRes.SessionEverSwitched
-		if s.effortEscalation {
+		if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+			baselineOpts.ForceEffort = knobs.ForceEffort
+			baselineOpts.ForceReasoningEffort = translate.ResolveForceEffort(baselineOpts.Capabilities, knobs.ForceEffort)
+		} else if s.effortEscalation {
 			baselineOpts.ForceReasoningEffort = forcedReasoningEffort(baselineModel, routeRes.EscalateEffort)
 		}
 		baselinePrep, baselineEmitErr := env.PrepareAnthropic(r.Header, baselineOpts)
@@ -3000,6 +3008,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			CredentialKeyPrefix: credentialKeyPrefix,
 			CredentialKeySuffix: credentialKeySuffix,
 			CredentialSource:    credSource,
+			// Phase 0 instrumentation — Anthropic only; see unified_limit_capture.go.
+			UnifiedLimitHeaders: unifiedLimitHeadersJSON(ctx),
 		})
 	}
 
@@ -4285,7 +4295,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		ModelSwitched:         routeRes.modelSwitched(),
 		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserveOAI),
 	}
-	if s.effortEscalation {
+	if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
+		opts.ForceEffort = knobs.ForceEffort
+		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
+	} else if s.effortEscalation {
 		opts.ForceReasoningEffort = forcedReasoningEffort(decision.Model, routeRes.EscalateEffort)
 	}
 

@@ -247,7 +247,7 @@ func TestService_RouterFeedbackCommand_OmitsTrainingTranscriptWithoutPermission(
 	assert.NotContains(t, payload, "training_conversation_delta")
 }
 
-func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T) {
+func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMEmbeddingRoute(t *testing.T) {
 	routeBody := []byte(`{
 		"model":"claude-haiku-4-5",
 		"max_tokens":195000,
@@ -267,15 +267,19 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMRoute(t *testing.T)
 		Provider: providers.ProviderAnthropic,
 		Model:    "claude-haiku-4-5",
 		Reason:   "hmm_policy(label=balanced)",
-		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMM)},
+		Metadata: &router.RoutingMetadata{Strategy: string(router.StrategyHMMEmbedding)},
 	}}
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
 	svc := newPinSvc(fr, store).
-		WithHMMRouter(policyFeedback).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy:    router.StrategyHMMEmbedding,
+			Router:      policyFeedback,
+			Unavailable: router.ErrStrategyUnavailable,
+		}).
 		WithAvailableModels(map[string]struct{}{"claude-haiku-4-5": {}}).
 		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
 	installationID := uuid.NewString()
-	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMM)
+	ctx := router.WithStrategy(authedCtx(installationID), router.StrategyHMMEmbedding)
 	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
 	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
