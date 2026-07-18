@@ -138,6 +138,60 @@ func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
 	assert.Empty(t, result.SchemaVersion)
 }
 
+func TestClientPreviewPostsNonLearningRequestAndReturnsEveryArm(t *testing.T) {
+	var got routeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/preview", request.URL.Path)
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(previewResponse{
+			SchemaVersion:         policy.SchemaVersionV1,
+			RouteID:               "preview-1",
+			PolicyArtifactID:      "hmm-prod",
+			PolicyArtifactSHA256:  "sha256:artifact",
+			RosterSHA256:          "sha256:roster",
+			HMMStateID:            7,
+			HMMStatePath:          []int{2, 7},
+			HMMStateProbabilities: []float64{0.01, 0.01, 0.05, 0.01, 0.01, 0.01, 0.1, 0.8},
+			ClassOrder:            []string{"hard", "balanced"},
+			ClassProbabilities:    map[string]float64{"hard": 0.75, "balanced": 0.25},
+			RankedFallback: []policy.PreviewGroup{{
+				Group:        "hard",
+				Probability:  0.75,
+				RosterArms:   []string{"arm-a", "arm-b"},
+				EligibleArms: []string{"arm-a", "arm-b"},
+			}},
+			SelectedGroup:     "hard",
+			EligibleRosterIDs: []string{"arm-a", "arm-b"},
+		})
+	}))
+	defer server.Close()
+
+	result, err := New(server.URL, server.Client(), 0).Preview(context.Background(), policy.Query{
+		ExecutionMode:   policy.ExecutionModePreview,
+		RouteID:         "preview-1",
+		TrainingAllowed: false,
+		Candidates: []policy.Candidate{
+			{RosterID: "arm-a", CatalogID: "model-a", Provider: providers.ProviderAnthropic},
+			{RosterID: "arm-b", CatalogID: "model-b", Provider: providers.ProviderOpenAI},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, policy.ExecutionModePreview, got.ExecutionMode)
+	assert.False(t, got.TrainingAllowed)
+	assert.Equal(t, []float64{0.01, 0.01, 0.05, 0.01, 0.01, 0.01, 0.1, 0.8}, result.HMMStateProbabilities)
+	assert.Equal(t, []string{"arm-a", "arm-b"}, result.EligibleRosterIDs)
+	assert.Equal(t, "sha256:artifact", result.PolicyArtifactSHA256)
+	assert.Equal(t, "sha256:roster", result.RosterSHA256)
+}
+
+func TestClientPreviewRequiresPreviewExecutionMode(t *testing.T) {
+	_, err := New("http://unused.invalid", nil, 0).Preview(context.Background(), policy.Query{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires preview execution mode")
+}
+
 func TestClientOmitsHMMTrainingTranscriptWithoutPermission(t *testing.T) {
 	var got routeRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

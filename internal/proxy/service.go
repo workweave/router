@@ -1664,38 +1664,11 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 // callers in internal/api/* never import internal/translate directly,
 // matching ProxyMessages.
 func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decision router.Decision, err error) {
-	env, parseErr := translate.ParseAnthropic(body)
-	if parseErr != nil {
-		err = fmt.Errorf("parse request: %w", parseErr)
+	req, err := s.anthropicRoutingRequest(ctx, body, nil)
+	if err != nil {
 		return decision, err
 	}
-
-	embedFlag := s.ResolveEmbedOnlyUserMessage(ctx)
-	feats := env.RoutingFeatures(embedFlag)
-	promptText := feats.PromptText
-	if embedFlag && feats.OnlyUserMessageText != "" {
-		promptText = feats.OnlyUserMessageText
-	}
-	organizationID, _ := ctx.Value(ExternalIDContextKey{}).(string)
-	installationID := ""
-	if id := installationIDFromContext(ctx); id != uuid.Nil {
-		installationID = id.String()
-	}
-
-	decision, err = s.Route(ctx, router.Request{
-		RequestedModel:          feats.Model,
-		EstimatedInputTokens:    feats.Tokens,
-		HasTools:                feats.HasTools,
-		TranslationRequirements: env.TranslationRequirements(router.EndpointAnthropicMessages),
-		PromptText:              promptText,
-		ConversationMessages:    conversationMessagesForRouting(env),
-		AvailableTools:          availableToolsForRouting(env),
-		OrganizationID:          organizationID,
-		InstallationID:          installationID,
-		ClientSessionID:         env.ClientSessionID(),
-		RoutingKnobs:            router.RoutingKnobsFromContext(ctx),
-	})
-	return decision, err
+	return s.Route(ctx, req)
 }
 
 // PassthroughToProvider forwards a non-routing request to the default
@@ -1984,7 +1957,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
 	installationID := installationIDFromContext(ctx)
 	clientID := ClientIdentityFrom(ctx)
-	bypassEval := hasEvalOverrideHeader(r)
+	agentShadowEval, agentShadowMode := AgentShadowEvalFromContext(ctx)
+	bypassEval := hasEvalOverrideHeader(r) || agentShadowMode
 
 	// Bind session_key/request_id/api_key_id/ingress onto a ctx-scoped logger
 	// before stripping router-only history. The derived key is reused below to
@@ -2020,21 +1994,26 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// env.body so the upstream never sees it). Session key is derived before
 	// extraction: DeriveSessionKey can fall back to prompt text, and deriving
 	// after the strip would mismatch subsequent turns with the unstripped message.
-	if s.pinStore != nil {
+	if !agentShadowMode && s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
 			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
 		}
 	}
-	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
-		log.Info("ProxyMessages router-feedback command")
-		return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+	if !agentShadowMode {
+		if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
+			log.Info("ProxyMessages router-feedback command")
+			return s.handleRouterFeedbackCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+		}
 	}
 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	forceModel := s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	forceModel := ""
+	if !agentShadowMode {
+		forceModel = s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	}
 
 	// Tool-call loop break: catches runaway OSS-model tool-call cycles (qwen3
 	// in particular) that the previous-turn-maxed-out guard misses because
@@ -2043,16 +2022,18 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// cheap/mid model escalates the session to opus instead, taking precedence
 	// over the tight-loop break below — rescuing beats stopping.
 	escalatedLoop := false
-	if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
-		loopRole := roleForTier(catalog.TierFor(feats.Model))
-		s.handleLoopEscalation(ctx, csig, ccount, cratio, cwin, installationID, sessionKey, loopRole, feats.Model)
-		escalatedLoop = true
-	}
-	if !escalatedLoop {
-		if loop, sig, count := detectToolCallLoop(env); loop {
+	if !agentShadowMode {
+		if cyc, csig, ccount, cratio, cwin := detectCyclicToolCallLoop(env); cyc {
 			loopRole := roleForTier(catalog.TierFor(feats.Model))
-			log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
-			return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic, feats.Tokens)
+			s.handleLoopEscalation(ctx, csig, ccount, cratio, cwin, installationID, sessionKey, loopRole, feats.Model)
+			escalatedLoop = true
+		}
+		if !escalatedLoop {
+			if loop, sig, count := detectToolCallLoop(env); loop {
+				loopRole := roleForTier(catalog.TierFor(feats.Model))
+				log.Info("ProxyMessages tool-call loop detected", "tool_sig", sig, "repeat_count", count, "role", loopRole)
+				return s.handleToolCallLoopBreak(ctx, w, env, sig, count, installationID, sessionKey, loopRole, feats.Model, providers.ProviderAnthropic, feats.Tokens)
+			}
 		}
 	}
 
@@ -2098,21 +2079,25 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// session is compacted (à la Claude Code) instead of dead-ending in the
 	// scorer with no eligible provider. Mutates env; feats is recomputed after.
 	maxEligibleWindow := s.maxEligibleContextWindow(baseExcluded, env.SignatureTokenSavings())
-	compRes, compErr := s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, ""), outputReserve, maxEligibleWindow, r.Header)
-	if compErr != nil {
-		log.Warn("Compaction could not fit request to any eligible model",
-			"err", compErr, "final_estimate", compRes.FinalEstimate, "max_window", maxEligibleWindow, "requested_model", feats.Model)
-		return compErr
-	}
-	if compRes.Applied {
-		feats = env.RoutingFeatures(embedFlag)
-		log.Info("Proactive compaction applied",
-			"tool_results_cleared", compRes.ToolResultsCleared,
-			"summarized", compRes.Summarized,
-			"summary_model", compRes.SummaryModel,
-			"trimmed_to_recent", compRes.TrimmedToRecent,
-			"final_estimate", compRes.FinalEstimate,
-		)
+	var compRes compactionResult
+	if !agentShadowMode {
+		var compErr error
+		compRes, compErr = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, ""), outputReserve, maxEligibleWindow, r.Header)
+		if compErr != nil {
+			log.Warn("Compaction could not fit request to any eligible model",
+				"err", compErr, "final_estimate", compRes.FinalEstimate, "max_window", maxEligibleWindow, "requested_model", feats.Model)
+			return compErr
+		}
+		if compRes.Applied {
+			feats = env.RoutingFeatures(embedFlag)
+			log.Info("Proactive compaction applied",
+				"tool_results_cleared", compRes.ToolResultsCleared,
+				"summarized", compRes.Summarized,
+				"summary_model", compRes.SummaryModel,
+				"trimmed_to_recent", compRes.TrimmedToRecent,
+				"final_estimate", compRes.FinalEstimate,
+			)
+		}
 	}
 
 	overflowEstimate := env.ContextOverflowTokenEstimate()
@@ -2157,7 +2142,13 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if installationID != uuid.Nil {
 		req.InstallationID = installationID.String()
 	}
-	routeRes, routeErr := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, req)
+	var routeRes turnLoopResult
+	var routeErr error
+	if agentShadowMode {
+		routeRes, routeErr = s.runAgentShadowEvaluationRoute(ctx, env, feats, installationID, req, agentShadowEval)
+	} else {
+		routeRes, routeErr = s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, "", r.Header, req)
+	}
 	if routeErr != nil {
 		log.Error("Routing failed", "err", routeErr, "route_ms", time.Since(routeStart).Milliseconds(), "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
 		return routeErr
@@ -2168,7 +2159,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if routeRes.UsageBypass && routeRes.Decision.Provider == providers.ProviderAnthropic {
 		err := s.bypassToAnthropic(ctx, env, feats, routeRes.modelSwitched(), requestStart, requestID, externalID, routeRes.TurnType, r, w)
 		if !errors.Is(err, errBypassRetryable) {
-			s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
+			if !agentShadowMode {
+				s.firePolicyShadowForServingDecision(ctx, routeRes.Decision, req)
+			}
 			return err
 		}
 
@@ -2210,7 +2203,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	routeRes.SuggestionMode = r.Header.Get("x-weave-suggestion-mode") == "true"
 	decision := routeRes.Decision
-	s.firePolicyShadowForServingDecision(ctx, decision, req)
+	if !agentShadowMode {
+		s.firePolicyShadowForServingDecision(ctx, decision, req)
+	}
 	tt := routeRes.TurnType
 	stickyHit := routeRes.StickyHit
 	pinTier := routeRes.PinTier
@@ -2223,7 +2218,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Gated to tool-bearing turns so a frozen marker + frozen prompt prefix
 	// can't collide on healthy text-only turns.
 	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
-	if toolBearingTurn && s.noProgress != nil {
+	if !agentShadowMode && toolBearingTurn && s.noProgress != nil {
 		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
@@ -2233,7 +2228,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Text-repetition break: fresh tool calls each turn defeat the no-progress
 	// fingerprint; repeated narration is the durable tell. See text_repetition.go.
-	if s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
+	if !agentShadowMode && s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if looped, count, sampleHash := detectTextRepetition(env); looped {
 			role := roleForTier(catalog.TierFor(feats.Model))
 			return s.handleTextRepetitionBreak(ctx, w, env, count, sampleHash, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
@@ -2245,7 +2240,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// reason), so fire rates/precision can be measured before any escalation
 	// is armed. Main-loop / tool-result turns only — hard-pinned turn types
 	// carry history shapes that mimic the signals.
-	if s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
+	if !agentShadowMode && s.spiralShadowEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if reasons := spiralReasons(inboundSpiralSignals); len(reasons) > 0 {
 			role := roleForTier(catalog.TierFor(feats.Model))
 			// Use the bindRequestLogger digest, not routeRes.SessionKey (zero
@@ -2269,7 +2264,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// client-trim detector as a false positive), so a compaction handover here
 	// would be a redundant summarizer call that also discards the recent-turn
 	// tail maybeCompact deliberately kept.
-	if decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compRes.Applied && routeRes.PrefixTrimmed {
+	if !agentShadowMode && decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compRes.Applied && routeRes.PrefixTrimmed {
 		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 			"message_count", feats.MessageCount,
 			"tool_call_count", inboundToolCallCount,
@@ -2315,7 +2310,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
 	w.Header().Set(HeaderRouterModel, decision.Model)
-	s.setFeedbackLinkHeader(w, installationID, externalID, requestID, auth.UserIDFrom(ctx))
+	if !agentShadowMode {
+		s.setFeedbackLinkHeader(w, installationID, externalID, requestID, auth.UserIDFrom(ctx))
+	}
 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
@@ -2418,13 +2415,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// wrapped below the capture layer so the footer never lands in
 	// cached/logged bodies. Transparent when streaming/feedback is off.
 	clientSink := w
-	if env.Stream() {
+	if env.Stream() && !agentShadowMode {
 		if footer := s.feedbackFooter(ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType); footer != "" {
 			clientSink = translate.NewAnthropicRoutingFooterWriter(w, footer)
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(clientSink)
-	contentSink, policyOutcomeCap := s.capturePolicyOutcomeResponse(ctx, contentSink, routeRes, decision)
+	var policyOutcomeCap *captureWriter
+	if !agentShadowMode {
+		contentSink, policyOutcomeCap = s.capturePolicyOutcomeResponse(ctx, contentSink, routeRes, decision)
+	}
 	preludeBuf := newPreludeBuffer(contentSink)
 	var rootSink http.ResponseWriter = preludeBuf
 	var captureW *captureWriter
@@ -2901,19 +2901,30 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: upstreamBuilder.Build(),
 	})
 	respBody, respTrunc := capturedResponse(contentCap)
-	s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
+	// Eval candidates are already captured by the content-addressed offline
+	// pipeline. Do not duplicate their request/response bodies into the
+	// production call-log stream, where they could be mistaken for serving
+	// traffic by a later training-data export.
+	if !agentShadowMode {
+		s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
+	}
 	otel.Flush(ctx)
 
-	s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
+	if !agentShadowMode {
+		s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
+	}
 
-	if installationID != uuid.Nil {
+	// Evaluation requests must not create persistent serving telemetry. Besides
+	// contaminating customer metrics, those rows are an input to offline policy
+	// analysis and would turn forced candidates into apparent serving choices.
+	if !agentShadowMode && installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		// Same-provider subscription->Weave retries keep finalProvider ==
 		// primaryProvider, so OR in subscriptionFailoverUsed to match the OTel
 		// span + completion log.
 		failoverUsed := finalProvider != primaryProvider || subscriptionFailoverUsed
 		degShadow := proxyErr == nil && isDegenerateResponse(out, respSummary.ToolUseBlocks, respSummary.StopReason, respSummary.StopReasonDemoted)
-		if degShadow {
+		if degShadow && !agentShadowMode {
 			log.Info("router.degenerate_shadow",
 				"model", decision.Model,
 				"provider", finalProvider,
@@ -3015,7 +3026,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// No-op when billing is unwired (selfhosted); only reached on a real
 	// upstream call since the cache-hit branch above already returned.
-	if proxyErr == nil {
+	if proxyErr == nil && !agentShadowMode {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 		if compRes.Summarized {
 			s.billCompactionSummary(ctx, requestID, externalID, compRes.SummaryUsage)
@@ -3046,10 +3057,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Two-strike eviction: a session pinned to a model returning non-retryable
 	// 4xx wedges until manually /force-model'd out. Expires the pin after a
 	// persistent counter hits threshold; successful turns reset it.
-	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
+	if !agentShadowMode {
+		s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
-	// Re-pin the session off the refusing model if a cyber refusal was observed.
-	s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, stickyStateRole(routeRes), decision)
+		// Re-pin the session off the refusing model if a cyber refusal was observed.
+		s.maybeRepinOnRefusal(ctx, refusalObs, routeRes.SessionKey, stickyStateRole(routeRes), decision)
+	}
 
 	// One event per tool_use block that failed toolcheck validation, including
 	// repaired ones — doubles as a per-model×provider tool-calling-quality signal.
@@ -3072,7 +3085,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	if policyOutcomeCap != nil {
 		policyResp = &policyOutcomeResponse{Body: policyRespBody, Truncated: policyRespTrunc}
 	}
-	s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, policyResp)
+	if !agentShadowMode {
+		s.reportPolicyOutcome(ctx, routeRes, decision, finalProvider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, policyResp)
+	}
 	return proxyErr
 }
 

@@ -12,6 +12,7 @@ const SchemaVersionV1 = "policy_router_v1"
 const (
 	ExecutionModeServing = "serving"
 	ExecutionModeShadow  = "shadow"
+	ExecutionModePreview = "preview"
 )
 
 // Capabilities declares which optional harness behaviors a policy supports.
@@ -94,9 +95,49 @@ type Result struct {
 	Debug                map[string]interface{}
 }
 
+// PreviewGroup records one classifier group in serving fallback order.
+type PreviewGroup struct {
+	Group        string   `json:"group"`
+	Probability  float64  `json:"probability"`
+	RosterArms   []string `json:"roster_arms"`
+	EligibleArms []string `json:"eligible_arms"`
+}
+
+// PreviewResult is a side-effect-free policy evaluation with every arm in the
+// first nonempty ranked group, plus authoritative router resolution details.
+type PreviewResult struct {
+	SchemaVersion         string             `json:"schema_version"`
+	RouteID               string             `json:"route_id"`
+	Strategy              router.Strategy    `json:"strategy"`
+	PolicyArtifactID      string             `json:"policy_artifact_id"`
+	PolicyArtifactSHA256  string             `json:"policy_artifact_sha256"`
+	RosterSHA256          string             `json:"roster_sha256"`
+	HMMStateID            int                `json:"hmm_state_id"`
+	HMMStatePath          []int              `json:"hmm_state_path"`
+	HMMStateProbabilities []float64          `json:"hmm_state_probabilities"`
+	ClassOrder            []string           `json:"class_order"`
+	ClassProbabilities    map[string]float64 `json:"class_probabilities"`
+	RankedFallback        []PreviewGroup     `json:"ranked_fallback"`
+	SelectedGroup         string             `json:"selected_group,omitempty"`
+	EligibleRosterIDs     []string           `json:"eligible_roster_ids"`
+	ResolverCandidates    []Candidate        `json:"resolver_candidates"`
+	ResolverExclusions    []Diagnostic       `json:"resolver_exclusions"`
+}
+
 // Decider asks a policy sidecar to choose one supplied candidate.
 type Decider interface {
 	Decide(ctx context.Context, query Query) (Result, error)
+}
+
+// PreviewDecider asks a policy sidecar for a decision trace without serving.
+type PreviewDecider interface {
+	Preview(ctx context.Context, query Query) (PreviewResult, error)
+}
+
+// RoutePreviewer evaluates a fully formed router request without dispatch or
+// serving lifecycle side effects.
+type RoutePreviewer interface {
+	PreviewRoute(ctx context.Context, req router.Request) (PreviewResult, error)
 }
 
 // OutcomeReporter sends final dispatch outcomes to a policy sidecar.

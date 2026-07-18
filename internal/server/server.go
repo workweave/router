@@ -147,6 +147,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithTimingEntry(),
 		middleware.WithTimeout(messagesTimeout),
 		middleware.WithAuth(authSvc, byokDisabled),
+		middleware.WithAgentShadowEvaluation(),
 	}
 	if billingSvc != nil {
 		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc), middleware.WithOrgMonthlySpendCap(billingSvc))
@@ -214,6 +215,17 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	)
 	routeGroup := engine.Group("", routeMiddleware...)
 	routeGroup.POST("/v1/route", anthropicapi.RouteHandler(proxySvc))
+
+	previewGroup := engine.Group("",
+		middleware.WithTimingEntry(),
+		middleware.WithTimeout(routeTimeout),
+		middleware.WithAuth(authSvc, byokDisabled),
+		middleware.WithEmbedOnlyUserMessageOverride(),
+		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
+		middleware.WithPolicyDebugOverride(),
+		middleware.WithRoutingKnobsOverride(),
+	)
+	previewGroup.POST("/v1/route/preview", anthropicapi.PreviewRouteHandler(proxySvc))
 
 	// No-login feedback link: the signed HMAC token in the URL/body is the
 	// sole credential, so no auth middleware. Mounted only when
