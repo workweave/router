@@ -177,6 +177,38 @@ func TestService_AgentShadowEvaluationForcesEphemerallyWithoutServingRouter(t *t
 	assert.Zero(t, pins.resetCalls)
 }
 
+func TestService_AgentShadowEvaluationNeverSubstitutesRequestedBaseline(t *testing.T) {
+	openAIProvider := &fakeProvider{proxyErr: &providers.UpstreamStatusError{Status: http.StatusServiceUnavailable}}
+	anthropicProvider := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusOK)
+	}}
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{
+		providers.ProviderAnthropic: anthropicProvider,
+		providers.ProviderOpenAI:    openAIProvider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithDeploymentKeyedProviders(map[string]struct{}{
+			providers.ProviderAnthropic: {},
+			providers.ProviderOpenAI:    {},
+		}).
+		WithAvailableModels(map[string]struct{}{
+			"claude-opus-4-8": {},
+			"gpt-5.5":         {},
+		})
+
+	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+		Model: "gpt-5.5", RolloutID: "pilot-1", StateID: "state-1",
+	})
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"inspect this repository"}],"max_tokens":512}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	assert.NotEmpty(t, openAIProvider.proxyBodies, "the planned candidate must be attempted")
+	assert.Empty(t, anthropicProvider.proxyBodies, "eval forcing must never dispatch the request baseline")
+	assert.Equal(t, "gpt-5.5", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
 func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testing.T) {
 	provider := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
