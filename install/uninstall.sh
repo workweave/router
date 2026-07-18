@@ -213,6 +213,41 @@ if [ "$target" = "opencode" ]; then
     ok "Removed $opencode_parked"
   fi
 
+  # Remove slash command wrapper files this installer owns. Install mirrors
+  # this split: project scope uses <repo>/.opencode/commands/, while user
+  # scope—including a user-style --dir install—uses the global XDG commands
+  # directory so opencode discovers the wrappers from any working directory.
+  remove_opencode_command_dir() {
+    local opencode_cmds_dir="$1" cmd cmd_file
+    if [ -d "$opencode_cmds_dir" ]; then
+      refuse_if_symlink "$opencode_cmds_dir"
+      for cmd in force-model unforce-model router-feedback fm ufm rf; do
+        cmd_file="$opencode_cmds_dir/$cmd.md"
+        if [ -f "$cmd_file" ]; then
+          refuse_if_symlink "$cmd_file"
+          rm -f "$cmd_file"
+          ok "Removed $cmd_file"
+        fi
+      done
+      rmdir "$opencode_cmds_dir" 2>/dev/null || true
+    fi
+  }
+
+  if [ "$scope" = "project" ]; then
+    opencode_commands_dir="$opencode_dir/.opencode/commands"
+  else
+    opencode_commands_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
+  fi
+  remove_opencode_command_dir "$opencode_commands_dir"
+
+  # Also clean the two paths used by earlier installer revisions, but avoid
+  # visiting the canonical path twice. This keeps uninstall idempotent for
+  # existing project and --dir installations.
+  for legacy_dir in "$opencode_dir/commands" "$opencode_dir/.opencode/commands"; do
+    [ "$legacy_dir" = "$opencode_commands_dir" ] && continue
+    remove_opencode_command_dir "$legacy_dir"
+  done
+
   if [ -n "$install_dir" ]; then
     ok "Weave Router uninstalled from $install_dir (opencode)."
   else

@@ -473,12 +473,14 @@ func writeSyntheticOpenAIJSON(w http.ResponseWriter, respID, text string, inputT
 		return fmt.Errorf("marshal synthetic openai response: %w", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	_, writeErr := w.Write(body)
 	return writeErr
 }
 
 func writeSyntheticOpenAISSE(w http.ResponseWriter, respID, text string, inputTokens int) error {
 	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	bw := bufio.NewWriterSize(w, 4096)
 	created := time.Now().Unix()
