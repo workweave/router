@@ -1,0 +1,35 @@
+frontend/src/app/(auth)/login/page.tsx
+  s_b19420d3dd2686::t_9b41ddd72e0199 62,66-70
+frontend/src/app/(app)/settings/page.tsx
+  s_b19420d3dd2686::t_1d2c4b6c478af6 18-19,38-39,41-56,58-73,75-89
+  s_b19420d3dd2686::t_987606c4be8620 362
+  s_b19420d3dd2686::t_11eaad3c8735f2 383-384
+  s_b19420d3dd2686::t_341a8c8c083318 261-267,269
+  s_b19420d3dd2686::t_6cca82783ecd0c 566
+  s_b19420d3dd2686::t_a97b865ebb5d39 185,189-193
+  s_b19420d3dd2686::t_1af5534e9dcaaa 40,57,74
+  s_b19420d3dd2686::t_1202f394d493b7 329,335-339,348-352
+  s_b19420d3dd2686::t_53550da96d5082 203
+  s_b19420d3dd2686::t_084e12efa7321c 431,434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "022647baca7ba526deedb5d0143918ee986796e7",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+internal/translate/anthropic_marker_output_progress_test.go
+  s_e9293ea02b22a1::t_7ffdb414e5ff3b 21,32,39,46
+  s_e9293ea02b22a1::t_adfeca80551c21 1-20,22-31,33-38,40-45,47-73
+internal/translate/anthropic_marker.go
+  s_e9293ea02b22a1::t_02b5180d0b068a 9
+  s_e9293ea02b22a1::t_4a2fcf40985ea5 31-32
+  s_e9293ea02b22a1::t_fa6089b9a197dc 218-234,237
+  s_e9293ea02b22a1::t_e0345c9708f70c 178-185
+internal/providers/anthropic/client.go
+  s_e9293ea02b22a1::t_d78b9e7f256e28 27-37,51-87
+  s_e9293ea02b22a1::t_b82d4a33c3570e 218-245
+  s_e9293ea02b22a1::t_3606615aea0ba8 88
+internal/providers/anthropic/client_output_stall_test.go
+  s_e9293ea02b22a1::t_d9a002521f91b0 1-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d5d60c4166c56df29a5f26346454352d5b865cfd",
+  "prompts": {},
+  "sessions": {
+    "s_e9293ea02b22a1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abc6e288-89d7-42f7-a8e8-d3ce2b1bba7a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

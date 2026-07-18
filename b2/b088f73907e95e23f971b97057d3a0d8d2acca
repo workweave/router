@@ -1,0 +1,31 @@
+cmd/routing-report/main_test.go
+  s_c5c3a4e3dd2fe4::t_c9260ab30b6b56 1-74
+scripts/embed_register_probes.py
+  s_c5c3a4e3dd2fe4::t_3c9777b0eac784 1-130
+cmd/routing-report/main.go
+  s_c5c3a4e3dd2fe4::t_533b19e0454398 33
+  s_c5c3a4e3dd2fe4::t_ac38c49d7adf9e 465
+  s_c5c3a4e3dd2fe4::t_fb45dc1a85743f 1-32,34-103,110-356,360,362-464,466-476
+  s_c5c3a4e3dd2fe4::t_66fc9b8edfa5e6 357-359,361
+  s_c5c3a4e3dd2fe4::t_881d1ddd3737e9 104-109
+internal/router/cluster/testdata/register_probes.jsonl
+  s_c5c3a4e3dd2fe4::t_298fad154999dc 1-180
+.github/workflows/check_cluster_routing.yml
+  s_c5c3a4e3dd2fe4::t_fa37f226139c45 1-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "b2b088f73907e95e23f971b97057d3a0d8d2acca",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+install/commands/router-session.md
+  s_a38571dca2710c::t_672c49de45c57f 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4f0208968de99190bba0d3b2754aa3c4ad8300cc",
+  "prompts": {},
+  "sessions": {
+    "s_a38571dca2710c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bef934ff-c07b-4847-9d82-8b23450dbb33",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

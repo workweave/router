@@ -1,0 +1,225 @@
+internal/router/catalog/catalog.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-14,16-18,20-46,50-52,56-58,70-83,86-96,99-104,106,109-276
+internal/router/cluster/artifacts/latest
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1
+frontend/next-env.d.ts
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 3
+internal/router/cluster/artifacts/v0.38/rankings.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-332
+install/install.sh
+  ai_agent 238-245,264-271,280-297,451-471,783-784,792,794-806,809-815,818,1013,1015,1042-1043,1045-1046,1053,1055,1082-1083,1085-1086,1257-1261,1266-1268,1359
+internal/router/catalog/lookup.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,9-10,12-15,19-31,33-46,49-58,61,64-70,72-73,75-82,84,87-90,97-98,100-116,118,123-126,128-135,142-159
+install/npm/package.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 3
+internal/translate/jsonw_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-116
+db/migrations/0005_telemetry-costs-to-micros.up.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-26
+internal/translate/handover.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 80-86,132,139,238-239,241,248,319-433
+internal/server/middleware/auth.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 26-34,41-44,73-79,104
+db/migrations/0007_user_display_name.down.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-6
+internal/server/server_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 68,80
+internal/postgres/user_repo.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 32,37-48,64,117-120,134-142
+internal/translate/envelope.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 18,34-44
+internal/auth/user.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 23,35,42
+internal/router/cluster/artifacts.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 321-322,339,347-362
+AGENTS.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,3,63-66
+internal/billing/repo.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-41
+internal/billing/errors.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-18
+internal/auth/service.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 287-288,290,307-312,324,330
+db/migrations/0006_credit_billing.up.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-52
+internal/router/handover/summarizer_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 4,12,207-409
+internal/sqlc/models.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 77-80,110-138
+db/migrations/0007_user_display_name.up.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-13
+install/cc-statusline.sh
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 136,138,165-166,168-169,176,178,205-206,208-209
+internal/translate/provider_hint_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 7,149-213,232-247
+internal/postgres/telemetry.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 15-34,68-71,107-109,134-135,152-153,171-172,191-193,214-215,231-232,249-250,343-344,379-380
+internal/proxy/service_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 439-508
+internal/router/catalog/AGENTS.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,5,7,9-28,32-37,39,41-43
+CLAUDE.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 63-66
+internal/router/planner/AGENTS.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,3,18,28
+internal/translate/emit_gemini.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 32-37,45-46,49,53,57-58,74-86,88-89,91-101,104-114,116-118,120,122-124,126-127,129-134,136,139-150,152-154,156-171,173-181,183-195,198-209,211-238,240-280,282-288,290-294,297,299-303,306-310,312-313,316-319,321-337,339-340,346-352,355-361,363-370,372-374,376-379,381-386,389-396,398-402,404-409,411-413,415-421,423-438,440,442-452,455-456,462,465,467,469-472,474-481,489-500,504-512,514-516,519-521,523,525-531,534-536,540,544-545,549-550,552-556,558,563-572,574-577,579,583-584,586-596,599,601-605,607-621,624-626,628-631,633-639,641-646,648-651,653-659,661-662,664-667,669-672,675-681,683-687,689-690,693-698,700-714,716,718-735,737-739,741,744-750,752-756,758-760,762-768,770-776,778-790,792-830,834-840,842-852,855-859,861-890,892,894-934,936-979,982-983,985,988-1009,1012-1051,1053-1060,1065-1068,1070,1078-1105,1109-1115,1125,1164-1186
+.env.example
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 52-54
+internal/proxy/turnloop_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 16,35,38,40
+internal/api/anthropic/messages.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 130,132-138,149,151
+internal/router/cluster/scorer_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 364-462
+internal/router/handover/summarizer.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 18-32,37-38,40
+internal/server/middleware/auth_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 14,22-45,120,136-199,212
+Makefile
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 12,157-177
+internal/auth/user_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 69,83,97,113,125,135,141-176,182,190,209,214
+internal/translate/strip_marker_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 18-19,21-27
+frontend/package-lock.json
+  ai_agent 21,35-36,740-742,746-748,756-758,772-774,788-790,804-806,820-822,836-838,852-854,868-870,3597-3599,3603,5302-5304,5307,5320-5328,5332
+db/queries/model_router_request_telemetry.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 56-59,85-86,90,100-101,113-114,126-127,140-141,145,156-157,170-171,184-185,210-211,235-236
+frontend/package.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 22,36-37,40-42
+internal/router/catalog/cost.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-30
+internal/billing/service_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-207
+cmd/router/main.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 22,35,139-170,241,253-300,449,455-456,534-535,545,578,1030,1046-1064
+internal/proxy/client_identity.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 13-14,16-22,60,62,123-152
+internal/proxy/gemini.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 14,114-117,135,171-174,193-195
+internal/router/cluster/artifacts/v0.39/rankings.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-281
+internal/router/CLAUDE.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 11
+internal/router/cluster/scorer.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 13,157-183,187-189,191-192,258-263,265,269-271,273-274,342-349,351,355
+internal/api/gemini/generate_content.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 145-149
+internal/router/planner/policy.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 12,19,95-96,132-134
+internal/providers/provider.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 20-21,25,32-33
+internal/server/server.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 16,53-64,68,83,104,107-112,116,119,122-127,131,139-143,146,152,154-159,163
+internal/sqlc/model_router_users.sql.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 16,24,39,45,54,76,92-93,98-99,103-106,112,126-127,132-133,137-140,142,152,158-186,188-190,195-196,200-210,212-216,218-255,257-267,276
+internal/translate/emit_anthropic.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 20,26-28,86-91,93-94,97-99,101-108,110-111,114-119,123-126,129-131,133-135,137-145,147-151,154-156,160-189,191-196,198-199,201-203,205-207,209-213,215,218-222,224,228-262,264-270,272-275,277-279,282-284,286-288,291-306,308-336,338-344,347-357,360-366,368-373,375-379,381-386,388-390,393-429,431-434,436-437,440-443,445-490,492-501,503-515,518-524
+db/queries/billing.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-95
+internal/translate/crossformat.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-65
+internal/translate/emit_openai.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 16-20,45-50,52-56,58-62,64-70,76-89,91-95,97-100,103-109,112-118,120-123,125-127,130-134,138-139,141-147,149-162,166-167,170-181,183-207,210-218,221-223,229-231,233,237-242,244-255,257-260,262,266,268-270,272-273,275-276,278-284,287-288,290-291,294-335,337-360,363-384,387-397,400-412,415-429,431,435-437,439,441,443,445-447,449-451,454-461,463-499,502-538,540-559,561-578,580-583,586-587,590-647
+internal/translate/inline_defs_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-157
+internal/translate/translate.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 11-12,17-18,20-21,25,27-51,54-57,60,62-63,65-66,69,71-72,74,76,78,80-100,102-116,138-140,143-157,163-164,166,170,175-177,179-199,201-214,216-248,251-254,257-258,271-276,281-286,288-289,292-293,295,300-302,305-317
+internal/translate/crossformat_response_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-866
+internal/router/catalog/CLAUDE.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,5,9-28,32-37,39,41-43
+go.mod
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 11,77
+internal/router/AGENTS.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,3,11
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-69
+internal/translate/system_reminder.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 4,38-48,50-79,81-97
+scripts/pre-commit
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-25
+internal/server/middleware/balance_check_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,4-8,11-15,20-27,30-40,43-46,48,50-64,66-89,91-120,122-126,129-142,144-146,149-154,157-186
+internal/translate/crossformat_request_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-1487
+.github/workflows/publish_npm.yml
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 46
+internal/proxy/handover.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 84-88,91,94,99,124,128,133,138,143-166
+internal/router/cluster/artifacts/v0.39/model_registry.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-24
+internal/proxy/credentials.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 58
+db/queries/model_router_users.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 2-15,17-45,47-49,62-63,68-69,73-75
+README.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 26,32
+db/migrations/0005_telemetry-costs-to-micros.down.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-17
+internal/observability/otel/pricing.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,6,13,17,22,25
+internal/providers/openaicompat/client.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 13-14,26-29,32-45,50-54,58-64,69-90,92,107-108
+internal/proxy/turnloop.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 12,50,75-78,101,253,268,284,286,288,290,302,308,311
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-27
+internal/postgres/billing_repo.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-79
+db/migrations/0006_credit_billing.down.sql
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-7
+internal/router/planner/CLAUDE.md
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 18,28
+internal/billing/service.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-140
+internal/translate/gemini_response.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 9-10,15-43,46-50,54-72,74,77,82-86,90-96,98-124,126-130,132-134,137-143,145-153,155-199,201-209,211-212,214-216,218-226,228,230-233,236-252,254-268
+go.sum
+  ai_agent 98-99,233-234
+internal/proxy/service_session_pin_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 17,584,618-619,640,672,686,700,731,774
+internal/translate/gemini_stream.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 175
+internal/api/openai/completions.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 87-91
+internal/proxy/service.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 15,21,63,100-103,126-127,140,153,156-157,160,162-163,165,168-170,174-176,178-180,182,325,334,382,384-393,752-755,768,801,874-877,914-917,935-942,1280-1388,1529-1532,1545,1565,1639-1642,1663-1666,1684-1687,1705
+internal/proxy/client_identity_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 87-113
+internal/sqlc/billing.sql.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-255
+internal/translate/gemini_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 220-270,689-738,864-1004
+internal/router/catalog/catalog_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1,6-7,12-18,21-25,27-42,45-51,54-62,66-68,72-76,79-84,86-90,93-96,99-108,110-121
+internal/translate/jsonw.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-122
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 28-29,60-61,80-81,145-146,175-176,197-198,247-248,252,269-271,279-280,284,307-308,312,327-329,339-340,344,365-366,384-385,392-393,424-425,441-442,449-450,480-481,499-500,507-508,539-540,556-557,564-565,595-596,614-615,622-623,654-655,671-672,679-680,757-760,795-798,871-874
+internal/proxy/marker_internal_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 9,16,21,24-26,29,34,37-39,46,71,74-75,86,89-90,95-108,114,117-118,122-158,163,166-167,177,180-181,218,220,226,228,231-233,235
+internal/proxy/handover_test.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 94,112,132,152,164
+internal/router/cluster/artifacts/v0.39/metadata.yaml
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-63
+internal/server/middleware/balance_check.go
+  s_dc5a44f29a89c6::t_5a66fd788acf3f 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "7f473f99ef057ecb72b8b710f629a98bb4ffbcf4",
+  "prompts": {},
+  "sessions": {
+    "s_dc5a44f29a89c6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1aba0b56-0c99-4f78-9599-2a0cbbcb776c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

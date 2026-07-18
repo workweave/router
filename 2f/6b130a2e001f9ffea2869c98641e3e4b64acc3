@@ -1,0 +1,25 @@
+internal/api/admin/policy_catalog_test.go
+  s_181299bbd674e9::t_d2eaf9ce1528a3 67
+internal/router/policy/contract.go
+  s_181299bbd674e9::t_d2eaf9ce1528a3 26
+internal/api/admin/policy_catalog.go
+  s_181299bbd674e9::t_d2eaf9ce1528a3 32
+internal/proxy/service.go
+  s_181299bbd674e9::t_cf5f8f9db5ed45 1535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2f6b130a2e001f9ffea2869c98641e3e4b64acc3",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

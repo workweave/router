@@ -1,0 +1,28 @@
+internal/translate/crossformat_request_test.go
+  s_6a47df7c07691e::t_ba655b3167261b 1198
+internal/translate/crossformat_response_test.go
+  s_6a47df7c07691e::t_730984c1e8c357 572
+internal/translate/emit_gemini.go
+  s_6a47df7c07691e::t_14a2967408b69a 348
+  s_6a47df7c07691e::t_53591afa229d82 303,310
+  s_6a47df7c07691e::t_71c84ab079cd4b 349
+  s_6a47df7c07691e::t_9914700d4b5301 386-392
+  s_6a47df7c07691e::t_8089e86255d0db 746
+  s_6a47df7c07691e::t_cd1f2cc768b745 680,687
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "07ab382f5feafc269f053168c351ec3a3a0a5c0d",
+  "prompts": {},
+  "sessions": {
+    "s_6a47df7c07691e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5206d9af-d5e6-4e45-8ac7-ead1fdb0cd81",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

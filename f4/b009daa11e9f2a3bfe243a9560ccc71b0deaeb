@@ -1,0 +1,21 @@
+internal/router/cluster/artifacts.go
+  s_e5e2afedd0969d::t_b897ff85582a82 321-322,339,347-362
+cmd/router/main.go
+  s_e5e2afedd0969d::t_27375ff44eee70 1009
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f4b009daa11e9f2a3bfe243a9560ccc71b0deaeb",
+  "prompts": {},
+  "sessions": {
+    "s_e5e2afedd0969d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f65d001-7bc0-49a5-866d-f6ef886589a4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
