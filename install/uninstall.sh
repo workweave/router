@@ -213,6 +213,25 @@ if [ "$target" = "opencode" ]; then
     ok "Removed $opencode_parked"
   fi
 
+  # Remove slash command wrapper files this installer owns. For project scope
+  # the commands land in .opencode/commands/; for user scope they land in
+  # ~/.config/opencode/commands/.
+  for candidate in "commands" ".opencode/commands"; do
+    opencode_cmds_dir="$opencode_dir/$candidate"
+    if [ -d "$opencode_cmds_dir" ]; then
+      refuse_if_symlink "$opencode_cmds_dir"
+      for cmd in force-model unforce-model router-feedback fm ufm rf; do
+        cmd_file="$opencode_cmds_dir/$cmd.md"
+        if [ -f "$cmd_file" ]; then
+          refuse_if_symlink "$cmd_file"
+          rm -f "$cmd_file"
+          ok "Removed $cmd_file"
+        fi
+      done
+      rmdir "$opencode_cmds_dir" 2>/dev/null || true
+    fi
+  done
+
   if [ -n "$install_dir" ]; then
     ok "Weave Router uninstalled from $install_dir (opencode)."
   else

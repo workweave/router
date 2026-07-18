@@ -1754,6 +1754,45 @@ install_slash_commands() {
   ok "Slash commands written to $dst_dir ($installed)"
 }
 
+# opencode discovers commands in *.md files under ~/.config/opencode/commands/
+# (user scope) and .opencode/commands/ (project scope). The format is identical
+# to Claude Code's — YAML frontmatter + template with $ARGUMENTS expansion.
+# Router-off/on/status are excluded because they run npx shell commands specific
+# to Claude Code's settings model.
+install_opencode_commands() {
+  dst_dir="$1"
+  commands_src_dir=""
+  for candidate in \
+    "$script_dir/commands" \
+    "$script_dir/../commands"
+  do
+    if [ -d "$candidate" ]; then
+      commands_src_dir="$candidate"
+      break
+    fi
+  done
+  [ -n "$commands_src_dir" ] || return 0
+
+  if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+    refuse_if_symlink "$dst_dir"
+  fi
+  mkdir -p "$dst_dir"
+
+  cmds="force-model unforce-model router-feedback fm ufm rf"
+  installed="force-model, unforce-model, router-feedback, fm, ufm, rf"
+
+  for cmd in $cmds; do
+    src="$commands_src_dir/$cmd.md"
+    dst="$dst_dir/$cmd.md"
+    [ -f "$src" ] || continue
+    if [ "$scope" = "project" ] || [ -n "$install_dir" ]; then
+      refuse_if_symlink "$dst"
+    fi
+    cp "$src" "$dst"
+  done
+  ok "Slash commands written to $dst_dir ($installed)"
+}
+
 # ---------- codex install path (dispatch + exit before the Claude-only writes) ----------
 
 if [ "$target" = "codex" ]; then
@@ -1832,6 +1871,27 @@ if [ "$target" = "opencode" ]; then
       fi
     done
     ok "Updated $gitignore (ignored opencode.json, .weave/)"
+  fi
+
+  # Slash command wrappers: opencode discovers commands in *.md files under
+  # ~/.config/opencode/commands/ (user scope) and .opencode/commands/ (project
+  # scope). Install command wrappers for /rf (±), /force-model, /unforce-model
+  # so typing /rf + in the TUI expands to /router-feedback + and reaches the
+  # router's server-side feedback interceptor, same as Claude Code + Codex.
+  #
+  # Router on/off/status are not installed — they run npx shell commands
+  # specific to the Claude Code settings model and don't apply to opencode.
+  if [ "$scope" = "project" ]; then
+    opencode_commands_dir="$opencode_dir/.opencode/commands"
+  else
+    # User scope and --dir installs: use the global commands path that opencode
+    # discovers regardless of working directory.
+    opencode_commands_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
+  fi
+  install_opencode_commands "$opencode_commands_dir"
+  ok "opencode slash commands installed to $opencode_commands_dir"
+  if [ "$scope" = "user" ] || [ -n "$install_dir" ]; then
+    info "opencode restart required for commands to take effect."
   fi
 
   # Post-install verification: same probes the Claude/Codex paths run.
