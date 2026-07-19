@@ -51,7 +51,7 @@ func (s *Service) runAgentShadowEvaluationRoute(
 	}
 	rawModel := strings.TrimSpace(evaluation.Model)
 	model, provider, known, _ := resolveForceModelWithEffort(rawModel)
-	if !known || model != rawModel {
+	if !known || model != strings.ToLower(rawModel) {
 		return turnLoopResult{}, fmt.Errorf("agent-shadow model must be a canonical catalog id: %q", rawModel)
 	}
 	if _, excluded := req.ExcludedModels[model]; excluded {

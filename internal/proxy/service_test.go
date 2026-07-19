@@ -138,7 +138,7 @@ func TestService_AgentShadowEvaluationForcesEphemerallyWithoutServingRouter(t *t
 		WithCompaction(nil, 0.0001)
 
 	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
-		Model: "claude-opus-4-8", RolloutID: "pilot-1", StateID: "state-1",
+		Model: "CLAUDE-OPUS-4-8", RolloutID: "pilot-1", StateID: "state-1",
 	})
 	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, "1791da5d-d0db-494c-8574-859a4cb20d97")
 	messages := make([]map[string]any, 0, 17)
