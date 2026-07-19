@@ -10,9 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WithAgentShadowEvaluation authorizes the all-or-nothing internal evaluation
-// header triplet after normal router-key authentication. Partial headers fail
-// closed; ordinary traffic is untouched.
+// WithAgentShadowEvaluation validates the evaluation header triplet; partial headers fail closed, absent headers pass through.
 func WithAgentShadowEvaluation() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		model := strings.TrimSpace(c.GetHeader(proxy.AgentShadowModelHeader))

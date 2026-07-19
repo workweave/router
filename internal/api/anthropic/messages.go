@@ -43,9 +43,7 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
-		// Historical eval requests may carry real Claude metadata. Preserve it
-		// for upstream request fidelity, but never upsert production router-user
-		// identity rows as a side effect of an offline shadow candidate.
+		// Skip identity upsert for agent-shadow eval requests to avoid mutating production router-user state.
 		if _, agentShadow := proxy.AgentShadowEvalFromContext(ctx); !agentShadow {
 			ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		}

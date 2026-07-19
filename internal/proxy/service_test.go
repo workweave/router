@@ -144,13 +144,24 @@ func TestService_AgentShadowEvaluationForcesEphemerallyWithoutServingRouter(t *t
 	messages := make([]map[string]any, 0, 17)
 	for i := range 8 {
 		toolID := fmt.Sprintf("tool_%d", i)
+		assistantContent := []map[string]any{
+			{"type": "tool_use", "id": toolID, "name": "Read", "input": map[string]any{"file_path": "README.md"}},
+		}
+		if i == 0 {
+			assistantContent = append([]map[string]any{
+				{"type": "thinking", "thinking": "historical thought", "signature": "stale-signature"},
+			}, assistantContent...)
+		}
 		messages = append(messages,
-			map[string]any{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": toolID, "name": "Read", "input": map[string]any{"file_path": "README.md"}}}},
+			map[string]any{"role": "assistant", "content": assistantContent},
 			map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": fmt.Sprintf("old-result-%d", i)}}},
 		)
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": "make the next edit"})
-	body, err := json.Marshal(map[string]any{"model": "claude-haiku-4-5", "messages": messages, "max_tokens": 512})
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-haiku-4-5", "messages": messages, "max_tokens": 512,
+		"thinking": map[string]any{"type": "adaptive"},
+	})
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
@@ -160,6 +171,7 @@ func TestService_AgentShadowEvaluationForcesEphemerallyWithoutServingRouter(t *t
 	require.Len(t, provider.proxyBodies, 1)
 	assert.Contains(t, string(provider.proxyBodies[0]), `"model":"claude-opus-4-8"`)
 	assert.Contains(t, string(provider.proxyBodies[0]), "old-result-0")
+	assert.NotContains(t, string(provider.proxyBodies[0]), "stale-signature")
 	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel))
 	assert.Equal(t, providers.ProviderAnthropic, rec.Header().Get(proxy.HeaderRouterProvider))
 	assert.Equal(t, proxy.ReasonAgentShadowEval, rec.Header().Get(proxy.HeaderRouterDecision))
@@ -207,6 +219,30 @@ func TestService_AgentShadowEvaluationNeverSubstitutesRequestedBaseline(t *testi
 	assert.NotEmpty(t, openAIProvider.proxyBodies, "the planned candidate must be attempted")
 	assert.Empty(t, anthropicProvider.proxyBodies, "eval forcing must never dispatch the request baseline")
 	assert.Equal(t, "gpt-5.5", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
+func TestService_AgentShadowEvaluationNeverRetriesSubscriptionOnDeploymentKey(t *testing.T) {
+	provider := &fakeProvider{proxyErr: &providers.UpstreamStatusError{Status: http.StatusTooManyRequests}}
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{
+		providers.ProviderAnthropic: provider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-opus-4-8", nil).
+		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}}).
+		WithAvailableModels(map[string]struct{}{"claude-opus-4-8": {}})
+
+	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+		Model: "claude-opus-4-8", RolloutID: "pilot-1", StateID: "state-1",
+	})
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, "1791da5d-d0db-494c-8574-859a4cb20d97")
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"inspect this repository"}],"max_tokens":512}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	require.Len(t, provider.proxyBodies, 1, "eval traffic must not retry on the paid deployment key")
+	require.NotNil(t, provider.proxyCreds[0])
+	assert.True(t, provider.proxyCreds[0].OAuth, "the single attempt must use the supplied subscription")
 }
 
 func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testing.T) {

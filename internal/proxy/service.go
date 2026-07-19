@@ -2666,6 +2666,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// key at full cost, which is exactly the paid spend the overdraft floor
 	// forbids — a subscription throttle there surfaces raw instead.
 	subscriptionRetryEligible := decision.Provider == providers.ProviderAnthropic &&
+		!agentShadowMode &&
 		servedOnSubscription(ctx) &&
 		!billing.SubscriptionOnlyFromContext(ctx) &&
 		s.anthropicFallbackKeyAvailable(ctx)
@@ -2902,10 +2903,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		Attrs: upstreamBuilder.Build(),
 	})
 	respBody, respTrunc := capturedResponse(contentCap)
-	// Eval candidates are already captured by the content-addressed offline
-	// pipeline. Do not duplicate their request/response bodies into the
-	// production call-log stream, where they could be mistaken for serving
-	// traffic by a later training-data export.
+	// Eval bodies are captured offline; exclude them from call-log so they are not mistaken for serving traffic.
 	if !agentShadowMode {
 		s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
 	}
@@ -2915,9 +2913,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		s.recordTurnUsage(routeRes, finalProvider, decision.Model, in, out, cacheCreation, cacheRead)
 	}
 
-	// Evaluation requests must not create persistent serving telemetry. Besides
-	// contaminating customer metrics, those rows are an input to offline policy
-	// analysis and would turn forced candidates into apparent serving choices.
+	// Eval rows must not enter serving telemetry; they would corrupt offline policy analysis.
 	if !agentShadowMode && installationID != uuid.Nil {
 		credentialKeyPrefix, credentialKeySuffix, credSource := s.credentialKeyParts(ctx)
 		// Same-provider subscription->Weave retries keep finalProvider ==
