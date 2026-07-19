@@ -1663,8 +1663,8 @@ func (s *Service) Route(ctx context.Context, req router.Request) (router.Decisio
 // Owns translate.ParseAnthropic + RoutingFeatures extraction internally so
 // callers in internal/api/* never import internal/translate directly,
 // matching ProxyMessages.
-func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte) (decision router.Decision, err error) {
-	req, err := s.anthropicRoutingRequest(ctx, body, nil)
+func (s *Service) RouteAnthropicRequest(ctx context.Context, body []byte, headers http.Header) (decision router.Decision, err error) {
+	req, err := s.anthropicRoutingRequest(ctx, body, headers)
 	if err != nil {
 		return decision, err
 	}

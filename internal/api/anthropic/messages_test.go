@@ -386,6 +386,22 @@ func TestRouteHandler_HappyPathReturnsDecision(t *testing.T) {
 	assert.Equal(t, "cheap_and_cheerful", got["reason"])
 }
 
+func TestRouteHandler_ForwardsAuthorizationForProviderEligibility(t *testing.T) {
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, providers.ProviderAnthropic, &fakeProviderClient{}).
+		WithByokOnly(true)
+	engine := routeEngine(svc)
+	req := httptest.NewRequest(http.MethodPost, "/v1/route", bytes.NewReader([]byte(validAnthropicBody)))
+	req.Header.Set("Authorization", "Bearer sk-ant-oat01-claude-code-token")
+	rec := httptest.NewRecorder()
+
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, got.EnabledProviders, providers.ProviderAnthropic)
+}
+
 func previewRouteEngine(svc *proxy.Service, authorized bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
@@ -449,7 +465,7 @@ func TestRouteAnthropicRequest_ForwardsValidInstallationIDUUIDVerbatim(t *testin
 	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID.String())
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, installID.String(), got.InstallationID,
 		"valid installation UUID must round-trip to the HMM sidecar unchanged")
@@ -463,7 +479,7 @@ func TestRouteAnthropicRequest_DropsMalformedInstallationIDInsteadOfForwardingRa
 	// "not-a-uuid" is the regression case: pre-fix leaked through verbatim,
 	// diverging tenant attribution from ProxyMessages (which drops invalid IDs).
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "not-a-uuid")
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"malformed installation ID must collapse to empty string so the HMM "+
@@ -476,7 +492,7 @@ func TestRouteAnthropicRequest_DropsEmptyInstallationIDInsteadOfForwardingRaw(t 
 	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "")
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"empty installation ID must collapse to empty string")
@@ -489,7 +505,7 @@ func TestRouteAnthropicRequest_DropsMissingInstallationIDInsteadOfForwardingRaw(
 
 	// No WithValue — request reached RouteAnthropicRequest with no
 	// InstallationIDContextKey on the context at all.
-	_, err := svc.RouteAnthropicRequest(context.Background(), []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(context.Background(), []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"missing installation ID context value must collapse to empty string")

@@ -30,7 +30,7 @@ func RouteHandler(svc *proxy.Service) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		decision, routeErr := svc.RouteAnthropicRequest(ctx, body)
+		decision, routeErr := svc.RouteAnthropicRequest(ctx, body, c.Request.Header)
 		if routeErr != nil {
 			if errors.Is(routeErr, proxy.ErrRequestNotJSONObject) {
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Request body must be a JSON object.")
