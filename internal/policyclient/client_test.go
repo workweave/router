@@ -414,16 +414,24 @@ func TestClientReturnsErrorAfterTransientRetriesExhausted(t *testing.T) {
 }
 
 func TestClientCapabilities(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/capabilities", request.URL.Path)
-		_ = json.NewEncoder(w).Encode(policy.Capabilities{SchemaVersion: policy.SchemaVersionV1, ReportsFeedback: true})
-	}))
-	defer server.Close()
+	for _, schemaVersion := range []string{policy.SchemaVersionV1, policy.SchemaVersionV2} {
+		t.Run(schemaVersion, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				require.Equal(t, "/capabilities", request.URL.Path)
+				_ = json.NewEncoder(w).Encode(policy.Capabilities{
+					SchemaVersion:   schemaVersion,
+					ReportsFeedback: true,
+				})
+			}))
+			defer server.Close()
 
-	capabilities, err := New(server.URL, server.Client(), 0).Capabilities(context.Background())
+			capabilities, err := New(server.URL, server.Client(), 0).Capabilities(context.Background())
 
-	require.NoError(t, err)
-	assert.True(t, capabilities.ReportsFeedback)
+			require.NoError(t, err)
+			assert.Equal(t, schemaVersion, capabilities.SchemaVersion)
+			assert.True(t, capabilities.ReportsFeedback)
+		})
+	}
 }
 
 func TestClientCheckHealth(t *testing.T) {

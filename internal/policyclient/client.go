@@ -101,7 +101,7 @@ func (c *Client) Capabilities(ctx context.Context) (policy.Capabilities, error) 
 	if err := json.Unmarshal(payload, &capabilities); err != nil {
 		return policy.Capabilities{}, fmt.Errorf("decode policy capabilities response: %w", err)
 	}
-	if capabilities.SchemaVersion != policy.SchemaVersionV1 {
+	if capabilities.SchemaVersion != policy.SchemaVersionV1 && capabilities.SchemaVersion != policy.SchemaVersionV2 {
 		return policy.Capabilities{}, fmt.Errorf("unsupported policy capabilities schema %q", capabilities.SchemaVersion)
 	}
 	return capabilities, nil
