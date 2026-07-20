@@ -14,6 +14,7 @@ import (
 	"workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
@@ -122,6 +123,90 @@ func TestProxyMessages_OSSOutageFailsOverToBaselineAnthropic(t *testing.T) {
 	// the cost-routed OSS id — otherwise next-turn switch detection is wrong.
 	require.NotEmpty(t, store.usages, "baseline failover must write pin usage")
 	assert.Equal(t, "claude-opus-4-8", store.usages[len(store.usages)-1].ServedModel, "pin usage records the served baseline model")
+}
+
+func TestProxyMessages_AuthoritativePolicyNeverChangesModelOnFailover(t *testing.T) {
+	var (
+		mu              sync.Mutex
+		fireworksCount  int
+		openRouterCount int
+		anthropicCount  int
+	)
+	fail503 := func(counter *int) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			*counter++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"provider unavailable"}}`))
+		}
+	}
+	fireworks := httptest.NewServer(fail503(&fireworksCount))
+	defer fireworks.Close()
+	openrouter := httptest.NewServer(fail503(&openRouterCount))
+	defer openrouter.Close()
+	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		anthropicCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer anthropicUpstream.Close()
+
+	strategy := router.Strategy("authoritative-failover-test")
+	policyRouter := &fakeRouter{decision: router.Decision{
+		Provider: providers.ProviderFireworks,
+		Model:    "deepseek/deepseek-v4-pro",
+		Reason:   "authoritative-test_policy",
+		Metadata: &router.RoutingMetadata{
+			RouteID:                       "route-authoritative",
+			Strategy:                      string(strategy),
+			AuthoritativePerTurnSelection: true,
+		},
+	}}
+	svc := proxy.NewService(
+		nil,
+		map[string]providers.Client{
+			providers.ProviderFireworks:  openaicompat.NewClient("test-fw-key", fireworks.URL),
+			providers.ProviderOpenRouter: openaicompat.NewClient("test-or-key", openrouter.URL),
+			providers.ProviderAnthropic:  anthropic.NewClient("test-anthropic-key", anthropicUpstream.URL),
+		},
+		nil,
+		false,
+		nil,
+		newFakePinStore(),
+		false,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		newCaptureTelemetry(),
+	).WithDeploymentKeyedProviders(map[string]struct{}{
+		providers.ProviderFireworks:  {},
+		providers.ProviderOpenRouter: {},
+		providers.ProviderAnthropic:  {},
+	}).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: strategy,
+		Router:   policyRouter,
+		Capabilities: policy.Capabilities{
+			SchemaVersion:                 policy.SchemaVersionV1,
+			AuthoritativePerTurnSelection: true,
+		},
+	})
+	ctx := router.WithStrategy(
+		authedCtx("11111111-1111-1111-1111-111111111111"),
+		strategy,
+	)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, fireworksCount)
+	assert.Equal(t, 1, openRouterCount)
+	assert.Equal(t, 0, anthropicCount, "authoritative policy must surface failure instead of substituting another model")
 }
 
 // TestProxyMessages_ForcedModelUnavailableDoesNotSubstituteAnthropic ensures a

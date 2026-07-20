@@ -90,6 +90,7 @@ def capabilities() -> JSONResponse:
             "supports_debug_route_detail": True,
             "supports_preview": True,
             "supports_shadow": True,
+            "authoritative_per_turn_selection": False,
             "learning": {
                 "enabled": False,
                 "state": "frozen_policy",

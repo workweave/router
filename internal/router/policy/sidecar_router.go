@@ -123,6 +123,7 @@ func (r *SidecarRouter) PreviewRoute(ctx context.Context, req router.Request) (P
 		FeedbackKey:          req.FeedbackKey,
 		FeedbackRole:         req.FeedbackRole,
 		ClientSessionID:      req.ClientSessionID,
+		TurnContext:          req.PolicyTurnContext,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
@@ -254,7 +255,8 @@ func validatePreviewResult(result PreviewResult) error {
 func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
 	strategy := r.config.Strategy
 	r.capabilitiesMu.RLock()
-	shadowUnsupported := r.capabilitiesSet && !r.capabilities.SupportsShadow
+	capabilities := r.capabilities
+	shadowUnsupported := r.capabilitiesSet && !capabilities.SupportsShadow
 	r.capabilitiesMu.RUnlock()
 	if req.ShadowMode && shadowUnsupported {
 		return router.Decision{}, fmt.Errorf("%s: sidecar does not support shadow routing: %w", strategy, r.config.Unavailable)
@@ -286,6 +288,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		FeedbackKey:          req.FeedbackKey,
 		FeedbackRole:         req.FeedbackRole,
 		ClientSessionID:      req.ClientSessionID,
+		TurnContext:          req.PolicyTurnContext,
 		EstimatedInputTokens: req.EstimatedInputTokens,
 		HasTools:             req.HasTools,
 		HasImages:            req.HasImages,
@@ -342,20 +345,21 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		Model:    binding.CatalogID,
 		Reason:   reason,
 		Metadata: &router.RoutingMetadata{
-			CandidateModels:      resolved.CandidateModels(),
-			CandidateProviders:   resolved.CandidateProviders(),
-			CandidateScores:      resolved.CatalogCandidateScores(res.CandidateScores),
-			ChosenScore:          float32(res.Score),
-			Propensity:           propensity,
-			DisplayMarker:        res.DisplayMarker,
-			RouteID:              routeID,
-			Strategy:             string(strategy),
-			PolicyRouteKey:       res.PolicyRouteKey,
-			PolicyArtifactID:     res.PolicyArtifactID,
-			PolicyArtifactSHA256: res.PolicyArtifactSHA256,
-			RosterVersion:        res.RosterVersion,
-			SidecarSchemaVersion: res.SchemaVersion,
-			DebugRef:             debugRef,
+			CandidateModels:               resolved.CandidateModels(),
+			CandidateProviders:            resolved.CandidateProviders(),
+			CandidateScores:               resolved.CatalogCandidateScores(res.CandidateScores),
+			ChosenScore:                   float32(res.Score),
+			Propensity:                    propensity,
+			DisplayMarker:                 res.DisplayMarker,
+			RouteID:                       routeID,
+			Strategy:                      string(strategy),
+			PolicyRouteKey:                res.PolicyRouteKey,
+			PolicyArtifactID:              res.PolicyArtifactID,
+			PolicyArtifactSHA256:          res.PolicyArtifactSHA256,
+			RosterVersion:                 res.RosterVersion,
+			SidecarSchemaVersion:          res.SchemaVersion,
+			DebugRef:                      debugRef,
+			AuthoritativePerTurnSelection: capabilities.AuthoritativePerTurnSelection,
 		},
 	}, nil
 }

@@ -143,7 +143,8 @@ func (s *Service) maybeCompact(ctx context.Context, env *translate.RequestEnvelo
 	}
 
 	// Tier 3: structured summarization with a window-aware model.
-	if s.compactionSummarizer != nil {
+	// Authoritative-policy turns skip LLM summarization; deterministic cleanup and rescue trimming still run.
+	if s.compactionSummarizer != nil && !s.authoritativePerTurnSelection(ctx) {
 		if summary, usage, model, ok := s.runCompactionSummary(ctx, env, reqHeaders); ok {
 			env.RewriteForCompaction(summary, compactionRecentTurns)
 			res.Applied = true

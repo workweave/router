@@ -25,6 +25,9 @@ type Capabilities struct {
 	SupportsDebugRouteDetail bool   `json:"supports_debug_route_detail"`
 	SupportsPreview          bool   `json:"supports_preview"`
 	SupportsShadow           bool   `json:"supports_shadow"`
+	// AuthoritativePerTurnSelection makes eligible main/tool-result decisions
+	// model-authoritative through dispatch.
+	AuthoritativePerTurnSelection bool `json:"authoritative_per_turn_selection"`
 }
 
 // CapabilitySource returns the live capability set of a sidecar router.
@@ -58,6 +61,7 @@ type Query struct {
 	FeedbackKey          string
 	FeedbackRole         string
 	ClientSessionID      string
+	TurnContext          *router.PolicyTurnContext
 	EstimatedInputTokens int
 	HasTools             bool
 	HasImages            bool

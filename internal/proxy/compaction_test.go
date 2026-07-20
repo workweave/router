@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"workweave/router/internal/providers"
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/handover"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/turntype"
 	"workweave/router/internal/translate"
 
@@ -150,6 +152,29 @@ func TestMaybeCompact_SkipsHardPinnedTurns(t *testing.T) {
 	assert.False(t, res.Applied, "hard-pinned turns must skip compaction")
 	assert.Equal(t, 0, fake.calls, "summarizer must not be called for a Compaction turn")
 	assert.Equal(t, before, env.ContextOverflowTokenEstimate(), "env must be untouched")
+}
+
+func TestMaybeCompact_AuthoritativePolicyNeverCallsSummarizer(t *testing.T) {
+	strategy := router.Strategy("authoritative-compaction-test")
+	fake := &fakeCompactionSummarizer{summary: "must not run"}
+	s := (&Service{
+		compactionTriggerPct: DefaultCompactionTriggerPct,
+		compactionSummarizer: fake,
+	}).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: strategy,
+		Router:   &authoritativeTestRouter{},
+		Capabilities: policy.Capabilities{
+			AuthoritativePerTurnSelection: true,
+		},
+	})
+	env, err := translate.ParseAnthropic(alternatingAnthropicBody(20, 200))
+	require.NoError(t, err)
+	ctx := router.WithStrategy(context.Background(), strategy)
+
+	result, _ := s.maybeCompact(ctx, env, turntype.MainLoop, 100, 1_000, http.Header{})
+
+	assert.Equal(t, 0, fake.calls)
+	assert.False(t, result.Summarized)
 }
 
 func TestWithCompaction_ZeroPctDisables(t *testing.T) {

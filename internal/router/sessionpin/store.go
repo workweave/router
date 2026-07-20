@@ -75,6 +75,9 @@ type Usage struct {
 	EndedAt           time.Time
 	// ServedModel is the model that served the turn this usage came from.
 	ServedModel string
+	// ServedProvider is the provider binding that served the turn. UpdateUsage
+	// persists it into Provider so the next policy sees actual cache affinity.
+	ServedProvider string
 	// PriorServedModel is optional prior-turn evidence known by the caller.
 	// UpdateUsage uses it to latch HasEverSwitched when the stored row is new
 	// or has no last_served_model yet.

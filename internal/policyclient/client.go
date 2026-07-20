@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/policy"
@@ -152,6 +153,15 @@ type routeRequest struct {
 	PromptText                string             `json:"prompt_text"`
 	LatestUserText            string             `json:"latest_user_text,omitempty"`
 	TurnIndex                 int                `json:"turn_index"`
+	VisibleTurnIndex          *int               `json:"visible_turn_index,omitempty"`
+	SessionTurnCount          *int               `json:"session_turn_count,omitempty"`
+	TurnType                  string             `json:"turn_type,omitempty"`
+	PreviousServedModel       string             `json:"previous_served_model,omitempty"`
+	PreviousProvider          string             `json:"previous_provider,omitempty"`
+	CacheState                string             `json:"cache_state,omitempty"`
+	PriorOutputTokens         *int               `json:"prior_output_tokens,omitempty"`
+	SessionEverSwitched       *bool              `json:"session_ever_switched,omitempty"`
+	HistoryTruncated          *bool              `json:"history_truncated,omitempty"`
 	ConversationMessages      []routeMessage     `json:"conversation_messages,omitempty"`
 	TrainingConversationDelta []routeMessage     `json:"training_conversation_delta,omitempty"`
 	AvailableTools            []string           `json:"available_tools,omitempty"`
@@ -194,9 +204,13 @@ type routeToolCall struct {
 }
 
 type routeToolResult struct {
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
-	Text      string `json:"text,omitempty"`
+	ToolUseID     string `json:"tool_use_id,omitempty"`
+	IsError       bool   `json:"is_error,omitempty"`
+	Text          string `json:"text,omitempty"`
+	ResultPresent bool   `json:"result_present,omitempty"`
+	CharCount     int    `json:"char_count,omitempty"`
+	ByteCount     int    `json:"byte_count,omitempty"`
+	ExitCategory  string `json:"exit_category,omitempty"`
 }
 
 type routeResponse struct {
@@ -365,6 +379,31 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 		providerMap[candidate.RosterID] = candidate.Provider
 	}
 	messages := routeMessages(query.ConversationMessages)
+	wireTurnIndex := turnIndex(messages)
+	var visibleTurnIndex *int
+	var sessionTurnCount *int
+	var sessionEverSwitched *bool
+	var historyTruncated *bool
+	var turnType string
+	var previousServedModel string
+	var previousProvider string
+	var cacheState string
+	var priorOutputTokens *int
+	if query.TurnContext != nil {
+		wireTurnIndex = query.TurnContext.VisibleTurnIndex
+		visibleTurnIndex = pointerTo(query.TurnContext.VisibleTurnIndex)
+		sessionTurnCount = pointerTo(query.TurnContext.SessionTurnCount)
+		sessionEverSwitched = pointerTo(query.TurnContext.SessionEverSwitched)
+		historyTruncated = pointerTo(
+			query.TurnContext.HistoryTruncated ||
+				routeMessagesTruncated(query.ConversationMessages),
+		)
+		turnType = query.TurnContext.TurnType
+		previousServedModel = query.TurnContext.PreviousServedModel
+		previousProvider = query.TurnContext.PreviousProvider
+		cacheState = query.TurnContext.CacheState
+		priorOutputTokens = query.TurnContext.PriorOutputTokens
+	}
 	var trainingDelta []routeMessage
 	if router.IsHMMStrategy(query.Strategy) && query.TrainingAllowed {
 		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
@@ -382,7 +421,16 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 		RequestedModel:            query.RequestedModel,
 		PromptText:                query.PromptText,
 		LatestUserText:            latestUserText(messages),
-		TurnIndex:                 turnIndex(messages),
+		TurnIndex:                 wireTurnIndex,
+		VisibleTurnIndex:          visibleTurnIndex,
+		SessionTurnCount:          sessionTurnCount,
+		TurnType:                  turnType,
+		PreviousServedModel:       previousServedModel,
+		PreviousProvider:          previousProvider,
+		CacheState:                cacheState,
+		PriorOutputTokens:         priorOutputTokens,
+		SessionEverSwitched:       sessionEverSwitched,
+		HistoryTruncated:          historyTruncated,
 		ConversationMessages:      messages,
 		TrainingConversationDelta: trainingDelta,
 		AvailableTools:            clipRouteValues(query.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
@@ -407,6 +455,10 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 		return nil, fmt.Errorf("marshal policy route request: %w", err)
 	}
 	return body, nil
+}
+
+func pointerTo[T any](value T) *T {
+	return &value
 }
 
 func (c *Client) doPolicyRequest(ctx context.Context, path string, body []byte) (*http.Response, []byte, error) {
@@ -502,6 +554,35 @@ func routeMessages(messages []router.ConversationMessage) []routeMessage {
 	})
 }
 
+func routeMessagesTruncated(messages []router.ConversationMessage) bool {
+	if len(messages) > maxRouteMessages {
+		return true
+	}
+	totalText := 0
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if len(text) > maxRouteMessageTextChars {
+			return true
+		}
+		totalText += len(text)
+		if totalText > maxRouteMessageTotalChars {
+			return true
+		}
+		for _, call := range message.ToolCalls {
+			if len(strings.TrimSpace(call.Name)) > maxRouteToolCallInputChars ||
+				len(call.InputKeys) > maxRouteToolCallInputKeys {
+				return true
+			}
+			for _, key := range call.InputKeys {
+				if len(strings.TrimSpace(key)) > maxRouteToolCallInputChars {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func trainingRouteMessageDelta(messages []router.ConversationMessage) []routeMessage {
 	if len(messages) == 0 {
 		return nil
@@ -582,9 +663,23 @@ func convertRouteMessages(messages []router.ConversationMessage, limits routeMes
 		}
 		results := make([]routeToolResult, 0, len(message.ToolResults))
 		for _, result := range message.ToolResults {
+			charCount := result.CharCount
+			byteCount := result.ByteCount
+			if result.Text != "" {
+				if charCount == 0 {
+					charCount = utf8.RuneCountInString(result.Text)
+				}
+				if byteCount == 0 {
+					byteCount = len(result.Text)
+				}
+			}
 			routeResult := routeToolResult{
-				ToolUseID: clipRouteText(result.ToolUseID, limits.maxToolCallInputChars),
-				IsError:   result.IsError,
+				ToolUseID:     clipRouteText(result.ToolUseID, limits.maxToolCallInputChars),
+				IsError:       result.IsError,
+				ResultPresent: result.ResultPresent || result.ToolUseID != "" || result.Text != "",
+				CharCount:     charCount,
+				ByteCount:     byteCount,
+				ExitCategory:  result.ExitCategory,
 			}
 			if limits.includeToolResultText {
 				routeResult.Text = clipRouteText(result.Text, limits.maxTextChars)

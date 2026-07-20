@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"unicode/utf8"
+
 	"workweave/router/internal/router"
 	"workweave/router/internal/translate"
 )
@@ -22,10 +24,18 @@ func conversationMessagesForRouting(env *translate.RequestEnvelope) []router.Con
 		}
 		results := make([]router.ConversationToolResult, 0, len(msg.ToolResults))
 		for _, result := range msg.ToolResults {
+			exitCategory := "success"
+			if result.IsError {
+				exitCategory = "error"
+			}
 			results = append(results, router.ConversationToolResult{
-				ToolUseID: result.ToolUseID,
-				IsError:   result.IsError,
-				Text:      result.Text,
+				ToolUseID:     result.ToolUseID,
+				IsError:       result.IsError,
+				Text:          result.Text,
+				ResultPresent: true,
+				CharCount:     utf8.RuneCountInString(result.Text),
+				ByteCount:     len(result.Text),
+				ExitCategory:  exitCategory,
 			})
 		}
 		out = append(out, router.ConversationMessage{

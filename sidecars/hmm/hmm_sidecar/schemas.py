@@ -72,6 +72,11 @@ class Candidate(FrozenModel):
     input_usd_per_1m: float = 0.0
     output_usd_per_1m: float = 0.0
     estimated_cost_usd: float = 0.0
+    cache_read_multiplier: float = 0.0
+    marginal_cost_factor: float = 1.0
+    effective_input_usd_per_1m: float = 0.0
+    effective_output_usd_per_1m: float = 0.0
+    effective_estimated_cost_usd: float = 0.0
     capabilities: dict[str, Any] = Field(default_factory=dict)
 
 

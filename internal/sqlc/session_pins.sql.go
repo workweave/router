@@ -146,13 +146,14 @@ SET last_input_tokens        = $1::int,
     last_cached_write_tokens = $3::int,
     last_output_tokens       = $4::int,
     last_turn_ended_at       = $5::timestamptz,
+    pinned_provider          = $6::varchar,
     has_ever_switched        = has_ever_switched
-      OR $6::boolean
-      OR (last_served_model <> '' AND last_served_model <> $7::varchar)
-      OR ($8::varchar <> '' AND $8::varchar <> $7::varchar),
-    last_served_model        = $7::varchar
-WHERE session_key = $9::bytea
-  AND role        = $10::varchar
+      OR $7::boolean
+      OR (last_served_model <> '' AND last_served_model <> $8::varchar)
+      OR ($9::varchar <> '' AND $9::varchar <> $8::varchar),
+    last_served_model        = $8::varchar
+WHERE session_key = $10::bytea
+  AND role        = $11::varchar
 `
 
 type UpdateSessionPinUsageParams struct {
@@ -161,6 +162,7 @@ type UpdateSessionPinUsageParams struct {
 	LastCachedWriteTokens int32
 	LastOutputTokens      int32
 	LastTurnEndedAt       pgtype.Timestamptz
+	LastServedProvider    string
 	SessionEverSwitched   bool
 	LastServedModel       string
 	PriorServedModel      string
@@ -178,6 +180,8 @@ type UpdateSessionPinUsageParams struct {
 // served this turn; it lives here (not in UpsertSessionPin) so a
 // /force-model upsert cannot overwrite the genuinely-last-served model
 // before the next turn reads it to detect a mid-session model switch.
+// pinned_provider is updated to the binding that actually served so per-turn
+// policies receive correct previous-provider cache affinity after fallback.
 // has_ever_switched latches true the first time the just-served model
 // differs from a prior non-empty last_served_model. Caller-supplied model and
 // latch evidence preserves history when the stored role row is new.
@@ -190,13 +194,14 @@ type UpdateSessionPinUsageParams struct {
 //	    last_cached_write_tokens = $3::int,
 //	    last_output_tokens       = $4::int,
 //	    last_turn_ended_at       = $5::timestamptz,
+//	    pinned_provider          = $6::varchar,
 //	    has_ever_switched        = has_ever_switched
-//	      OR $6::boolean
-//	      OR (last_served_model <> '' AND last_served_model <> $7::varchar)
-//	      OR ($8::varchar <> '' AND $8::varchar <> $7::varchar),
-//	    last_served_model        = $7::varchar
-//	WHERE session_key = $9::bytea
-//	  AND role        = $10::varchar
+//	      OR $7::boolean
+//	      OR (last_served_model <> '' AND last_served_model <> $8::varchar)
+//	      OR ($9::varchar <> '' AND $9::varchar <> $8::varchar),
+//	    last_served_model        = $8::varchar
+//	WHERE session_key = $10::bytea
+//	  AND role        = $11::varchar
 func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPinUsageParams) error {
 	_, err := q.db.Exec(ctx, updateSessionPinUsage,
 		arg.LastInputTokens,
@@ -204,6 +209,7 @@ func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPi
 		arg.LastCachedWriteTokens,
 		arg.LastOutputTokens,
 		arg.LastTurnEndedAt,
+		arg.LastServedProvider,
 		arg.SessionEverSwitched,
 		arg.LastServedModel,
 		arg.PriorServedModel,
