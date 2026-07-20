@@ -523,6 +523,14 @@ func (s *Service) runTurnLoop(
 						}
 						req.ExcludedModels = pruned
 					}
+					// Keep SafetyExcludedModels consistent: the fit-check just
+					// cleared this model's context-overflow exclusion, so it must
+					// not linger in the safety set and refuse usage bypass for the
+					// pinned model at usageBypassDecision below. The two are computed
+					// from the same estimate/window, so in practice pin.Model is
+					// absent here — this makes the invariant explicit and robust if
+					// the two fit formulas ever drift.
+					delete(req.SafetyExcludedModels, pin.Model)
 				}
 				log.Info("Session pin preserved despite context-window pre-filter exclusion",
 					"pin_model", pin.Model,

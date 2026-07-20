@@ -75,14 +75,10 @@ func TestExcludeContextOverflowModels_SignatureSavingsOnlyForStrippingTargets(t 
 	assert.False(t, kimiExcluded, "stripping target must not be denylisted")
 }
 
-// TestSafetyExcludedModels_CatchesPolicyExcludedOverflow is the regression for
-// the bypass-safety hole: safetyExcludedModels must denylist a model that
-// overflows the context window even when that model is ALSO in the installation
-// excluded_models set. The routing-path overflow filter seeds excluded_models as
-// its base and skips anything already in it, so the both-excluded model never
-// reaches the routing denylist — but the bypass gate still has to block it, or a
-// pass-through turn 400s on the subscription. safetyExcludedModels re-runs the
-// filter against an empty base to close that gap.
+// TestSafetyExcludedModels_CatchesPolicyExcludedOverflow guards the bypass
+// gap: the routing-path filter skips models already in excluded_models, so a
+// both-policy-and-overflow model never lands on the routing denylist. The
+// safety set re-runs against an empty base to close that gap.
 func TestSafetyExcludedModels_CatchesPolicyExcludedOverflow(t *testing.T) {
 	// A body large enough that ContextOverflowTokenEstimate (len/6) plus the
 	// output reserve exceeds haiku's 200K window. ~1.3MB / 6 ≈ 217K > 200K.

@@ -176,9 +176,7 @@ func TestUsageBypass_NoSubscription_EngagesRouting(t *testing.T) {
 
 // TestUsageBypass_InstallationExcludedModel_StillBypasses: installation
 // excluded_models is a routing preference, not a hard block. A bypass-enabled
-// caller must be served on their own subscription even for a policy-excluded
-// model — honoring the exclusion here silently burns credits on a substituted
-// model, the bug this guards against.
+// caller must be served on their own subscription even for a policy-excluded model.
 func TestUsageBypass_InstallationExcludedModel_StillBypasses(t *testing.T) {
 	svc, fr, p := bypassFixture(t, 0.20)
 	svc = svc.WithExcludedModelsOverride([]string{bypassRequestedMdl})

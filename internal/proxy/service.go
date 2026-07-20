@@ -560,14 +560,12 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
-// safetyExcludedModels returns the request-time safety-exclusion set: the models
-// that context-overflow or gemini-unsigned-history filtering bar regardless of
-// installation policy. It re-runs both filters against an EMPTY base rather than
-// reusing the routing-path lists, because those filters skip models already in
-// excluded_models — so a model that is both policy-excluded AND over capacity
-// would be absent from the routing lists yet must still block usage bypass (it
-// would 400 on the subscription just as it would when routed). Returns nil when
-// neither filter fires.
+// safetyExcludedModels returns the hard request-time safety exclusion set
+// (context-overflow + gemini-unsigned-history). It re-runs both filters
+// against an EMPTY base — the routing-path filters skip models already in
+// excluded_models, so a policy-excluded overflow model would be absent from
+// those lists yet must still block bypass (it would 400 on the subscription).
+// Returns nil when neither filter fires.
 func (s *Service) safetyExcludedModels(env *translate.RequestEnvelope, outputReserve int) map[string]struct{} {
 	_, overflowed := excludeContextOverflowModels(env.ContextOverflowTokenEstimate(), env.SignatureTokenSavings(), outputReserve, nil, s.availableModels)
 	_, geminiUnsigned := excludeGemini3xOnUnsignedHistory(env, nil, s.availableModels)
