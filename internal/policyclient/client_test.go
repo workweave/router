@@ -148,7 +148,8 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "success", got.ConversationMessages[2].ToolResults[0].ExitCategory)
 	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	require.Len(t, got.Candidates, 1)
-	assert.Equal(t, "arm-kimi-fireworks", got.Candidates[0].ArmID)
+	assert.Empty(t, got.Candidates[0].ArmID)
+	assert.Nil(t, got.Candidates[0].BindingIndex)
 	assert.Equal(t, "moonshotai/kimi-k2.7", got.Candidates[0].CatalogID)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", got.Candidates[0].UpstreamID)
 	assert.Equal(t, "balanced|open", result.PolicyRouteKey)
@@ -160,6 +161,40 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "debug-1", result.DebugRef)
 	assert.Equal(t, 0.91, result.Score)
 	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7-code": 0.91}, result.CandidateScores)
+}
+
+func TestClientOmitsV2CandidateFieldsFromV1(t *testing.T) {
+	body, err := marshalRouteRequest(policy.Query{
+		SchemaVersion: policy.SchemaVersionV1,
+		Candidates: []policy.Candidate{{
+			ArmID:                        "arm-fireworks",
+			RosterID:                     "deepseek/deepseek-v4-pro",
+			CatalogID:                    "deepseek/deepseek-v4-pro",
+			Provider:                     providers.ProviderFireworks,
+			BindingIndex:                 0,
+			Endpoint:                     string(router.EndpointAnthropicMessages),
+			ModelRevision:                "2026-07-20",
+			ReasoningConfigurationSHA256: "reasoning-hash",
+			ToolConfigurationSHA256:      "tool-hash",
+		}},
+	})
+
+	require.NoError(t, err)
+	var payload struct {
+		Candidates []map[string]json.RawMessage `json:"candidates"`
+	}
+	require.NoError(t, json.Unmarshal(body, &payload))
+	require.Len(t, payload.Candidates, 1)
+	for _, field := range []string{
+		"arm_id",
+		"binding_index",
+		"endpoint",
+		"model_revision",
+		"reasoning_configuration_sha256",
+		"tool_configuration_sha256",
+	} {
+		assert.NotContains(t, payload.Candidates[0], field)
+	}
 }
 
 func TestClientPostsArmProviderMapForV2(t *testing.T) {
@@ -178,16 +213,18 @@ func TestClientPostsArmProviderMapForV2(t *testing.T) {
 		SchemaVersion: policy.SchemaVersionV2,
 		Candidates: []policy.Candidate{
 			{
-				ArmID:     "arm-fireworks",
-				RosterID:  "deepseek/deepseek-v4-pro",
-				CatalogID: "deepseek/deepseek-v4-pro",
-				Provider:  providers.ProviderFireworks,
+				ArmID:        "arm-fireworks",
+				RosterID:     "deepseek/deepseek-v4-pro",
+				CatalogID:    "deepseek/deepseek-v4-pro",
+				Provider:     providers.ProviderFireworks,
+				BindingIndex: 0,
 			},
 			{
-				ArmID:     "arm-makora",
-				RosterID:  "deepseek/deepseek-v4-pro",
-				CatalogID: "deepseek/deepseek-v4-pro",
-				Provider:  providers.ProviderMakora,
+				ArmID:        "arm-makora",
+				RosterID:     "deepseek/deepseek-v4-pro",
+				CatalogID:    "deepseek/deepseek-v4-pro",
+				Provider:     providers.ProviderMakora,
+				BindingIndex: 1,
 			},
 		},
 	})
@@ -198,6 +235,9 @@ func TestClientPostsArmProviderMapForV2(t *testing.T) {
 		"arm-makora":    providers.ProviderMakora,
 	}, got.CandidateProviders)
 	assert.Equal(t, []string{"arm-fireworks", "arm-makora"}, got.CandidateModels)
+	require.NotNil(t, got.Candidates[0].BindingIndex)
+	assert.Equal(t, 0, *got.Candidates[0].BindingIndex)
+	assert.Equal(t, "arm-fireworks", got.Candidates[0].ArmID)
 }
 
 func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
