@@ -111,8 +111,7 @@ func TestUsageBypassDecision_CodexSubscriptionPreservesRequestedModel(t *testing
 // TestUsageBypassEngaged_SafetyExclusionBlocks_PolicyExclusionDoesNot pins the
 // exclusion contract: ExcludedModels (policy) must NOT block bypass;
 // SafetyExcludedModels (context-overflow / gemini-unsigned) MUST. The
-// both-excluded subcase is load-bearing — a model that can't fit the context
-// window stays blocked even when also policy-excluded.
+// both-excluded subcase is load-bearing: context overflow stays blocked even when also policy-excluded.
 func TestUsageBypassEngaged_SafetyExclusionBlocks_PolicyExclusionDoesNot(t *testing.T) {
 	const token = "sk-ant-oat01-test-subscription-token"
 	const model = "claude-sonnet-4-6"

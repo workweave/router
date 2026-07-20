@@ -191,8 +191,7 @@ func TestUsageBypass_InstallationExcludedModel_StillBypasses(t *testing.T) {
 
 // TestUsageBypass_MaxedOutModel_EngagesRouting: the maxed-out guard writes
 // the saturated model to SafetyExcludedModels so an auto-continue re-request
-// of that model falls through to the scorer instead of bypassing back to it,
-// which would reopen the degenerate max-output loop the guard breaks.
+// falls through to the scorer, preventing bypass from reopening the max-output loop.
 func TestUsageBypass_MaxedOutModel_EngagesRouting(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true

@@ -128,7 +128,7 @@ type Request struct {
 	// physically cannot satisfy: context-window overflow and gemini-unsigned
 	// history — not the installation's excluded_models policy. The bypass gate
 	// consults this so policy exclusions don't block pass-through, but physical
-	// constraints still do. nil or empty means no safety exclusion.
+	// constraints still do.
 	SafetyExcludedModels map[string]struct{}
 	// PreferredModels is the per-installation priority ranking (index 0 =
 	// first). The scorer adds a small rank-decaying bonus to each preferred
