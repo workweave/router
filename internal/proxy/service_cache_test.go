@@ -237,3 +237,40 @@ func TestService_Cache_DisabledByNilCache(t *testing.T) {
 	assert.Len(t, provider.proxyBodies, 2, "nil cache must be a transparent passthrough")
 	assert.Empty(t, rec2.Header().Get(proxy.HeaderRouterCache))
 }
+
+// TestService_Cache_PreferredModelsBypasses guards #789: PreferredModels is a
+// per-request score-perturbing input (blendScoresV2 priorityBonus) that can
+// flip the scorer's winner without changing EffectiveKnobsHash. Without a
+// cacheEligible gate, a no-preference store is replayed to a preference-
+// bearing request (wrong model's body, live x-router-model). Same class as
+// the subsidyFactors gate from #495.
+func TestService_Cache_PreferredModelsBypasses(t *testing.T) {
+	emb := embeddingFixture(8)
+	provider := &fakeProvider{
+		proxyResponse: func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"from-no-pref","content":"opus-shaped"}`))
+		},
+	}
+	// Fake router returns a fixed decision+embedding so both turns land in the
+	// same cache bucket — isolating the eligibility gate from scorer variance.
+	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0, 1, 2, 3})}
+	c := cache.New(cache.DefaultConfig())
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
+
+	body := anthropicBody("close-call prompt", false)
+
+	ctxNoPref := proxyContextWithExternalID(t, "tenant-pref")
+	rec1 := httptest.NewRecorder()
+	require.NoError(t, svc.ProxyMessages(ctxNoPref, body, rec1, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+	require.Len(t, provider.proxyBodies, 1, "no-preference turn must miss and hit the provider")
+
+	ctxPref := context.WithValue(ctxNoPref, proxy.InstallationPreferredModelsContextKey{}, []string{"claude-haiku-4-5"})
+	rec2 := httptest.NewRecorder()
+	require.NoError(t, svc.ProxyMessages(ctxPref, body, rec2, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+
+	assert.Len(t, provider.proxyBodies, 2,
+		"PreferredModels turn must bypass the semantic cache and hit the provider (no cross-preference hit)")
+	assert.Empty(t, rec2.Header().Get(proxy.HeaderRouterCache),
+		"PreferredModels turn must not report x-router-cache: hit")
+}
