@@ -117,10 +117,15 @@ type ResolvedCandidates struct {
 	Diagnostics []Diagnostic
 }
 
-// CandidateModels returns catalog IDs in deterministic candidate order.
+// CandidateModels returns unique catalog IDs in first-candidate order.
 func (r ResolvedCandidates) CandidateModels() []string {
 	models := make([]string, 0, len(r.Candidates))
+	seen := make(map[string]struct{}, len(r.Candidates))
 	for _, candidate := range r.Candidates {
+		if _, exists := seen[candidate.CatalogID]; exists {
+			continue
+		}
+		seen[candidate.CatalogID] = struct{}{}
 		models = append(models, candidate.CatalogID)
 	}
 	return models
