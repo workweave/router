@@ -28,6 +28,11 @@ func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (pr
 		if err != nil {
 			return providers.PreparedRequest{}, fmt.Errorf("marshal anthropic body: %w", err)
 		}
+	case FormatGemini:
+		body, err = e.buildAnthropicFromGemini(opts)
+		if err != nil {
+			return providers.PreparedRequest{}, fmt.Errorf("build anthropic from gemini: %w", err)
+		}
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Anthropic emit: %d", e.format)
 	}

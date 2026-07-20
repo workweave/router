@@ -164,3 +164,52 @@ func TestProviderSummarizer_NilEnvelopeReturnsError(t *testing.T) {
 	_, _, err := s.Summarize(context.Background(), nil)
 	require.Error(t, err)
 }
+
+// Summarize accepts a Gemini envelope.
+func TestProviderSummarizer_AcceptsGeminiEnvelope(t *testing.T) {
+	t.Parallel()
+
+	env, err := translate.ParseGemini([]byte(`{
+  "systemInstruction": {"parts": [{"text": "sys"}]},
+  "contents": [
+    {"role": "user", "parts": [{"text": "edit a.go"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"path": "a.go"}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]}
+  ]
+}`))
+	require.NoError(t, err)
+
+	fake := &fakeHandoverProvider{
+		respBody:   canonicalAnthropicResponse,
+		respStatus: http.StatusOK,
+	}
+	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+
+	got, _, err := s.Summarize(context.Background(), env)
+	require.NoError(t, err)
+	assert.Equal(t, "Refactor in progress: step 1 done, step 2 pending.", got)
+}
+
+// SummarizeForCompaction accepts a Gemini envelope.
+func TestProviderSummarizer_CompactionAcceptsGeminiEnvelope(t *testing.T) {
+	t.Parallel()
+
+	env, err := translate.ParseGemini([]byte(`{
+  "contents": [
+    {"role": "user", "parts": [{"text": "long prior context"}]},
+    {"role": "model", "parts": [{"text": "ack"}]},
+    {"role": "user", "parts": [{"text": "continue"}]}
+  ]
+}`))
+	require.NoError(t, err)
+
+	fake := &fakeHandoverProvider{
+		respBody:   canonicalAnthropicResponse,
+		respStatus: http.StatusOK,
+	}
+	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+
+	got, _, err := s.SummarizeForCompaction(context.Background(), env, "claude-haiku-4-5", 512)
+	require.NoError(t, err)
+	assert.Equal(t, "Refactor in progress: step 1 done, step 2 pending.", got)
+}

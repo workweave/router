@@ -327,6 +327,73 @@ func TestRewriteEnvelope_StripsToolResultsFromLatestUser(t *testing.T) {
 	assert.Equal(t, "assistant", msgs[0].Get("role").String())
 }
 
+func TestRewriteEnvelope_GeminiStripsOrphanFunctionResponseFromLatestUser(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "run edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "applied"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.RewriteEnvelope(env, "User asked to run edit.")
+	assert.Equal(t, 3, elided, "functionResponse-only latest user must be dropped")
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 1, "only summary when latest user was purely functionResponse")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	contents[0].Get("parts").ForEach(func(_, part gjson.Result) bool {
+		assert.False(t, part.Get("functionResponse").Exists())
+		return true
+	})
+}
+
+func TestRewriteEnvelope_GeminiMixedTextKeepsTextDropsFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "run edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [
+      {"functionResponse": {"name": "edit", "response": {"result": "applied"}}},
+      {"text": "also continue with step 2"}
+    ]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	handover.RewriteEnvelope(env, "recap")
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+
+	fr, text := 0, ""
+	gjson.GetBytes(prep.Body, "contents").ForEach(func(_, entry gjson.Result) bool {
+		if entry.Get("role").String() != "user" {
+			return true
+		}
+		entry.Get("parts").ForEach(func(_, part gjson.Result) bool {
+			if part.Get("functionResponse").Exists() {
+				fr++
+			}
+			if t := part.Get("text").String(); t != "" {
+				text = t
+			}
+			return true
+		})
+		return true
+	})
+	assert.Equal(t, 0, fr, "orphan functionResponse must be stripped from mixed latest user")
+	assert.Equal(t, "also continue with step 2", text)
+}
+
 func TestRewriteEnvelope_GeminiCollapsesToSummaryPlusLastUser(t *testing.T) {
 	t.Parallel()
 
@@ -441,6 +508,66 @@ func TestTrimLastN_GeminiNoOpWhenUnderLimit(t *testing.T) {
 	require.NoError(t, err)
 	contents := gjson.GetBytes(prep.Body, "contents").Array()
 	require.Len(t, contents, 2)
+}
+
+// TrimLastN drops a trailing orphan functionResponse-only user turn.
+func TestTrimLastN_GeminiStripsOrphanFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "edit a.go"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]},
+    {"role": "model", "parts": [{"text": "done"}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "stale"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 2)
+	assert.Equal(t, 3, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 1, "orphan functionResponse-only user must be dropped")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	assert.Equal(t, "done", contents[0].Get("parts.0.text").String())
+	assert.NotContains(t, string(prep.Body), "functionResponse")
+}
+
+// TrimLastN drops a stale same-name functionResponse that precedes the kept functionCall.
+func TestTrimLastN_GeminiStripsStaleSameNameFunctionResponse(t *testing.T) {
+	t.Parallel()
+
+	// TrimLastN(3) keeps [stale FR edit, model FC edit, valid FR edit].
+	// A name-only match would keep the stale FR because a later FC reuses "edit".
+	const body = `{
+  "contents": [
+    {"role": "user", "parts": [{"text": "first edit"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"n": 1}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "stale"}}}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"n": 2}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]}
+  ]
+}`
+	env, err := translate.ParseGemini([]byte(body))
+	require.NoError(t, err)
+
+	elided := handover.TrimLastN(env, 3)
+	assert.Equal(t, 2, elided)
+
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{TargetModel: "gemini-3.1-pro"})
+	require.NoError(t, err)
+	contents := gjson.GetBytes(prep.Body, "contents").Array()
+	require.Len(t, contents, 2, "stale FR dropped; keep [model FC, valid FR]")
+	assert.Equal(t, "model", contents[0].Get("role").String())
+	assert.Equal(t, "edit", contents[0].Get("parts.0.functionCall.name").String())
+	assert.Equal(t, "user", contents[1].Get("role").String())
+	assert.Equal(t, "ok", contents[1].Get("parts.0.functionResponse.response.result").String())
+	assert.NotContains(t, string(prep.Body), "stale")
 }
 
 // Regression: mid-session model switch + TrimLastN can orphan tool_result

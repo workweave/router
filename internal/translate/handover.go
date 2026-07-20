@@ -278,8 +278,13 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	rebuilt = append(rebuilt, string(summaryRaw))
 	preserved := 0
 	if latestUser.Exists() {
-		rebuilt = append(rebuilt, latestUser.Raw)
-		preserved = 1
+		// Strip functionResponse parts: the summary has no functionCall parts,
+		// so any functionResponse would be orphaned.
+		cleaned := stripGeminiFunctionResponseEntry(latestUser, nil)
+		if cleaned != "" {
+			rebuilt = append(rebuilt, cleaned)
+			preserved = 1
+		}
 	}
 
 	elided := max(len(all)-preserved, 0)
@@ -293,6 +298,59 @@ func (e *RequestEnvelope) rewriteGeminiForHandover(summary string) int {
 	return elided
 }
 
+// stripGeminiFunctionResponseEntry removes functionResponse parts whose name
+// is not in knownNames (nil knownNames = strip all). Returns "" if nothing
+// remains — matching stripAnthropicToolResultMsg.
+func stripGeminiFunctionResponseEntry(entry gjson.Result, knownNames map[string]struct{}) string {
+	parts := entry.Get("parts")
+	if !parts.IsArray() {
+		return entry.Raw
+	}
+	hasOrphans := false
+	parts.ForEach(func(_, part gjson.Result) bool {
+		resp := part.Get("functionResponse")
+		if !resp.Exists() {
+			resp = part.Get("function_response")
+		}
+		if !resp.Exists() {
+			return true
+		}
+		name := resp.Get("name").String()
+		if _, ok := knownNames[name]; !ok {
+			hasOrphans = true
+			return false
+		}
+		return true
+	})
+	if !hasOrphans {
+		return entry.Raw
+	}
+	var kept []string
+	parts.ForEach(func(_, part gjson.Result) bool {
+		resp := part.Get("functionResponse")
+		if !resp.Exists() {
+			resp = part.Get("function_response")
+		}
+		if resp.Exists() {
+			name := resp.Get("name").String()
+			if _, ok := knownNames[name]; !ok {
+				return true
+			}
+		}
+		kept = append(kept, part.Raw)
+		return true
+	})
+	if len(kept) == 0 {
+		return ""
+	}
+	newParts := "[" + strings.Join(kept, ",") + "]"
+	out, err := sjson.SetRawBytes([]byte(entry.Raw), "parts", []byte(newParts))
+	if err != nil {
+		return entry.Raw
+	}
+	return string(out)
+}
+
 func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 	contents := gjson.GetBytes(e.body, "contents")
 	if !contents.IsArray() {
@@ -303,17 +361,92 @@ func (e *RequestEnvelope) trimGeminiLastN(n int) int {
 		return 0
 	}
 	keep := all[len(all)-n:]
-	rebuilt := make([]string, 0, len(keep))
-	for _, m := range keep {
-		rebuilt = append(rebuilt, m.Raw)
-	}
+	rebuilt := stripOrphanedGeminiFunctionResponses(keep)
 	newContents := "[" + strings.Join(rebuilt, ",") + "]"
 	out, err := sjson.SetRawBytes(e.body, "contents", []byte(newContents))
 	if err != nil {
 		return 0
 	}
 	e.body = out
-	return len(all) - len(keep)
+	return len(all) - n
+}
+
+// stripOrphanedGeminiFunctionResponses walks entries in order and drops
+// functionResponse parts that lack a preceding unmatched functionCall of the
+// same name in the kept window. A later same-name call must not resurrect a
+// stale response from a trimmed turn. User entries left empty are omitted.
+func stripOrphanedGeminiFunctionResponses(entries []gjson.Result) []string {
+	pending := make(map[string]int)
+	result := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Get("role").String() == "model" {
+			addGeminiPendingFunctionCalls(pending, entry)
+			result = append(result, entry.Raw)
+			continue
+		}
+		cleaned := stripGeminiFunctionResponseEntryConsuming(entry, pending)
+		if cleaned != "" {
+			result = append(result, cleaned)
+		}
+	}
+	return result
+}
+
+// addGeminiPendingFunctionCalls increments the unmatched functionCall count
+// for each named call in a model entry.
+func addGeminiPendingFunctionCalls(pending map[string]int, entry gjson.Result) {
+	entry.Get("parts").ForEach(func(_, part gjson.Result) bool {
+		call := part.Get("functionCall")
+		if !call.Exists() {
+			call = part.Get("function_call")
+		}
+		if name := call.Get("name").String(); name != "" {
+			pending[name]++
+		}
+		return true
+	})
+}
+
+// stripGeminiFunctionResponseEntryConsuming keeps functionResponse parts that
+// can be paired with a preceding unmatched functionCall (decrementing the
+// pending count). Unmatched responses are dropped. Returns "" if nothing remains.
+func stripGeminiFunctionResponseEntryConsuming(entry gjson.Result, pending map[string]int) string {
+	parts := entry.Get("parts")
+	if !parts.IsArray() {
+		return entry.Raw
+	}
+	var kept []string
+	changed := false
+	parts.ForEach(func(_, part gjson.Result) bool {
+		resp := part.Get("functionResponse")
+		if !resp.Exists() {
+			resp = part.Get("function_response")
+		}
+		if !resp.Exists() {
+			kept = append(kept, part.Raw)
+			return true
+		}
+		name := resp.Get("name").String()
+		if pending[name] > 0 {
+			pending[name]--
+			kept = append(kept, part.Raw)
+			return true
+		}
+		changed = true
+		return true
+	})
+	if !changed {
+		return entry.Raw
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	newParts := "[" + strings.Join(kept, ",") + "]"
+	out, err := sjson.SetRawBytes([]byte(entry.Raw), "parts", []byte(newParts))
+	if err != nil {
+		return entry.Raw
+	}
+	return string(out)
 }
 
 // stripOrphanedAnthropicToolResults drops tool_result blocks whose tool_use_id

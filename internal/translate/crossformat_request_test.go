@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 var openAISimpleConversation = []byte(`{
@@ -1103,16 +1104,41 @@ func TestCrossFormat_AnthropicToGemini_EmptyToolInput(t *testing.T) {
 	require.True(t, ok, "args must be a JSON object")
 	assert.Empty(t, args)
 }
-func TestCrossFormat_GeminiToAnthropic_IsUnsupported(t *testing.T) {
+func TestCrossFormat_GeminiToAnthropic_TextAndTools(t *testing.T) {
 	body := []byte(`{
 		"model": "gemini-2.5-pro",
-		"contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+		"systemInstruction": {"parts": [{"text": "be helpful"}]},
+		"contents": [
+			{"role": "user", "parts": [{"text": "edit a.go"}]},
+			{"role": "model", "parts": [{"functionCall": {"name": "edit", "args": {"path": "a.go"}}}]},
+			{"role": "user", "parts": [{"functionResponse": {"name": "edit", "response": {"result": "ok"}}}]},
+			{"role": "user", "parts": [{"text": "thanks"}]}
+		]
 	}`)
 	env, err := translate.ParseGemini(body)
 	require.NoError(t, err)
 
-	_, err = env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-sonnet-4-20250514"})
-	assert.Error(t, err, "Gemini→Anthropic request translation is not implemented and must return an error")
+	prep, err := env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-haiku-4-5"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "claude-haiku-4-5", gjson.GetBytes(prep.Body, "model").String())
+	assert.Equal(t, "be helpful", gjson.GetBytes(prep.Body, "system.0.text").String())
+
+	msgs := gjson.GetBytes(prep.Body, "messages").Array()
+	require.Len(t, msgs, 4)
+	assert.Equal(t, "user", msgs[0].Get("role").String())
+	assert.Equal(t, "edit a.go", msgs[0].Get("content.0.text").String())
+	assert.Equal(t, "assistant", msgs[1].Get("role").String())
+	assert.Equal(t, "tool_use", msgs[1].Get("content.0.type").String())
+	assert.Equal(t, "edit", msgs[1].Get("content.0.name").String())
+	toolID := msgs[1].Get("content.0.id").String()
+	require.NotEmpty(t, toolID)
+	assert.Equal(t, "user", msgs[2].Get("role").String())
+	assert.Equal(t, "tool_result", msgs[2].Get("content.0.type").String())
+	assert.Equal(t, toolID, msgs[2].Get("content.0.tool_use_id").String(), "functionResponse must pair with prior functionCall id")
+	assert.Equal(t, "ok", msgs[2].Get("content.0.content").String())
+	assert.Equal(t, "user", msgs[3].Get("role").String())
+	assert.Equal(t, "thanks", msgs[3].Get("content.0.text").String())
 }
 
 func TestCrossFormat_GeminiToOpenAI_IsUnsupported(t *testing.T) {

@@ -580,7 +580,8 @@ func (s *Service) runTurnLoop(
 	// MainLoop parity. Kill switch preserves the legacy #82 verbatim-reuse path.
 	// The #82 noisy-embedding concern is stale under only_user_message embed mode:
 	// translate.userPromptTextGJSON strips tool_result blocks from the embed input.
-	// Switches degrade safely — handover.RewriteEnvelope strips orphaned tool_results.
+	// Switches degrade safely — handover.RewriteEnvelope strips orphaned
+	// tool_results / functionResponse parts (Anthropic / Gemini).
 	if !s.scoreToolResultTurns && res.TurnType == turntype.ToolResult && pinFound {
 		decision := pinDecision(pin)
 		res.Decision = decision
