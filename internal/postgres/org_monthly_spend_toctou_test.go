@@ -53,11 +53,11 @@ func TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot(t *testing.T)
 
 	orgID := fmt.Sprintf("toctou-793-%d", time.Now().UnixNano())
 	const (
-		limitMicros   int64 = 1_000_000 // $1.00
-		startSpent    int64 = 900_000   // $0.90
-		inputTokens         = 1_000_000
-		outputTokens        = 250_000
-		concurrency         = 20
+		limitMicros  int64 = 1_000_000 // $1.00
+		startSpent   int64 = 900_000   // $0.90
+		inputTokens        = 1_000_000
+		outputTokens       = 250_000
+		concurrency        = 20
 	)
 	pricing := catalog.Pricing{InputUSDPer1M: 3, OutputUSDPer1M: 15}
 	perCallMicros := catalog.USDToMicros(
