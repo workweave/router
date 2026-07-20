@@ -193,7 +193,7 @@ func (s *Service) setForceModelPin(
 	}
 	log := observability.FromContext(ctx)
 	var lastServedModel string
-	existing, found, err := s.pinStore.Get(ctx, sessionKey, role)
+	existing, found, err := s.pinStore.Get(ctx, sessionKey, role, installationID)
 	if err != nil {
 		log.Error("force-model: prior pin lookup failed", "err", err)
 	} else if found {

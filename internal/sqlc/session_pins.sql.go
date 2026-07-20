@@ -17,11 +17,13 @@ SELECT session_key, role, installation_id, pinned_provider, pinned_model, decisi
 FROM router.session_pins
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
+  AND installation_id = $3::uuid
 `
 
 type GetSessionPinParams struct {
-	SessionKey []byte
-	Role       string
+	SessionKey     []byte
+	Role           string
+	InstallationID uuid.UUID
 }
 
 // Reads the active pin for a (session_key, role) pair. Single-row;
@@ -35,8 +37,9 @@ type GetSessionPinParams struct {
 //	FROM router.session_pins
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
+//	  AND installation_id = $3::uuid
 func (q *Queries) GetSessionPin(ctx context.Context, arg GetSessionPinParams) (RouterSessionPin, error) {
-	row := q.db.QueryRow(ctx, getSessionPin, arg.SessionKey, arg.Role)
+	row := q.db.QueryRow(ctx, getSessionPin, arg.SessionKey, arg.Role, arg.InstallationID)
 	var i RouterSessionPin
 	err := row.Scan(
 		&i.SessionKey,
@@ -68,28 +71,32 @@ UPDATE router.session_pins
 SET consecutive_upstream_errors = consecutive_upstream_errors + 1
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
+  AND installation_id = $3::uuid
 RETURNING consecutive_upstream_errors
 `
 
 type IncrementSessionPinUpstreamErrorsParams struct {
-	SessionKey []byte
-	Role       string
+	SessionKey     []byte
+	Role           string
+	InstallationID uuid.UUID
 }
 
 // Atomically increments consecutive_upstream_errors and returns the
 // new value. The turn loop calls this after a non-retryable upstream
 // 4xx on a sticky-pinned turn; the returned count drives the
 // two-strike eviction decision. Returns sql.ErrNoRows if no pin
-// exists, which the adapter maps to a no-op (pin must already be
-// evicted by another path, e.g. force-model / loop-break).
+// exists (or installation_id mismatches), which the adapter maps to a
+// no-op (pin must already be evicted by another path, e.g. force-model /
+// loop-break).
 //
 //	UPDATE router.session_pins
 //	SET consecutive_upstream_errors = consecutive_upstream_errors + 1
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
+//	  AND installation_id = $3::uuid
 //	RETURNING consecutive_upstream_errors
 func (q *Queries) IncrementSessionPinUpstreamErrors(ctx context.Context, arg IncrementSessionPinUpstreamErrorsParams) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementSessionPinUpstreamErrors, arg.SessionKey, arg.Role)
+	row := q.db.QueryRow(ctx, incrementSessionPinUpstreamErrors, arg.SessionKey, arg.Role, arg.InstallationID)
 	var consecutive_upstream_errors int32
 	err := row.Scan(&consecutive_upstream_errors)
 	return consecutive_upstream_errors, err
@@ -100,25 +107,29 @@ UPDATE router.session_pins
 SET consecutive_upstream_errors = 0
 WHERE session_key = $1::bytea
   AND role        = $2::varchar
+  AND installation_id = $3::uuid
   AND consecutive_upstream_errors > 0
 `
 
 type ResetSessionPinUpstreamErrorsParams struct {
-	SessionKey []byte
-	Role       string
+	SessionKey     []byte
+	Role           string
+	InstallationID uuid.UUID
 }
 
 // Clears the two-strike counter after a successful turn. UPDATE
-// matches by (session_key, role); zero rows affected on missing pin
-// is a successful no-op like UpdateSessionPinUsage.
+// matches by (session_key, role, installation_id); zero rows affected
+// on missing pin (or ownership mismatch) is a successful no-op like
+// UpdateSessionPinUsage.
 //
 //	UPDATE router.session_pins
 //	SET consecutive_upstream_errors = 0
 //	WHERE session_key = $1::bytea
 //	  AND role        = $2::varchar
+//	  AND installation_id = $3::uuid
 //	  AND consecutive_upstream_errors > 0
 func (q *Queries) ResetSessionPinUpstreamErrors(ctx context.Context, arg ResetSessionPinUpstreamErrorsParams) error {
-	_, err := q.db.Exec(ctx, resetSessionPinUpstreamErrors, arg.SessionKey, arg.Role)
+	_, err := q.db.Exec(ctx, resetSessionPinUpstreamErrors, arg.SessionKey, arg.Role, arg.InstallationID)
 	return err
 }
 
@@ -153,6 +164,7 @@ SET last_input_tokens        = $1::int,
     last_served_model        = $7::varchar
 WHERE session_key = $9::bytea
   AND role        = $10::varchar
+  AND installation_id = $11::uuid
 `
 
 type UpdateSessionPinUsageParams struct {
@@ -166,6 +178,7 @@ type UpdateSessionPinUsageParams struct {
 	PriorServedModel      string
 	SessionKey            []byte
 	Role                  string
+	InstallationID        uuid.UUID
 }
 
 // Records the previous turn's upstream token usage on an existing pin
@@ -197,6 +210,7 @@ type UpdateSessionPinUsageParams struct {
 //	    last_served_model        = $7::varchar
 //	WHERE session_key = $9::bytea
 //	  AND role        = $10::varchar
+//	  AND installation_id = $11::uuid
 func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPinUsageParams) error {
 	_, err := q.db.Exec(ctx, updateSessionPinUsage,
 		arg.LastInputTokens,
@@ -209,6 +223,7 @@ func (q *Queries) UpdateSessionPinUsage(ctx context.Context, arg UpdateSessionPi
 		arg.PriorServedModel,
 		arg.SessionKey,
 		arg.Role,
+		arg.InstallationID,
 	)
 	return err
 }
@@ -258,6 +273,7 @@ ON CONFLICT (session_key, role) DO UPDATE SET
       THEN router.session_pins.consecutive_upstream_errors
     ELSE 0
   END
+WHERE router.session_pins.installation_id = EXCLUDED.installation_id
 `
 
 type UpsertSessionPinParams struct {
@@ -277,11 +293,14 @@ type UpsertSessionPinParams struct {
 // turn_count increments on conflict so we can observe how many turns a
 // single (session_key, role) lives for. installation_id is set on first
 // insert and not touched on update — re-binding a session to a different
-// installation would indicate a bug, not a legitimate state. The
-// last_*_tokens / last_turn_ended_at columns are deliberately omitted
-// from the ON CONFLICT update set: only UpdateSessionPinUsage writes
-// them, so the at-start-of-turn refresh here cannot clobber the
-// previous turn's usage with zeros before the planner reads it.
+// installation would indicate a bug, not a legitimate state. The ON CONFLICT
+// DO UPDATE is gated on installation_id = EXCLUDED.installation_id so a
+// mismatched caller silently no-ops rather than overwriting another
+// tenant's pin. The last_*_tokens / last_turn_ended_at columns are
+// deliberately omitted from the ON CONFLICT update set: only
+// UpdateSessionPinUsage writes them, so the at-start-of-turn refresh
+// here cannot clobber the previous turn's usage with zeros before the
+// planner reads it.
 //
 // consecutive_upstream_errors is preserved on a same-model refresh (so
 // the two-strike eviction counter accumulates across turns of the same
@@ -344,6 +363,7 @@ type UpsertSessionPinParams struct {
 //	      THEN router.session_pins.consecutive_upstream_errors
 //	    ELSE 0
 //	  END
+//	WHERE router.session_pins.installation_id = EXCLUDED.installation_id
 func (q *Queries) UpsertSessionPin(ctx context.Context, arg UpsertSessionPinParams) error {
 	_, err := q.db.Exec(ctx, upsertSessionPin,
 		arg.SessionKey,

@@ -85,17 +85,18 @@ type Usage struct {
 }
 
 // Store is the I/O surface for session pins. Get returns (zero, false, nil)
-// when no row exists; UpdateUsage/IncrementUpstreamErrors/ResetUpstreamErrors
-// are no-ops on an evicted or missing pin.
+// when no row exists (or installation_id mismatches); UpdateUsage /
+// IncrementUpstreamErrors / ResetUpstreamErrors are no-ops on an evicted,
+// missing, or cross-installation pin.
 //
 // IncrementUpstreamErrors atomically bumps the error counter and returns the
 // new count so the turn loop can two-strike-evict without a cross-pod
 // read-modify-write race; it returns (0, nil) for a missing pin.
 type Store interface {
-	Get(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) (Pin, bool, error)
+	Get(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, installationID uuid.UUID) (Pin, bool, error)
 	Upsert(ctx context.Context, p Pin) error
-	UpdateUsage(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, usage Usage) error
-	IncrementUpstreamErrors(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) (int, error)
-	ResetUpstreamErrors(ctx context.Context, sessionKey [SessionKeyLen]byte, role string) error
+	UpdateUsage(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, installationID uuid.UUID, usage Usage) error
+	IncrementUpstreamErrors(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, installationID uuid.UUID) (int, error)
+	ResetUpstreamErrors(ctx context.Context, sessionKey [SessionKeyLen]byte, role string, installationID uuid.UUID) error
 	SweepExpired(ctx context.Context) error
 }

@@ -1892,7 +1892,7 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 	// Prefer the scorer's runner-up (PairedModel); use context.Background() because
 	// the request ctx may already be canceled when the response has been written.
 	fbModel, fbProvider := s.cyberRefusalFallbackModel, ""
-	if existing, found, err := s.pinStore.Get(context.Background(), sessionKey, role); err == nil && found && existing.PairedModel != "" {
+	if existing, found, err := s.pinStore.Get(context.Background(), sessionKey, role, installationID); err == nil && found && existing.PairedModel != "" {
 		fbModel, fbProvider = existing.PairedModel, existing.PairedProvider
 	}
 	if fbProvider == "" {
@@ -2208,8 +2208,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		if s.pinStore != nil {
 			sessionKey := DeriveSessionKey(env, apiKeyID)
 			role := roleForTier(catalog.TierFor(feats.Model))
-			pin, _ := s.loadPin(ctx, sessionKey, role)
-			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role)
+			pin, _ := s.loadPin(ctx, sessionKey, role, installationIDFromContext(ctx))
+			hmmHistory := s.loadHMMHistory(ctx, sessionKey, role, installationIDFromContext(ctx))
 			routeRes.SessionKey = sessionKey
 			routeRes.PriorServedModel, routeRes.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 		}
@@ -3253,7 +3253,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 	if role == "" {
 		role = sessionpin.DefaultRole
 	}
-	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, usage); err != nil {
+	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, res.InstallationID, usage); err != nil {
 		observability.Get().Error("session pin usage writeback failed", "err", err)
 	}
 }
@@ -3275,7 +3275,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 	if !hasUsage {
 		// A failed turn has no usage writeback; preserve the prior provider to
 		// avoid an invalid model/provider pair on the next HMM stay.
-		if prior := s.loadHMMHistory(context.Background(), res.SessionKey, res.PinRole); prior.Provider != "" {
+		if prior := s.loadHMMHistory(context.Background(), res.SessionKey, res.PinRole, res.InstallationID); prior.Provider != "" {
 			historyProvider = prior.Provider
 		}
 	}
@@ -3297,7 +3297,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		return
 	}
 	now := time.Now()
-	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, sessionpin.Usage{
+	if err := s.pinStore.UpdateUsage(context.Background(), res.SessionKey, role, res.InstallationID, sessionpin.Usage{
 		InputTokens:         in,
 		CachedReadTokens:    cacheRead,
 		CachedWriteTokens:   cacheCreation,

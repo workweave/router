@@ -188,7 +188,7 @@ func (s *Service) handleLoopEscalation(
 	loopingModel := routedModel
 	userForced := false
 	if s.pinStore != nil && installationID != uuid.Nil {
-		existing, found, err := s.pinStore.Get(ctx, sessionKey, role)
+		existing, found, err := s.pinStore.Get(ctx, sessionKey, role, installationID)
 		if err != nil {
 			log.Error("loop-escalation: prior pin lookup failed", "err", err)
 		} else if found {
@@ -263,7 +263,7 @@ func (s *Service) handleLoopEscalation(
 			return
 		}
 		var lastServed string
-		if existing, found, err := s.pinStore.Get(ctx, sessionKey, role); err == nil && found {
+		if existing, found, err := s.pinStore.Get(ctx, sessionKey, role, installationID); err == nil && found {
 			lastServed = existing.LastServedModel
 		}
 		pin := sessionpin.Pin{

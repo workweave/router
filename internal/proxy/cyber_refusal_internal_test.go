@@ -18,7 +18,7 @@ type repinFakeStore struct {
 	upserts []sessionpin.Pin
 }
 
-func (f *repinFakeStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
+func (f *repinFakeStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) (sessionpin.Pin, bool, error) {
 	if !f.hasPin {
 		return sessionpin.Pin{}, false, nil
 	}
@@ -31,13 +31,13 @@ func (f *repinFakeStore) Upsert(_ context.Context, p sessionpin.Pin) error {
 	f.upserts = append(f.upserts, p)
 	return nil
 }
-func (f *repinFakeStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, sessionpin.Usage) error {
+func (f *repinFakeStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID, sessionpin.Usage) error {
 	return nil
 }
-func (f *repinFakeStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (f *repinFakeStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (f *repinFakeStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (f *repinFakeStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	return nil
 }
 func (f *repinFakeStore) SweepExpired(context.Context) error { return nil }

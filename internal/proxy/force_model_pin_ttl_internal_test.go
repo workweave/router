@@ -21,20 +21,20 @@ type recordingPinStore struct {
 	upserts []sessionpin.Pin
 }
 
-func (s *recordingPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string) (sessionpin.Pin, bool, error) {
+func (s *recordingPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (sessionpin.Pin, bool, error) {
 	return sessionpin.Pin{}, false, nil
 }
 func (s *recordingPinStore) Upsert(_ context.Context, p sessionpin.Pin) error {
 	s.upserts = append(s.upserts, p)
 	return nil
 }
-func (s *recordingPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, sessionpin.Usage) error {
+func (s *recordingPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID, sessionpin.Usage) error {
 	return nil
 }
-func (s *recordingPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (s *recordingPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (s *recordingPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (s *recordingPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	return nil
 }
 func (s *recordingPinStore) SweepExpired(context.Context) error { return nil }
