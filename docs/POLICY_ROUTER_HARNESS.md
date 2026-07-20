@@ -57,9 +57,19 @@ Example capabilities response:
   "honors_quality_price_bias": true,
   "supports_debug_route_detail": true,
   "supports_preview": false,
-  "supports_shadow": true
+  "supports_shadow": true,
+  "authoritative_per_turn_selection": false
 }
 ```
+
+When `authoritative_per_turn_selection=true`, each eligible main-loop or
+tool-result `/route` selection is model-authoritative for that turn. Go still
+owns hard eligibility, explicit force-model/operator pins, credentials, and
+same-model provider retries. It disables automatic session reuse, EV planner
+overrides, model-changing baseline failover, semantic-cache hits, and
+router-generated summarizer calls for those turns. Post-selection synthetic
+loop breakers are also bypassed so one accepted policy action maps to one
+selected model dispatch attempt.
 
 ## Route contract
 
@@ -78,6 +88,15 @@ structured candidate list. Candidate bindings are authoritative.
   "rollout_id": "quality-v2-prod-1",
   "routing_intent": "high",
   "preferred_models": ["gpt-5.5"],
+  "visible_turn_index": 7,
+  "session_turn_count": 9,
+  "turn_type": "tool_result",
+  "previous_served_model": "claude-opus-4-8",
+  "previous_provider": "anthropic",
+  "cache_state": "warm",
+  "prior_output_tokens": 321,
+  "session_ever_switched": true,
+  "history_truncated": false,
   "training_allowed": false,
   "debug_enabled": false,
   "candidates": [
@@ -87,7 +106,14 @@ structured candidate list. Candidate bindings are authoritative.
       "provider": "openai",
       "upstream_id": "gpt-5.5",
       "preference_rank": 0,
+      "input_usd_per_1m": 5.0,
+      "output_usd_per_1m": 30.0,
       "estimated_cost_usd": 0.03,
+      "cache_read_multiplier": 0.1,
+      "marginal_cost_factor": 0.25,
+      "effective_input_usd_per_1m": 1.25,
+      "effective_output_usd_per_1m": 7.5,
+      "effective_estimated_cost_usd": 0.0075,
       "capabilities": {
         "context_window": 400000,
         "tier": "high",
@@ -123,6 +149,11 @@ holds any policy-internal arm, bucket, cluster, or mode. During migration,
 The router rejects empty selections, unknown roster IDs, provider mismatches,
 and unsupported schema versions. Rich `debug` data is internal to the sidecar;
 only an opaque `debug_ref` is projected when authorized debug mode is enabled.
+
+`POST /outcome` reports `selected_model`, `selected_provider`, `served_model`,
+`served_provider`, `selected_served_model_match`, and
+`authoritative_per_turn_selection`. An authoritative model mismatch is marked
+ineligible for training and logged as an error.
 
 ## Privacy and execution modes
 

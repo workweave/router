@@ -64,15 +64,20 @@ type Diagnostic struct {
 
 // Candidate is one catalog-backed model offered to a policy sidecar.
 type Candidate struct {
-	RosterID         string                `json:"roster_id"`
-	CatalogID        string                `json:"catalog_id"`
-	Provider         string                `json:"provider"`
-	UpstreamID       string                `json:"upstream_id"`
-	PreferenceRank   *int                  `json:"preference_rank,omitempty"`
-	InputUSDPer1M    float64               `json:"input_usd_per_1m"`
-	OutputUSDPer1M   float64               `json:"output_usd_per_1m"`
-	EstimatedCostUSD float64               `json:"estimated_cost_usd"`
-	Capabilities     CandidateCapabilities `json:"capabilities"`
+	RosterID                  string                `json:"roster_id"`
+	CatalogID                 string                `json:"catalog_id"`
+	Provider                  string                `json:"provider"`
+	UpstreamID                string                `json:"upstream_id"`
+	PreferenceRank            *int                  `json:"preference_rank,omitempty"`
+	InputUSDPer1M             float64               `json:"input_usd_per_1m"`
+	OutputUSDPer1M            float64               `json:"output_usd_per_1m"`
+	EstimatedCostUSD          float64               `json:"estimated_cost_usd"`
+	CacheReadMultiplier       float64               `json:"cache_read_multiplier"`
+	MarginalCostFactor        float64               `json:"marginal_cost_factor"`
+	EffectiveInputUSDPer1M    float64               `json:"effective_input_usd_per_1m"`
+	EffectiveOutputUSDPer1M   float64               `json:"effective_output_usd_per_1m"`
+	EffectiveEstimatedCostUSD float64               `json:"effective_estimated_cost_usd"`
+	Capabilities              CandidateCapabilities `json:"capabilities"`
 }
 
 // CandidateCapabilities describes only dispatch-relevant catalog facts. It is
@@ -203,15 +208,24 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			continue
 		}
 
+		marginalCostFactor := 1.0
+		if factor, found := req.SubsidizedModelCostFactor[id]; found && factor > 0 {
+			marginalCostFactor = factor
+		}
 		base = append(base, eligibleCandidate{Candidate: Candidate{
-			RosterID:         rosterID,
-			CatalogID:        id,
-			Provider:         binding.Provider,
-			UpstreamID:       upstreamID(id, binding.UpstreamID),
-			PreferenceRank:   preferenceRanks[id],
-			InputUSDPer1M:    binding.Price.InputUSDPer1M,
-			OutputUSDPer1M:   binding.Price.OutputUSDPer1M,
-			EstimatedCostUSD: estimatedCostUSD(req, binding.Price),
+			RosterID:                  rosterID,
+			CatalogID:                 id,
+			Provider:                  binding.Provider,
+			UpstreamID:                upstreamID(id, binding.UpstreamID),
+			PreferenceRank:            preferenceRanks[id],
+			InputUSDPer1M:             binding.Price.InputUSDPer1M,
+			OutputUSDPer1M:            binding.Price.OutputUSDPer1M,
+			EstimatedCostUSD:          estimatedCostUSD(req, binding.Price),
+			CacheReadMultiplier:       binding.Price.EffectiveCacheReadMultiplier(),
+			MarginalCostFactor:        marginalCostFactor,
+			EffectiveInputUSDPer1M:    binding.Price.InputUSDPer1M * marginalCostFactor,
+			EffectiveOutputUSDPer1M:   binding.Price.OutputUSDPer1M * marginalCostFactor,
+			EffectiveEstimatedCostUSD: estimatedCostUSD(req, binding.Price) * marginalCostFactor,
 			Capabilities: CandidateCapabilities{
 				ContextWindow:  contextWindow,
 				Tier:           model.Tier.String(),

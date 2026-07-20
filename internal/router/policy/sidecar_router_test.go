@@ -68,7 +68,13 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
 		Strategy:    strategy,
 		Unavailable: errors.New("future unavailable"),
-	}, decider, resolver)
+	}, decider, resolver).WithCapabilities(policy.Capabilities{
+		SchemaVersion:                 policy.SchemaVersionV1,
+		AuthoritativePerTurnSelection: true,
+		ReportsOutcomes:               true,
+		ReportsFeedback:               true,
+	})
+	priorOutputTokens := 42
 
 	decision, err := adapter.Route(context.Background(), router.Request{
 		OrganizationID:       "org-1",
@@ -78,6 +84,15 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 		TrainingAllowed:      true,
 		CaptureMode:          "hashed",
 		EstimatedInputTokens: 1000,
+		PolicyTurnContext: &router.PolicyTurnContext{
+			VisibleTurnIndex:    3,
+			SessionTurnCount:    4,
+			TurnType:            "main_loop",
+			PreviousServedModel: "gpt-5.4",
+			PreviousProvider:    providers.ProviderOpenAI,
+			CacheState:          router.PolicyCacheStateWarm,
+			PriorOutputTokens:   &priorOutputTokens,
+		},
 	})
 
 	require.NoError(t, err)
@@ -88,6 +103,7 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.Equal(t, "high", decision.Metadata.PolicyRouteKey)
 	assert.Equal(t, "future-prod", decision.Metadata.PolicyArtifactID)
 	assert.Equal(t, map[string]float32{"gpt-5.5": 0.9}, decision.Metadata.CandidateScores)
+	assert.True(t, decision.Metadata.AuthoritativePerTurnSelection)
 	assert.Empty(t, decision.Metadata.DebugRef)
 	assert.Equal(t, strategy, decider.query.Strategy)
 	assert.Equal(t, policy.ExecutionModeServing, decider.query.ExecutionMode)
@@ -95,6 +111,9 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.Equal(t, "cursor", decider.query.ClientApp)
 	assert.True(t, decider.query.TrainingAllowed)
 	assert.Equal(t, "hashed", decider.query.CaptureMode)
+	require.NotNil(t, decider.query.TurnContext)
+	assert.Equal(t, 3, decider.query.TurnContext.VisibleTurnIndex)
+	assert.Equal(t, "gpt-5.4", decider.query.TurnContext.PreviousServedModel)
 	require.Len(t, decider.query.Candidates, 1)
 	assert.Equal(t, "future/gpt-5.5", decider.query.Candidates[0].RosterID)
 	assert.Greater(t, decider.query.Candidates[0].InputUSDPer1M, 0.0)

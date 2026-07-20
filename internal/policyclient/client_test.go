@@ -64,8 +64,26 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 		ConversationMessages: []router.ConversationMessage{
 			{Role: "user", Text: "please explore the repo"},
 			{Role: "assistant", Text: "done"},
-			{Role: "user", ToolResults: []router.ConversationToolResult{{ToolUseID: "toolu_123", Text: "full tool result"}}},
+			{Role: "user", ToolResults: []router.ConversationToolResult{{
+				ToolUseID:     "toolu_123",
+				Text:          "full tool result",
+				ResultPresent: true,
+				CharCount:     16,
+				ByteCount:     16,
+				ExitCategory:  "success",
+			}}},
 			{Role: "user", Text: "latest hello", ToolCalls: []router.ConversationToolCall{{Name: "Read", InputKeys: []string{"file_path"}, InputJSON: `{"file_path":"README.md"}`}}},
+		},
+		TurnContext: &router.PolicyTurnContext{
+			VisibleTurnIndex:    7,
+			SessionTurnCount:    9,
+			TurnType:            "tool_result",
+			PreviousServedModel: "claude-opus-4-8",
+			PreviousProvider:    providers.ProviderAnthropic,
+			CacheState:          router.PolicyCacheStateWarm,
+			PriorOutputTokens:   intPointer(321),
+			SessionEverSwitched: true,
+			HistoryTruncated:    true,
 		},
 		AvailableTools:  []string{"Read", "Grep", "Read", ""},
 		FeedbackKey:     "feedback-session",
@@ -97,7 +115,21 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.True(t, got.TrainingAllowed)
 	assert.True(t, got.DebugEnabled)
 	assert.Equal(t, "latest hello", got.LatestUserText)
-	assert.Equal(t, 1, got.TurnIndex)
+	assert.Equal(t, 7, got.TurnIndex)
+	require.NotNil(t, got.VisibleTurnIndex)
+	assert.Equal(t, 7, *got.VisibleTurnIndex)
+	require.NotNil(t, got.SessionTurnCount)
+	assert.Equal(t, 9, *got.SessionTurnCount)
+	assert.Equal(t, "tool_result", got.TurnType)
+	assert.Equal(t, "claude-opus-4-8", got.PreviousServedModel)
+	assert.Equal(t, providers.ProviderAnthropic, got.PreviousProvider)
+	assert.Equal(t, router.PolicyCacheStateWarm, got.CacheState)
+	require.NotNil(t, got.PriorOutputTokens)
+	assert.Equal(t, 321, *got.PriorOutputTokens)
+	require.NotNil(t, got.SessionEverSwitched)
+	assert.True(t, *got.SessionEverSwitched)
+	require.NotNil(t, got.HistoryTruncated)
+	assert.True(t, *got.HistoryTruncated)
 	assert.Equal(t, []string{"Read", "Grep"}, got.AvailableTools)
 	assert.Equal(t, "feedback-session", got.FeedbackKey)
 	assert.Equal(t, "default", got.FeedbackRole)
@@ -109,6 +141,9 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	require.Len(t, got.TrainingConversationDelta[2].ToolCalls, 1)
 	assert.Equal(t, `{"file_path":"README.md"}`, got.TrainingConversationDelta[2].ToolCalls[0].InputJSON)
 	assert.Empty(t, got.ConversationMessages[2].ToolResults[0].Text)
+	assert.True(t, got.ConversationMessages[2].ToolResults[0].ResultPresent)
+	assert.Equal(t, 16, got.ConversationMessages[2].ToolResults[0].CharCount)
+	assert.Equal(t, "success", got.ConversationMessages[2].ToolResults[0].ExitCategory)
 	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	require.Len(t, got.Candidates, 1)
 	assert.Equal(t, "moonshotai/kimi-k2.7", got.Candidates[0].CatalogID)
@@ -336,18 +371,22 @@ func TestClientUsesBoundedDefaultHTTPClient(t *testing.T) {
 }
 
 func TestRouteMessagesPreservesLatestUserWhenPayloadIsCapped(t *testing.T) {
-	messages := routeMessages([]router.ConversationMessage{
+	source := []router.ConversationMessage{
 		{Role: "user", Text: strings.Repeat("a", maxRouteMessageTotalChars+100)},
 		{Role: "assistant", Text: "older response"},
 		{Role: "tool", Text: "raw tool output should be skipped"},
 		{Role: "user", Text: "latest request"},
-	})
+	}
+	messages := routeMessages(source)
 
 	assert.Equal(t, "latest request", latestUserText(messages))
 	assert.Equal(t, 1, turnIndex(messages))
+	assert.True(t, routeMessagesTruncated(source))
 	for _, message := range messages {
 		assert.NotEqual(t, "tool", message.Role)
 	}
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+func intPointer(value int) *int { return &value }

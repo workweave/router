@@ -1539,6 +1539,18 @@ func (s *Service) PolicyCapabilities(strategy router.Strategy) (policy.Capabilit
 	return registered.capabilities, ok
 }
 
+func (s *Service) authoritativePerTurnSelection(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	capabilities, ok := s.PolicyCapabilities(router.StrategyFromContext(ctx))
+	return ok && capabilities.AuthoritativePerTurnSelection
+}
+
+func (s *Service) semanticCacheAllowed(ctx context.Context) bool {
+	return !s.authoritativePerTurnSelection(ctx)
+}
+
 // PolicyStrategyAvailable reports whether a strategy has a live router;
 // registration stays visible when a sidecar is absent so callers see the gap.
 func (s *Service) PolicyStrategyAvailable(strategy router.Strategy) bool {
@@ -2150,6 +2162,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:              promptText,
 		ConversationMessages:    conversationMessagesForRouting(env),
 		AvailableTools:          availableToolsForRouting(env),
+		HistoryTruncated:        compRes.Applied,
 		OrganizationID:          externalID,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
@@ -2241,7 +2254,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Gated to tool-bearing turns so a frozen marker + frozen prompt prefix
 	// can't collide on healthy text-only turns.
 	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
-	if !agentShadowMode && toolBearingTurn && s.noProgress != nil {
+	if !agentShadowMode && !routeRes.AuthoritativePerTurn && toolBearingTurn && s.noProgress != nil {
 		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
 		role := roleForTier(catalog.TierFor(feats.Model))
 		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
@@ -2251,7 +2264,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	// Text-repetition break: fresh tool calls each turn defeat the no-progress
 	// fingerprint; repeated narration is the durable tell. See text_repetition.go.
-	if !agentShadowMode && s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
+	if !agentShadowMode && !routeRes.AuthoritativePerTurn && s.textRepetitionBreakEnabled && (tt == turntype.MainLoop || tt == turntype.ToolResult) {
 		if looped, count, sampleHash := detectTextRepetition(env); looped {
 			role := roleForTier(catalog.TierFor(feats.Model))
 			return s.handleTextRepetitionBreak(ctx, w, env, count, sampleHash, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
@@ -2287,7 +2300,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// client-trim detector as a false positive), so a compaction handover here
 	// would be a redundant summarizer call that also discards the recent-turn
 	// tail maybeCompact deliberately kept.
-	if !agentShadowMode && decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compRes.Applied && routeRes.PrefixTrimmed {
+	if !agentShadowMode && !routeRes.AuthoritativePerTurn && decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compRes.Applied && routeRes.PrefixTrimmed {
 		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
 			"message_count", feats.MessageCount,
 			"tool_call_count", inboundToolCallCount,
@@ -2306,7 +2319,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Subscription-only turns are excluded (like the OpenAI path): the mode is an
 	// unfoldable routing signal absent from the cache key, so a stored body would
 	// bypass the exhausted-sub 402 guard and the depleted-credits warning below.
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
+	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !compactionHandoverRan && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatAnthropic, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -2662,7 +2675,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	baselineModel := s.baselineFor(feats.Model)
 	baselineCatalog, baselineKnown := catalog.ByID(baselineModel)
 	_, anthropicExcluded := s.excludedProvidersForRequest(ctx)[providers.ProviderAnthropic]
-	baselineEligible := !agentShadowMode &&
+	baselineEligible := !routeRes.AuthoritativePerTurn &&
+		!agentShadowMode &&
 		decision.Reason != translate.ReasonUserForceModel &&
 		s.shouldFailover(ctx) &&
 		!anthropicExcluded &&
@@ -3246,6 +3260,7 @@ func (s *Service) recordTurnUsage(res turnLoopResult, servedProvider, servedMode
 		OutputTokens:        out,
 		EndedAt:             time.Now(),
 		ServedModel:         servedModel,
+		ServedProvider:      servedProvider,
 		PriorServedModel:    res.PriorServedModel,
 		SessionEverSwitched: res.SessionEverSwitched,
 	}
@@ -3304,6 +3319,7 @@ func (s *Service) recordHMMTurnHistory(res turnLoopResult, servedProvider, serve
 		OutputTokens:        out,
 		EndedAt:             now,
 		ServedModel:         servedModel,
+		ServedProvider:      servedProvider,
 		PriorServedModel:    res.PriorServedModel,
 		SessionEverSwitched: res.SessionEverSwitched,
 	}); err != nil {
@@ -3357,35 +3373,54 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	installationID, _ := ctx.Value(InstallationIDContextKey{}).(string)
 	trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
 	clientIdentity := ClientIdentityFrom(ctx)
+	selectedServedModelMatch := routeDecision.Model == decision.Model
+	authoritativeModelMismatch := routeMetadata.AuthoritativePerTurnSelection &&
+		!selectedServedModelMatch
+	if authoritativeModelMismatch {
+		trainingAllowed = false
+		observability.FromContext(ctx).Error(
+			"Authoritative policy model did not match served model",
+			"route_id", routeMetadata.RouteID,
+			"selected_model", routeDecision.Model,
+			"served_model", decision.Model,
+		)
+	}
 	payload := map[string]interface{}{
-		"route_id":               routeMetadata.RouteID,
-		"strategy":               routeMetadata.Strategy,
-		"organization_id":        organizationID,
-		"installation_id":        installationID,
-		"client_app":             clientIdentity.ClientApp,
-		"rollout_id":             policyRolloutIDFromContext(ctx),
-		"training_allowed":       trainingAllowed,
-		"capture_mode":           s.captureMode.String(),
-		"policy_route_key":       routeMetadata.PolicyRouteKey,
-		"policy_artifact_id":     routeMetadata.PolicyArtifactID,
-		"policy_artifact_sha256": routeMetadata.PolicyArtifactSHA256,
-		"roster_version":         routeMetadata.RosterVersion,
-		"sidecar_schema_version": routeMetadata.SidecarSchemaVersion,
-		"served_model":           decision.Model,
-		"served_provider":        finalProvider,
-		"decision_model":         routeDecision.Model,
-		"decision_provider":      routeDecision.Provider,
-		"status":                 upstreamStatus(proxyErr),
-		"error":                  "",
-		"estimated_input_tokens": estimatedInputTokens,
-		"input_tokens":           inputTokens,
-		"output_tokens":          outputTokens,
-		"cache_creation_tokens":  cacheCreation,
-		"cache_read_tokens":      cacheRead,
-		"route_latency_ms":       routeMs,
-		"upstream_latency_ms":    proxyMs,
-		"turn_type":              string(res.TurnType),
-		"sticky_hit":             res.StickyHit,
+		"route_id":                         routeMetadata.RouteID,
+		"strategy":                         routeMetadata.Strategy,
+		"organization_id":                  organizationID,
+		"installation_id":                  installationID,
+		"client_app":                       clientIdentity.ClientApp,
+		"rollout_id":                       policyRolloutIDFromContext(ctx),
+		"training_allowed":                 trainingAllowed,
+		"capture_mode":                     s.captureMode.String(),
+		"policy_route_key":                 routeMetadata.PolicyRouteKey,
+		"policy_artifact_id":               routeMetadata.PolicyArtifactID,
+		"policy_artifact_sha256":           routeMetadata.PolicyArtifactSHA256,
+		"roster_version":                   routeMetadata.RosterVersion,
+		"sidecar_schema_version":           routeMetadata.SidecarSchemaVersion,
+		"selected_model":                   routeDecision.Model,
+		"selected_provider":                routeDecision.Provider,
+		"served_model":                     decision.Model,
+		"served_provider":                  finalProvider,
+		"decision_model":                   routeDecision.Model,
+		"decision_provider":                routeDecision.Provider,
+		"selected_served_model_match":      selectedServedModelMatch,
+		"authoritative_per_turn_selection": routeMetadata.AuthoritativePerTurnSelection,
+		"status":                           upstreamStatus(proxyErr),
+		"error":                            "",
+		"estimated_input_tokens":           estimatedInputTokens,
+		"input_tokens":                     inputTokens,
+		"output_tokens":                    outputTokens,
+		"cache_creation_tokens":            cacheCreation,
+		"cache_read_tokens":                cacheRead,
+		"route_latency_ms":                 routeMs,
+		"upstream_latency_ms":              proxyMs,
+		"turn_type":                        string(res.TurnType),
+		"sticky_hit":                       res.StickyHit,
+	}
+	if authoritativeModelMismatch {
+		payload["training_exclusion_reason"] = "selected_served_model_mismatch"
 	}
 	if trainingAllowed && response != nil {
 		payload["response_body_truncated"] = response.Truncated
@@ -4222,6 +4257,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:           promptText,
 		ConversationMessages: conversationMessagesForRouting(env),
 		AvailableTools:       availableToolsForRouting(env),
+		HistoryTruncated:     compResOAI.Applied,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
@@ -4251,7 +4287,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
 	// semantic cache (the key doesn't capture headroom-dependent model choice).
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !responsesPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
+	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !responsesPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)

@@ -111,6 +111,12 @@ type Request struct {
 	ConversationMessages []ConversationMessage
 	// AvailableTools is a bounded list of tool names declared on this request.
 	AvailableTools []string
+	// PolicyTurnContext carries persisted, content-free state from the turn
+	// orchestrator. Nil keeps older policy clients wire-compatible.
+	PolicyTurnContext *PolicyTurnContext
+	// HistoryTruncated records deterministic ingress rewrites that happened
+	// before the turn orchestrator could build PolicyTurnContext.
+	HistoryTruncated bool
 	// FeedbackKey/FeedbackRole are optional opaque correlation fields for
 	// sidecar routers that accept per-session feedback.
 	FeedbackKey  string
@@ -174,10 +180,34 @@ type ConversationToolCall struct {
 }
 
 type ConversationToolResult struct {
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
-	Text      string `json:"text,omitempty"`
+	ToolUseID     string `json:"tool_use_id,omitempty"`
+	IsError       bool   `json:"is_error,omitempty"`
+	Text          string `json:"text,omitempty"`
+	ResultPresent bool   `json:"result_present,omitempty"`
+	CharCount     int    `json:"char_count,omitempty"`
+	ByteCount     int    `json:"byte_count,omitempty"`
+	ExitCategory  string `json:"exit_category,omitempty"`
 }
+
+// PolicyTurnContext describes the current per-turn decision state without
+// carrying raw tool-result content.
+type PolicyTurnContext struct {
+	VisibleTurnIndex    int
+	SessionTurnCount    int
+	TurnType            string
+	PreviousServedModel string
+	PreviousProvider    string
+	CacheState          string
+	PriorOutputTokens   *int
+	SessionEverSwitched bool
+	HistoryTruncated    bool
+}
+
+const (
+	PolicyCacheStateUnknown = "unknown"
+	PolicyCacheStateCold    = "cold"
+	PolicyCacheStateWarm    = "warm"
+)
 
 type Decision struct {
 	Provider string
@@ -210,6 +240,9 @@ type RoutingMetadata struct {
 	RosterVersion        string
 	SidecarSchemaVersion string
 	DebugRef             string
+	// AuthoritativePerTurnSelection means downstream orchestration may retry
+	// providers but must not replace this decision's model on this turn.
+	AuthoritativePerTurnSelection bool
 	// DisplayMarker is an optional, already-humanized route badge. Sidecars
 	// use this to show strategy-specific labels without moving their display
 	// logic into router-internal.

@@ -92,6 +92,8 @@ ON CONFLICT (session_key, role) DO UPDATE SET
 -- served this turn; it lives here (not in UpsertSessionPin) so a
 -- /force-model upsert cannot overwrite the genuinely-last-served model
 -- before the next turn reads it to detect a mid-session model switch.
+-- pinned_provider is updated to the binding that actually served so per-turn
+-- policies receive correct previous-provider cache affinity after fallback.
 -- has_ever_switched latches true the first time the just-served model
 -- differs from a prior non-empty last_served_model. Caller-supplied model and
 -- latch evidence preserves history when the stored role row is new.
@@ -104,6 +106,7 @@ SET last_input_tokens        = @last_input_tokens::int,
     last_cached_write_tokens = @last_cached_write_tokens::int,
     last_output_tokens       = @last_output_tokens::int,
     last_turn_ended_at       = @last_turn_ended_at::timestamptz,
+    pinned_provider          = @last_served_provider::varchar,
     has_ever_switched        = has_ever_switched
       OR @session_ever_switched::boolean
       OR (last_served_model <> '' AND last_served_model <> @last_served_model::varchar)

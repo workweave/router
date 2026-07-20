@@ -67,6 +67,9 @@ type turnLoopResult struct {
 	TurnType       turntype.TurnType
 	StickyHit      bool
 	HardPinned     bool
+	// AuthoritativePerTurn is true only for eligible main/tool-result turns
+	// whose active policy declared model-authoritative dispatch.
+	AuthoritativePerTurn bool
 	// UsageBypass is true when the caller's own subscription has headroom:
 	// ProxyMessages must serve the requested model straight through with no
 	// billing debit, bypassing Decision's normal dispatch.
@@ -186,6 +189,10 @@ func (s *Service) isHardPinnedTurn(ctx context.Context, tt turntype.TurnType) bo
 	}
 }
 
+func authoritativePolicyTurn(tt turntype.TurnType) bool {
+	return tt == turntype.MainLoop || tt == turntype.ToolResult
+}
+
 func isUserForcedReason(reason string) bool {
 	return strings.HasPrefix(reason, translate.ReasonUserForceModel)
 }
@@ -264,6 +271,8 @@ func (s *Service) runTurnLoop(
 		PinTier:        "miss",
 		RequestedTier:  catalog.TierFor(feats.Model),
 	}
+	res.AuthoritativePerTurn = authoritativePolicyTurn(res.TurnType) &&
+		s.authoritativePerTurnSelection(ctx)
 	res.PinRole = roleForTier(res.RequestedTier)
 	log.Info("turnloop classified",
 		"turn_type", string(res.TurnType),
@@ -368,10 +377,13 @@ func (s *Service) runTurnLoop(
 	// Without a pin store, run the scorer and return its decision. The usage
 	// bypass intercepts the fresh scorer decision here too (no pins to honor).
 	if s.pinStore == nil {
-		if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-			res.Decision = dec
-			res.UsageBypass = true
-			return res, nil
+		req.PolicyTurnContext = buildPolicyTurnContext(req, res, sessionpin.Pin{}, sessionpin.Pin{})
+		if !res.AuthoritativePerTurn {
+			if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+				res.Decision = dec
+				res.UsageBypass = true
+				return res, nil
+			}
 		}
 		decision, err := s.routeFor(ctx, req)
 		if err != nil {
@@ -387,6 +399,7 @@ func (s *Service) runTurnLoop(
 	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
 	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
 	res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
+	req.PolicyTurnContext = buildPolicyTurnContext(req, res, pin, hmmHistory)
 	// Computed before any same-turn pin-drop guards below so it reflects the
 	// prior turn's outcome; Service.effortEscalation gates whether it's acted on.
 	res.EscalateEffort = pinFound && !pin.LastTurnEndedAt.IsZero() &&
@@ -592,10 +605,12 @@ func (s *Service) runTurnLoop(
 	// stale pin from a prior routed stretch can't make a tool_result
 	// continuation diverge from the bypassed tool_use turn. The pin itself is
 	// untouched and resumes once utilization crosses the threshold.
-	if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
-		res.Decision = dec
-		res.UsageBypass = true
-		return res, nil
+	if !res.AuthoritativePerTurn {
+		if dec, ok := s.usageBypassDecision(ctx, reqHeaders, req); ok {
+			res.Decision = dec
+			res.UsageBypass = true
+			return res, nil
+		}
 	}
 
 	// Tool-result turns: by default, fall through to the scorer + planner for
@@ -603,7 +618,10 @@ func (s *Service) runTurnLoop(
 	// The #82 noisy-embedding concern is stale under only_user_message embed mode:
 	// translate.userPromptTextGJSON strips tool_result blocks from the embed input.
 	// Switches degrade safely — handover.RewriteEnvelope strips orphaned tool_results.
-	if !s.scoreToolResultTurns && res.TurnType == turntype.ToolResult && pinFound {
+	if !res.AuthoritativePerTurn &&
+		!s.scoreToolResultTurns &&
+		res.TurnType == turntype.ToolResult &&
+		pinFound {
 		decision := pinDecision(pin)
 		res.Decision = decision
 		res.StickyHit = true
@@ -613,7 +631,7 @@ func (s *Service) runTurnLoop(
 	}
 
 	// Planner-disabled + pin found: preserve first-decision-wins behavior.
-	if !s.plannerEnabled && pinFound {
+	if !res.AuthoritativePerTurn && !s.plannerEnabled && pinFound {
 		decision := pinDecision(pin)
 		res.Decision = decision
 		res.StickyHit = true
@@ -639,6 +657,8 @@ func (s *Service) runTurnLoop(
 					"fresh_model", dec.Model,
 					"fresh_provider", dec.Provider,
 				)
+			} else if res.AuthoritativePerTurn {
+				return res, derr
 			} else {
 				log.Info("tier-constrained reroute found no candidate; using unconstrained scorer",
 					"forced_tier", forcedTierFloor.String(), "err", derr)
@@ -659,6 +679,12 @@ func (s *Service) runTurnLoop(
 		"fresh_reason", fresh.Reason,
 	)
 	res.Fresh = fresh
+	if res.AuthoritativePerTurn {
+		res.Decision = fresh
+		res.PinTier = "authoritative_per_turn"
+		s.writeNewPin(ctx, installationID, res.SessionKey, res.PinRole, fresh)
+		return res, nil
+	}
 	if isHMMDecision(fresh) {
 		activePin := sessionpin.Pin{}
 		if pinFound {
@@ -1093,6 +1119,53 @@ func switchHistoryFromPins(activePin, hmmHistory sessionpin.Pin) (string, bool) 
 		sessionEverSwitched = true
 	}
 	return priorServedModel, sessionEverSwitched
+}
+
+func buildPolicyTurnContext(
+	req router.Request,
+	res turnLoopResult,
+	activePin sessionpin.Pin,
+	hmmHistory sessionpin.Pin,
+) *router.PolicyTurnContext {
+	previous := activePin
+	if hmmHistory.LastServedModel != "" &&
+		(previous.LastServedModel == "" ||
+			hmmHistory.LastTurnEndedAt.After(previous.LastTurnEndedAt)) {
+		previous = hmmHistory
+	}
+	cacheState := router.PolicyCacheStateUnknown
+	var priorOutputTokens *int
+	if !previous.LastTurnEndedAt.IsZero() {
+		cacheState = router.PolicyCacheStateCold
+		if cacheWarm(previous) && !res.PrefixTrimmed && !req.HistoryTruncated {
+			cacheState = router.PolicyCacheStateWarm
+		}
+		outputTokens := previous.LastOutputTokens
+		priorOutputTokens = &outputTokens
+	}
+	userTurns := 0
+	for _, message := range req.ConversationMessages {
+		if strings.EqualFold(message.Role, "user") {
+			userTurns++
+		}
+	}
+	visibleTurnIndex := max(userTurns-1, 0)
+	sessionTurnCount := max(activePin.TurnCount, hmmHistory.TurnCount)
+	previousProvider := ""
+	if res.PriorServedModel != "" {
+		previousProvider = previous.Provider
+	}
+	return &router.PolicyTurnContext{
+		VisibleTurnIndex:    visibleTurnIndex,
+		SessionTurnCount:    sessionTurnCount,
+		TurnType:            string(res.TurnType),
+		PreviousServedModel: res.PriorServedModel,
+		PreviousProvider:    previousProvider,
+		CacheState:          cacheState,
+		PriorOutputTokens:   priorOutputTokens,
+		SessionEverSwitched: res.SessionEverSwitched,
+		HistoryTruncated:    req.HistoryTruncated || res.PrefixTrimmed,
+	}
 }
 
 // refreshPin extends the TTL on an existing pin. Carries the existing pin's

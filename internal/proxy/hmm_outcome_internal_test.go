@@ -74,8 +74,12 @@ func TestReportPolicyOutcome_UsesFreshMetadataForStickyServedDecision(t *testing
 	select {
 	case payload := <-reporter.ch:
 		require.Equal(t, "route-fresh", payload["route_id"])
+		assert.Equal(t, "moonshotai/kimi-k2.7", payload["selected_model"])
+		assert.Equal(t, providers.ProviderFireworks, payload["selected_provider"])
 		assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
 		assert.Equal(t, providers.ProviderAnthropic, payload["served_provider"])
+		assert.Equal(t, false, payload["selected_served_model_match"])
+		assert.NotContains(t, payload, "training_exclusion_reason")
 		assert.Equal(t, "moonshotai/kimi-k2.7", payload["decision_model"])
 		assert.Equal(t, providers.ProviderFireworks, payload["decision_provider"])
 		assert.Equal(t, "medium|mid", payload["policy_route_key"])
@@ -110,6 +114,57 @@ func TestReportPolicyOutcome_OmitsResponseBodyWhenTrainingIsNotAllowed(t *testin
 		assert.Equal(t, false, payload["training_allowed"])
 		assert.NotContains(t, payload, "response_body")
 		assert.NotContains(t, payload, "response_body_truncated")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for policy outcome payload")
+	}
+}
+
+func TestReportPolicyOutcome_AuthoritativeMismatchFailsClosedForTraining(t *testing.T) {
+	strategy := router.Strategy("authoritative-outcome-test")
+	reporter := &captureHMMOutcomeReporter{ch: make(chan map[string]interface{}, 1)}
+	s := (&Service{}).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: strategy,
+		Router:   reporter,
+	})
+	selected := router.Decision{
+		Model:    "claude-opus-4-8",
+		Provider: providers.ProviderAnthropic,
+		Metadata: &router.RoutingMetadata{
+			RouteID:                       "route-authoritative",
+			Strategy:                      string(strategy),
+			AuthoritativePerTurnSelection: true,
+		},
+	}
+	served := router.Decision{
+		Model:    "claude-haiku-4-5",
+		Provider: providers.ProviderAnthropic,
+	}
+	ctx := context.WithValue(context.Background(), PolicyTrainingAllowedContextKey{}, true)
+
+	s.reportPolicyOutcome(
+		ctx,
+		turnLoopResult{Fresh: selected, AuthoritativePerTurn: true},
+		served,
+		providers.ProviderAnthropic,
+		100,
+		90,
+		10,
+		0,
+		0,
+		12,
+		34,
+		nil,
+		&policyOutcomeResponse{Body: []byte("must not train")},
+	)
+
+	select {
+	case payload := <-reporter.ch:
+		assert.Equal(t, "claude-opus-4-8", payload["selected_model"])
+		assert.Equal(t, "claude-haiku-4-5", payload["served_model"])
+		assert.Equal(t, false, payload["selected_served_model_match"])
+		assert.Equal(t, false, payload["training_allowed"])
+		assert.Equal(t, "selected_served_model_mismatch", payload["training_exclusion_reason"])
+		assert.NotContains(t, payload, "response_body")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for policy outcome payload")
 	}
