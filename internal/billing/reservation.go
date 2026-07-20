@@ -15,9 +15,8 @@ const (
 	ScopeAPIKey    = "api_key"
 )
 
-// DefaultReserveAmountMicros is the v1 fixed reservation slot ($1). Tuned as a
-// p95-ish turn cost approximation — not exact. Override via
-// ROUTER_SPEND_RESERVE_USD_MICROS.
+// DefaultReserveAmountMicros is the v1 fixed reservation slot ($1) — p95-ish turn cost,
+// not exact. Override via ROUTER_SPEND_RESERVE_USD_MICROS.
 const DefaultReserveAmountMicros int64 = 1_000_000
 
 // DefaultReserveTTL is request timeout (600s) + 5m grace. Override via

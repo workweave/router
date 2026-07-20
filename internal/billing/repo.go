@@ -41,14 +41,12 @@ type Repo interface {
 	// means no cap is set.
 	GetOrgMonthlySpendAndLimit(ctx context.Context, organizationID string) (spentMicros, reservedMicros int64, limitMicros *int64, err error)
 
-	// ReserveSpendCaps atomically reserves every applicable scope in one
-	// transaction. On any scope failure the whole TX rolls back (no partial
-	// holds). Returns reservation ids (possibly empty when no caps apply).
+	// ReserveSpendCaps atomically reserves every applicable scope in one TX;
+	// any scope failure rolls back the whole TX (no partial holds).
 	ReserveSpendCaps(ctx context.Context, p ReserveSpendCapsParams) ([]uuid.UUID, error)
 
-	// ReleaseSpendReservations consumes reservation ids via DELETE … RETURNING
-	// and decrements denormalized reserved only when a row was returned.
-	// Idempotent: already-gone ids are no-ops.
+	// ReleaseSpendReservations deletes reservation ids and decrements denormalized
+	// reserved. Idempotent: already-gone ids are no-ops.
 	ReleaseSpendReservations(ctx context.Context, ids []uuid.UUID) error
 
 	// SweepExpiredSpendReservations deletes expired reservation rows and
