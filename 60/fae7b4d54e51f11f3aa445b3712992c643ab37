@@ -1,6 +1,8 @@
 internal/proxy/service.go
   s_0cb555d8dc2e1e::t_a27a0765ffccd8 2162-2163,4260-4261
   s_0cb555d8dc2e1e::t_8b3c87ef2dcc2f 2156-2161,2164-2166,2168,4254-4259,4262-4264
+  s_0cb555d8dc2e1e::t_da2d1eed298d6d 4265
+  s_0cb555d8dc2e1e::t_7704be606187c8 2167
 internal/translate/configuration_hashes.go
   s_0cb555d8dc2e1e::t_123d04b265bb7f 1-6,9-51
   s_0cb555d8dc2e1e::t_8e31a7a438a8f6 7-8
