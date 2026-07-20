@@ -170,26 +170,32 @@ const ensureOrgMonthlySpendRow = `-- name: EnsureOrgMonthlySpendRow :exec
 INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, reserved_usd_micros)
 VALUES (
     $1::varchar,
-    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+    $2::date,
     0,
     0
 )
 ON CONFLICT (organization_id, month) DO NOTHING
 `
 
-// Ensures the current UTC-month org spend row exists so a reserve UPDATE can
-// target it. No-op when the row is already present.
+type EnsureOrgMonthlySpendRowParams struct {
+	OrganizationID string
+	Month          pgtype.Date
+}
+
+// Ensures the org spend row for @month exists so a reserve UPDATE can target
+// it. Month is supplied by Go (utcMonthDate) so Ensure/Bump/Insert share one
+// clock reading for the whole ReserveSpendCaps transaction.
 //
 //	INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, reserved_usd_micros)
 //	VALUES (
 //	    $1::varchar,
-//	    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+//	    $2::date,
 //	    0,
 //	    0
 //	)
 //	ON CONFLICT (organization_id, month) DO NOTHING
-func (q *Queries) EnsureOrgMonthlySpendRow(ctx context.Context, organizationID string) error {
-	_, err := q.db.Exec(ctx, ensureOrgMonthlySpendRow, organizationID)
+func (q *Queries) EnsureOrgMonthlySpendRow(ctx context.Context, arg EnsureOrgMonthlySpendRowParams) error {
+	_, err := q.db.Exec(ctx, ensureOrgMonthlySpendRow, arg.OrganizationID, arg.Month)
 	return err
 }
 
@@ -197,25 +203,30 @@ const ensureUserMonthlySpendRow = `-- name: EnsureUserMonthlySpendRow :exec
 INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, reserved_usd_micros)
 VALUES (
     $1::uuid,
-    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+    $2::date,
     0,
     0
 )
 ON CONFLICT (router_user_id, month) DO NOTHING
 `
 
+type EnsureUserMonthlySpendRowParams struct {
+	RouterUserID uuid.UUID
+	Month        pgtype.Date
+}
+
 // EnsureUserMonthlySpendRow
 //
 //	INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, reserved_usd_micros)
 //	VALUES (
 //	    $1::uuid,
-//	    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+//	    $2::date,
 //	    0,
 //	    0
 //	)
 //	ON CONFLICT (router_user_id, month) DO NOTHING
-func (q *Queries) EnsureUserMonthlySpendRow(ctx context.Context, routerUserID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, ensureUserMonthlySpendRow, routerUserID)
+func (q *Queries) EnsureUserMonthlySpendRow(ctx context.Context, arg EnsureUserMonthlySpendRowParams) error {
+	_, err := q.db.Exec(ctx, ensureUserMonthlySpendRow, arg.RouterUserID, arg.Month)
 	return err
 }
 
@@ -335,7 +346,7 @@ SET reserved_usd_micros = sp.reserved_usd_micros + $1::bigint,
     updated_at = NOW()
 FROM router.organization_spend_limits lim
 WHERE sp.organization_id = $2::varchar
-  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+  AND sp.month = $3::date
   AND lim.organization_id = sp.organization_id
   AND lim.org_monthly_limit_usd_micros IS NOT NULL
   AND sp.spent_usd_micros + sp.reserved_usd_micros + $1::bigint
@@ -346,26 +357,28 @@ RETURNING sp.organization_id
 type TryBumpOrgMonthReservedParams struct {
 	AmountUsdMicros int64
 	OrganizationID  string
+	Month           pgtype.Date
 }
 
 // Atomically bumps org-month reserved when spent+reserved+amount still fits
 // under the configured org monthly limit. Returns the organization_id on
 // success; zero rows means limit reached (or no limit configured — caller
-// must skip reserve when limit is NULL before calling this).
+// must skip reserve when limit is NULL before calling this). Month must be
+// the same Go-computed value passed to Ensure and InsertSpendReservation.
 //
 //	UPDATE router.organization_monthly_spend sp
 //	SET reserved_usd_micros = sp.reserved_usd_micros + $1::bigint,
 //	    updated_at = NOW()
 //	FROM router.organization_spend_limits lim
 //	WHERE sp.organization_id = $2::varchar
-//	  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+//	  AND sp.month = $3::date
 //	  AND lim.organization_id = sp.organization_id
 //	  AND lim.org_monthly_limit_usd_micros IS NOT NULL
 //	  AND sp.spent_usd_micros + sp.reserved_usd_micros + $1::bigint
 //	      <= lim.org_monthly_limit_usd_micros
 //	RETURNING sp.organization_id
 func (q *Queries) TryBumpOrgMonthReserved(ctx context.Context, arg TryBumpOrgMonthReservedParams) (string, error) {
-	row := q.db.QueryRow(ctx, tryBumpOrgMonthReserved, arg.AmountUsdMicros, arg.OrganizationID)
+	row := q.db.QueryRow(ctx, tryBumpOrgMonthReserved, arg.AmountUsdMicros, arg.OrganizationID, arg.Month)
 	var organization_id string
 	err := row.Scan(&organization_id)
 	return organization_id, err
@@ -376,32 +389,39 @@ UPDATE router.model_router_user_monthly_spend sp
 SET reserved_usd_micros = sp.reserved_usd_micros + $1::bigint,
     updated_at = NOW()
 WHERE sp.router_user_id = $2::uuid
-  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+  AND sp.month = $3::date
   AND sp.spent_usd_micros + sp.reserved_usd_micros + $1::bigint
-      <= $3::bigint
+      <= $4::bigint
 RETURNING sp.router_user_id
 `
 
 type TryBumpUserMonthReservedParams struct {
 	AmountUsdMicros int64
 	RouterUserID    uuid.UUID
+	Month           pgtype.Date
 	LimitUsdMicros  int64
 }
 
 // Bumps user-month reserved under the effective limit (per-user override when
 // present, else org default). Caller supplies the already-resolved effective
-// limit; NULL limit means the caller should skip this scope.
+// limit; NULL limit means the caller should skip this scope. Month must match
+// the Go-computed value used for Ensure and InsertSpendReservation.
 //
 //	UPDATE router.model_router_user_monthly_spend sp
 //	SET reserved_usd_micros = sp.reserved_usd_micros + $1::bigint,
 //	    updated_at = NOW()
 //	WHERE sp.router_user_id = $2::uuid
-//	  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+//	  AND sp.month = $3::date
 //	  AND sp.spent_usd_micros + sp.reserved_usd_micros + $1::bigint
-//	      <= $3::bigint
+//	      <= $4::bigint
 //	RETURNING sp.router_user_id
 func (q *Queries) TryBumpUserMonthReserved(ctx context.Context, arg TryBumpUserMonthReservedParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, tryBumpUserMonthReserved, arg.AmountUsdMicros, arg.RouterUserID, arg.LimitUsdMicros)
+	row := q.db.QueryRow(ctx, tryBumpUserMonthReserved,
+		arg.AmountUsdMicros,
+		arg.RouterUserID,
+		arg.Month,
+		arg.LimitUsdMicros,
+	)
 	var router_user_id uuid.UUID
 	err := row.Scan(&router_user_id)
 	return router_user_id, err

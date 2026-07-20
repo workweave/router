@@ -179,12 +179,16 @@ func (r *BillingRepo) ReserveSpendCaps(ctx context.Context, p billing.ReserveSpe
 		}
 		_ = spent
 		if limit != nil {
-			if err := q.EnsureOrgMonthlySpendRow(ctx, p.OrganizationID); err != nil {
+			if err := q.EnsureOrgMonthlySpendRow(ctx, sqlc.EnsureOrgMonthlySpendRowParams{
+				OrganizationID: p.OrganizationID,
+				Month:          month,
+			}); err != nil {
 				return nil, err
 			}
 			_, err := q.TryBumpOrgMonthReserved(ctx, sqlc.TryBumpOrgMonthReservedParams{
 				AmountUsdMicros: p.AmountUsdMicros,
 				OrganizationID:  p.OrganizationID,
+				Month:           month,
 			})
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
@@ -252,12 +256,16 @@ func (r *BillingRepo) ReserveSpendCaps(ctx context.Context, p billing.ReserveSpe
 			return nil, err
 		}
 		if limit != nil {
-			if err := q.EnsureUserMonthlySpendRow(ctx, userUUID); err != nil {
+			if err := q.EnsureUserMonthlySpendRow(ctx, sqlc.EnsureUserMonthlySpendRowParams{
+				RouterUserID: userUUID,
+				Month:        month,
+			}); err != nil {
 				return nil, err
 			}
 			_, err := q.TryBumpUserMonthReserved(ctx, sqlc.TryBumpUserMonthReservedParams{
 				AmountUsdMicros: p.AmountUsdMicros,
 				RouterUserID:    userUUID,
+				Month:           month,
 				LimitUsdMicros:  *limit,
 			})
 			if err != nil {
@@ -397,7 +405,12 @@ func decrementReservedForScope(ctx context.Context, q *sqlc.Queries, scopeKind, 
 	}
 }
 
+// utcNow is the clock for reservation month bucketing. Tests override it to
+// prove Ensure/Bump/Insert share one Go-computed month even when Postgres
+// NOW() would land in a different UTC month.
+var utcNow = time.Now
+
 func utcMonthDate() pgtype.Date {
-	now := time.Now().UTC()
+	now := utcNow().UTC()
 	return pgtype.Date{Time: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), Valid: true}
 }

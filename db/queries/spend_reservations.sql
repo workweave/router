@@ -1,10 +1,11 @@
--- Ensures the current UTC-month org spend row exists so a reserve UPDATE can
--- target it. No-op when the row is already present.
+-- Ensures the org spend row for @month exists so a reserve UPDATE can target
+-- it. Month is supplied by Go (utcMonthDate) so Ensure/Bump/Insert share one
+-- clock reading for the whole ReserveSpendCaps transaction.
 -- name: EnsureOrgMonthlySpendRow :exec
 INSERT INTO router.organization_monthly_spend (organization_id, month, spent_usd_micros, reserved_usd_micros)
 VALUES (
     @organization_id::varchar,
-    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+    @month::date,
     0,
     0
 )
@@ -13,14 +14,15 @@ ON CONFLICT (organization_id, month) DO NOTHING;
 -- Atomically bumps org-month reserved when spent+reserved+amount still fits
 -- under the configured org monthly limit. Returns the organization_id on
 -- success; zero rows means limit reached (or no limit configured — caller
--- must skip reserve when limit is NULL before calling this).
+-- must skip reserve when limit is NULL before calling this). Month must be
+-- the same Go-computed value passed to Ensure and InsertSpendReservation.
 -- name: TryBumpOrgMonthReserved :one
 UPDATE router.organization_monthly_spend sp
 SET reserved_usd_micros = sp.reserved_usd_micros + @amount_usd_micros::bigint,
     updated_at = NOW()
 FROM router.organization_spend_limits lim
 WHERE sp.organization_id = @organization_id::varchar
-  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+  AND sp.month = @month::date
   AND lim.organization_id = sp.organization_id
   AND lim.org_monthly_limit_usd_micros IS NOT NULL
   AND sp.spent_usd_micros + sp.reserved_usd_micros + @amount_usd_micros::bigint
@@ -31,7 +33,7 @@ RETURNING sp.organization_id;
 INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, reserved_usd_micros)
 VALUES (
     @router_user_id::uuid,
-    DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date,
+    @month::date,
     0,
     0
 )
@@ -39,13 +41,14 @@ ON CONFLICT (router_user_id, month) DO NOTHING;
 
 -- Bumps user-month reserved under the effective limit (per-user override when
 -- present, else org default). Caller supplies the already-resolved effective
--- limit; NULL limit means the caller should skip this scope.
+-- limit; NULL limit means the caller should skip this scope. Month must match
+-- the Go-computed value used for Ensure and InsertSpendReservation.
 -- name: TryBumpUserMonthReserved :one
 UPDATE router.model_router_user_monthly_spend sp
 SET reserved_usd_micros = sp.reserved_usd_micros + @amount_usd_micros::bigint,
     updated_at = NOW()
 WHERE sp.router_user_id = @router_user_id::uuid
-  AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+  AND sp.month = @month::date
   AND sp.spent_usd_micros + sp.reserved_usd_micros + @amount_usd_micros::bigint
       <= @limit_usd_micros::bigint
 RETURNING sp.router_user_id;
