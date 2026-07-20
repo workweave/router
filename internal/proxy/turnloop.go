@@ -24,10 +24,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// addToSet returns set with model added, copying first so a caller-shared or nil
-// map is never mutated in place (req.SafetyExcludedModels may be shared across
-// requests or nil when no safety filter fired). Returns a fresh single-entry map
-// when set is nil/empty.
+// addToSet returns set with model added. Copies before mutating so a
+// caller-shared or nil map is never modified in place.
 func addToSet(set map[string]struct{}, model string) map[string]struct{} {
 	out := make(map[string]struct{}, len(set)+1)
 	for k := range set {
@@ -471,11 +469,9 @@ func (s *Service) runTurnLoop(
 		}
 		excluded[maxedModel] = struct{}{}
 		req.ExcludedModels = excluded
-		// Also bar it from usage bypass: the maxed-out exclusion is a hard
-		// loop-breaking constraint, not an installation preference, so it belongs
-		// in the set the bypass gate honors. Without this, an auto-continue turn
-		// re-requesting the saturated subscription model would bypass straight back
-		// to it and reopen the degenerate max-output loop this guard breaks.
+		// Also bar it from usage bypass — the maxed-out exclusion is a hard
+		// loop-breaking constraint; without it, an auto-continue turn re-requesting
+		// the saturated model would bypass back to it and reopen the loop.
 		req.SafetyExcludedModels = addToSet(req.SafetyExcludedModels, maxedModel)
 		pinFound = false
 		pin = sessionpin.Pin{}

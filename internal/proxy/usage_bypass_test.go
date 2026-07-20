@@ -189,13 +189,10 @@ func TestUsageBypass_InstallationExcludedModel_StillBypasses(t *testing.T) {
 	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"), "bypass must serve the requested model, not a substituted one")
 }
 
-// TestUsageBypass_MaxedOutModel_EngagesRouting: the maxed-out loop-breaking
-// guard adds the saturated model to the request's safety-exclusion set, so a
-// re-request of that same subscription model on an auto-continue turn must NOT
-// bypass — it has to fall through to the scorer, or the degenerate max-output
-// loop the guard breaks reopens on the subscription. Regression for the review
-// finding that bypass, checking only SafetyExcludedModels, ignored the maxed
-// exclusion (which the guard wrote only to ExcludedModels).
+// TestUsageBypass_MaxedOutModel_EngagesRouting: the maxed-out guard writes
+// the saturated model to SafetyExcludedModels so an auto-continue re-request
+// of that model falls through to the scorer instead of bypassing back to it,
+// which would reopen the degenerate max-output loop the guard breaks.
 func TestUsageBypass_MaxedOutModel_EngagesRouting(t *testing.T) {
 	store := newFakePinStore()
 	store.hasPin = true
