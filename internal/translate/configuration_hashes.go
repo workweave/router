@@ -8,9 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// ToolConfigurationSHA256 returns a content-retention-safe identity for the
-// complete inbound tool configuration. It is never persisted with raw schema
-// or description text.
+// ToolConfigurationSHA256 returns a privacy-safe hash of the inbound tool configuration; raw schema text is never persisted.
 func (e *RequestEnvelope) ToolConfigurationSHA256() string {
 	if e == nil {
 		return sha256String("")
@@ -18,9 +16,7 @@ func (e *RequestEnvelope) ToolConfigurationSHA256() string {
 	return sha256String(gjson.GetBytes(e.body, "tools").Raw)
 }
 
-// ReasoningConfigurationSHA256 returns a normalized identity for the inbound
-// reasoning configuration. Equivalent wire syntaxes normalize through
-// ReasoningIntent before hashing.
+// ReasoningConfigurationSHA256 returns a normalized hash; equivalent wire syntaxes (reasoning_effort vs reasoning.effort) produce the same value via ReasoningIntent.
 func (e *RequestEnvelope) ReasoningConfigurationSHA256() string {
 	intent := e.ReasoningIntent()
 	payload := struct {

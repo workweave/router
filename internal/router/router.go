@@ -105,9 +105,7 @@ type Request struct {
 	// ingress. Routing implementations must not turn their empty result into
 	// an incompatible fallback pool.
 	TranslationRequirements TranslationRequirements
-	// ReasoningConfigurationSHA256 and ToolConfigurationSHA256 are
-	// privacy-safe ingress hashes of the request semantics that constrain an
-	// arm. They never contain raw request content.
+	// ReasoningConfigurationSHA256 and ToolConfigurationSHA256 are privacy-safe hashes; raw request content is never stored here.
 	ReasoningConfigurationSHA256 string
 	ToolConfigurationSHA256      string
 	PromptText                   string

@@ -64,6 +64,7 @@ type Diagnostic struct {
 
 // Candidate is one catalog-backed model offered to a policy sidecar.
 type Candidate struct {
+	// ArmID is a configuration-level temporal-Q action ID; equals RosterID on the legacy resolver.
 	ArmID                        string                `json:"arm_id"`
 	RosterID                     string                `json:"roster_id"`
 	CatalogID                    string                `json:"catalog_id"`
@@ -184,9 +185,7 @@ func NewResolver(deployed, available map[string]struct{}, mapper RosterMapper, p
 	}
 }
 
-// NewArmResolver returns every enabled catalog provider binding as a distinct
-// policy candidate. It is for policies that score dispatch arms rather than
-// logical catalog models; existing policy artifacts should keep NewResolver.
+// NewArmResolver enumerates every enabled provider binding as a distinct candidate for arm-scoring policies; use NewResolver for model-scoring policies.
 func NewArmResolver(deployed, available map[string]struct{}, mapper RosterMapper, providerPolicy ProviderPolicy) *Resolver {
 	resolver := NewResolver(deployed, available, mapper, providerPolicy)
 	resolver.enumerateBindings = true

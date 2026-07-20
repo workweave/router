@@ -43,9 +43,7 @@ func MakeArmID(identity ArmIdentity) string {
 	return "tq_arm_" + hex.EncodeToString(sum[:])
 }
 
-// DeriveArmContext derives a privacy-safe action context from router-visible
-// request configuration. Ingress may provide stronger hashes; the fallback
-// only uses normalized routing metadata.
+// DeriveArmContext derives a privacy-safe action context; ingress hashes take priority over fallback normalization.
 func DeriveArmContext(req router.Request) ArmContext {
 	context := ArmContext{
 		Endpoint:                     string(req.TranslationRequirements.Endpoint),
