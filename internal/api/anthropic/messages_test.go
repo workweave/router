@@ -10,10 +10,12 @@ import (
 	"testing"
 
 	anthropicapi "workweave/router/internal/api/anthropic"
+	"workweave/router/internal/auth"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/cluster"
+	"workweave/router/internal/router/policy"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,6 +31,42 @@ type fakeRouter struct {
 	decision router.Decision
 	err      error
 	got      *router.Request
+}
+
+type fakeRoutePreviewer struct {
+	result policy.PreviewResult
+	got    *router.Request
+}
+
+type countingUserRepository struct {
+	upserts int
+}
+
+func (r *countingUserRepository) UpsertByEmail(context.Context, auth.UpsertUserParams) (*auth.User, error) {
+	r.upserts++
+	return &auth.User{ID: "unexpected"}, nil
+}
+
+func (r *countingUserRepository) UpsertByAccountUUID(context.Context, auth.UpsertUserByAccountUUIDParams) (*auth.User, error) {
+	r.upserts++
+	return &auth.User{ID: "unexpected"}, nil
+}
+
+func (*countingUserRepository) Get(context.Context, string) (*auth.User, error) {
+	return nil, nil
+}
+
+func (*countingUserRepository) ListForInstallation(context.Context, string) ([]*auth.User, error) {
+	return nil, nil
+}
+
+func (f *fakeRoutePreviewer) Route(context.Context, router.Request) (router.Decision, error) {
+	return router.Decision{}, errors.New("serving route must not run")
+}
+
+func (f *fakeRoutePreviewer) PreviewRoute(_ context.Context, req router.Request) (policy.PreviewResult, error) {
+	f.got = &req
+	return f.result, nil
 }
 
 func (f *fakeRouter) Route(_ context.Context, req router.Request) (router.Decision, error) {
@@ -263,6 +301,31 @@ func TestMessagesHandler_HappyPathServesUpstreamResponse(t *testing.T) {
 	assert.Equal(t, "test_reason", rec.Header().Get("x-router-decision"))
 }
 
+func TestMessagesHandler_AgentShadowDoesNotUpsertRouterUser(t *testing.T) {
+	users := &countingUserRepository{}
+	authSvc := auth.NewService(nil, nil, nil, users, nil, nil, nil)
+	provider := &fakeProviderClient{proxyBody: `{"id":"msg_eval","type":"message","role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":3}}`}
+	svc := newTestService(&fakeRouter{}, providers.ProviderAnthropic, provider)
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set("router_installation", &auth.Installation{ID: uuid.NewString()})
+		ctx := context.WithValue(c.Request.Context(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+			Model: "claude-opus-4-8", RolloutID: "pilot-1", StateID: "state-1",
+		})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	engine.POST("/v1/messages", anthropicapi.MessagesHandler(svc, authSvc))
+	body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"{\"account_uuid\":\"real-account\",\"email\":\"person@example.com\"}"},"max_tokens":4096}`)
+
+	recorder := postMessages(engine, body)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Zero(t, users.upserts, "eval traffic must not mutate router-user identity state")
+}
+
 // --- RouteHandler (/v1/route) ---
 
 func routeEngine(svc *proxy.Service) *gin.Engine {
@@ -323,6 +386,71 @@ func TestRouteHandler_HappyPathReturnsDecision(t *testing.T) {
 	assert.Equal(t, "cheap_and_cheerful", got["reason"])
 }
 
+func TestRouteHandler_ForwardsAuthorizationForProviderEligibility(t *testing.T) {
+	decision := router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	var got router.Request
+	svc := newTestService(&fakeRouter{decision: decision, got: &got}, providers.ProviderAnthropic, &fakeProviderClient{}).
+		WithByokOnly(true)
+	engine := routeEngine(svc)
+	req := httptest.NewRequest(http.MethodPost, "/v1/route", bytes.NewReader([]byte(validAnthropicBody)))
+	req.Header.Set("Authorization", "Bearer sk-ant-oat01-claude-code-token")
+	rec := httptest.NewRecorder()
+
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, got.EnabledProviders, providers.ProviderAnthropic)
+}
+
+func previewRouteEngine(svc *proxy.Service, authorized bool) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		if authorized {
+			c.Set("router_installation", &auth.Installation{ID: "eval-installation", PolicyHeaderOverridesEnabled: true})
+		}
+		c.Request = c.Request.WithContext(router.WithStrategy(c.Request.Context(), router.StrategyHMM))
+		c.Next()
+	})
+	engine.POST("/v1/route/preview", anthropicapi.PreviewRouteHandler(svc))
+	return engine
+}
+
+func TestPreviewRouteHandler_RejectsInstallationWithoutEvalAuthorization(t *testing.T) {
+	engine := previewRouteEngine(newTestService(&fakeRouter{}, "", nil), false)
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/route/preview", bytes.NewReader([]byte(validAnthropicBody))))
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	errObj := errorEnvelope(t, recorder.Body.Bytes())
+	assert.Equal(t, "permission_error", errObj["type"])
+}
+
+func TestPreviewRouteHandler_ReturnsFrozenPolicyPlan(t *testing.T) {
+	previewer := &fakeRoutePreviewer{result: policy.PreviewResult{
+		SchemaVersion:        policy.SchemaVersionV1,
+		PolicyArtifactID:     "hmm-prod",
+		PolicyArtifactSHA256: "sha256:artifact",
+		RosterSHA256:         "sha256:roster",
+		EligibleRosterIDs:    []string{"anthropic/claude-opus-4-8", "openai/gpt-5.5"},
+	}}
+	svc := newTestService(&fakeRouter{}, "", nil).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: router.StrategyHMM,
+		Router:   previewer,
+	})
+	engine := previewRouteEngine(svc, true)
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/route/preview", bytes.NewReader([]byte(validAnthropicBody))))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"policy_artifact_sha256":"sha256:artifact"`)
+	assert.Contains(t, recorder.Body.String(), `"eligible_roster_ids":["anthropic/claude-opus-4-8","openai/gpt-5.5"]`)
+	require.NotNil(t, previewer.got)
+	assert.False(t, previewer.got.TrainingAllowed)
+}
+
 // --- RouteAnthropicRequest InstallationID forwarding ---
 //
 // RouteAnthropicRequest is the dry-run /v1/route entry. It must forward
@@ -337,7 +465,7 @@ func TestRouteAnthropicRequest_ForwardsValidInstallationIDUUIDVerbatim(t *testin
 	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID.String())
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, installID.String(), got.InstallationID,
 		"valid installation UUID must round-trip to the HMM sidecar unchanged")
@@ -351,7 +479,7 @@ func TestRouteAnthropicRequest_DropsMalformedInstallationIDInsteadOfForwardingRa
 	// "not-a-uuid" is the regression case: pre-fix leaked through verbatim,
 	// diverging tenant attribution from ProxyMessages (which drops invalid IDs).
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "not-a-uuid")
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"malformed installation ID must collapse to empty string so the HMM "+
@@ -364,7 +492,7 @@ func TestRouteAnthropicRequest_DropsEmptyInstallationIDInsteadOfForwardingRaw(t 
 	svc := newTestService(&fakeRouter{decision: decision, got: &got}, "", nil)
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "")
-	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(ctx, []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"empty installation ID must collapse to empty string")
@@ -377,7 +505,7 @@ func TestRouteAnthropicRequest_DropsMissingInstallationIDInsteadOfForwardingRaw(
 
 	// No WithValue — request reached RouteAnthropicRequest with no
 	// InstallationIDContextKey on the context at all.
-	_, err := svc.RouteAnthropicRequest(context.Background(), []byte(validAnthropicBody))
+	_, err := svc.RouteAnthropicRequest(context.Background(), []byte(validAnthropicBody), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", got.InstallationID,
 		"missing installation ID context value must collapse to empty string")

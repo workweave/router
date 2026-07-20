@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
+	"workweave/router/internal/router/sessionpin"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +27,24 @@ type fakeRouter struct {
 	err         error
 	capturedReq *router.Request
 	routeCalls  int
+}
+
+type fakePreviewRouter struct {
+	previewResult policy.PreviewResult
+	previewReq    *router.Request
+	previewCalls  int
+	routeCalls    int
+}
+
+func (f *fakePreviewRouter) Route(context.Context, router.Request) (router.Decision, error) {
+	f.routeCalls++
+	return router.Decision{}, errors.New("serving route must not run during preview")
+}
+
+func (f *fakePreviewRouter) PreviewRoute(_ context.Context, req router.Request) (policy.PreviewResult, error) {
+	f.previewCalls++
+	f.previewReq = &req
+	return f.previewResult, nil
 }
 
 func (f *fakeRouter) Route(ctx context.Context, req router.Request) (router.Decision, error) {
@@ -51,6 +73,176 @@ func (f *fakeProvider) Proxy(ctx context.Context, decision router.Decision, prep
 		f.proxyResponse(w)
 	}
 	return f.proxyErr
+}
+
+func TestService_PreviewAnthropicRouteBuildsServingCandidateContextWithoutDispatch(t *testing.T) {
+	anthropicProvider := &fakeProvider{}
+	openAIProvider := &fakeProvider{}
+	previewer := &fakePreviewRouter{previewResult: policy.PreviewResult{
+		SchemaVersion:     policy.SchemaVersionV1,
+		EligibleRosterIDs: []string{"anthropic/claude-opus-4-8", "openai/gpt-5.5"},
+	}}
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{
+		providers.ProviderAnthropic: anthropicProvider,
+		providers.ProviderOpenAI:    openAIProvider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyHMM, Router: previewer}).
+		WithDeploymentKeyedProviders(map[string]struct{}{
+			providers.ProviderAnthropic: {},
+			providers.ProviderOpenAI:    {},
+		})
+
+	ctx := router.WithStrategy(context.Background(), router.StrategyHMM)
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-1")
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, "1791da5d-d0db-494c-8574-859a4cb20d97")
+	ctx = context.WithValue(ctx, proxy.InstallationExcludedModelsContextKey{}, []string{"gpt-5.5-mini"})
+	ctx = context.WithValue(ctx, proxy.InstallationPreferredModelsContextKey{}, []string{"claude-opus-4-8"})
+	body := []byte(`{"model":"claude-opus-4-8[1m]","messages":[{"role":"user","content":"inspect this repository"}],"max_tokens":4096,"tools":[{"name":"Read","description":"read a file","input_schema":{"type":"object"}}]}`)
+
+	result, err := svc.PreviewAnthropicRoute(ctx, body, http.Header{})
+
+	require.NoError(t, err)
+	assert.Equal(t, previewer.previewResult, result)
+	assert.Equal(t, 1, previewer.previewCalls)
+	assert.Zero(t, previewer.routeCalls)
+	require.NotNil(t, previewer.previewReq)
+	assert.Equal(t, "claude-opus-4-8", previewer.previewReq.RequestedModel)
+	assert.Equal(t, "org-1", previewer.previewReq.OrganizationID)
+	assert.Equal(t, "1791da5d-d0db-494c-8574-859a4cb20d97", previewer.previewReq.InstallationID)
+	assert.True(t, previewer.previewReq.HasTools)
+	assert.Equal(t, []string{"Read"}, previewer.previewReq.AvailableTools)
+	assert.Contains(t, previewer.previewReq.EnabledProviders, providers.ProviderAnthropic)
+	assert.Contains(t, previewer.previewReq.EnabledProviders, providers.ProviderOpenAI)
+	assert.Contains(t, previewer.previewReq.ExcludedModels, "gpt-5.5-mini")
+	assert.Equal(t, []string{"claude-opus-4-8"}, previewer.previewReq.PreferredModels)
+	assert.False(t, previewer.previewReq.TrainingAllowed)
+	assert.Empty(t, anthropicProvider.proxyBodies)
+	assert.Empty(t, openAIProvider.proxyBodies)
+}
+
+func TestService_AgentShadowEvaluationForcesEphemerallyWithoutServingRouter(t *testing.T) {
+	telemetry := newCaptureTelemetry()
+	pins := newFakePinStore()
+	pins.hasPin = true
+	pins.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}
+	provider := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_eval","type":"message","role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":3}}`)
+	}}
+	servingRouter := &fakeRouter{err: errors.New("serving router must not run")}
+	svc := proxy.NewService(servingRouter, map[string]providers.Client{
+		providers.ProviderAnthropic: provider,
+	}, nil, false, nil, pins, false, providers.ProviderAnthropic, "claude-haiku-4-5", telemetry).
+		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}}).
+		WithAvailableModels(map[string]struct{}{"claude-opus-4-8": {}}).
+		WithCompaction(nil, 0.0001)
+
+	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+		Model: "CLAUDE-OPUS-4-8", RolloutID: "pilot-1", StateID: "state-1",
+	})
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, "1791da5d-d0db-494c-8574-859a4cb20d97")
+	messages := make([]map[string]any, 0, 17)
+	for i := range 8 {
+		toolID := fmt.Sprintf("tool_%d", i)
+		assistantContent := []map[string]any{
+			{"type": "tool_use", "id": toolID, "name": "Read", "input": map[string]any{"file_path": "README.md"}},
+		}
+		if i == 0 {
+			assistantContent = append([]map[string]any{
+				{"type": "thinking", "thinking": "historical thought", "signature": "stale-signature"},
+			}, assistantContent...)
+		}
+		messages = append(messages,
+			map[string]any{"role": "assistant", "content": assistantContent},
+			map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": fmt.Sprintf("old-result-%d", i)}}},
+		)
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": "make the next edit"})
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-haiku-4-5", "messages": messages, "max_tokens": 512,
+		"thinking": map[string]any{"type": "adaptive"},
+	})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	require.NoError(t, svc.ProxyMessages(ctx, body, rec, req))
+	assert.Zero(t, servingRouter.routeCalls)
+	require.Len(t, provider.proxyBodies, 1)
+	assert.Contains(t, string(provider.proxyBodies[0]), `"model":"claude-opus-4-8"`)
+	assert.Contains(t, string(provider.proxyBodies[0]), "old-result-0")
+	assert.NotContains(t, string(provider.proxyBodies[0]), "stale-signature")
+	assert.Equal(t, "claude-opus-4-8", rec.Header().Get(proxy.HeaderRouterModel))
+	assert.Equal(t, providers.ProviderAnthropic, rec.Header().Get(proxy.HeaderRouterProvider))
+	assert.Equal(t, proxy.ReasonAgentShadowEval, rec.Header().Get(proxy.HeaderRouterDecision))
+	assert.Never(t, func() bool {
+		telemetry.mu.Lock()
+		defer telemetry.mu.Unlock()
+		return len(telemetry.rows) != 0 || len(telemetry.shadowRows) != 0
+	}, 100*time.Millisecond, 5*time.Millisecond, "eval traffic must not create serving or policy telemetry")
+	pins.mu.Lock()
+	defer pins.mu.Unlock()
+	assert.Zero(t, pins.getCalls, "eval traffic must not read production session pins")
+	assert.Empty(t, pins.upserts, "eval traffic must not write production session pins")
+	assert.Empty(t, pins.usages, "eval traffic must not update production session usage")
+	assert.Zero(t, pins.incrementCalls)
+	assert.Zero(t, pins.resetCalls)
+}
+
+func TestService_AgentShadowEvaluationNeverSubstitutesRequestedBaseline(t *testing.T) {
+	openAIProvider := &fakeProvider{proxyErr: &providers.UpstreamStatusError{Status: http.StatusServiceUnavailable}}
+	anthropicProvider := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusOK)
+	}}
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{
+		providers.ProviderAnthropic: anthropicProvider,
+		providers.ProviderOpenAI:    openAIProvider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithDeploymentKeyedProviders(map[string]struct{}{
+			providers.ProviderAnthropic: {},
+			providers.ProviderOpenAI:    {},
+		}).
+		WithAvailableModels(map[string]struct{}{
+			"claude-opus-4-8": {},
+			"gpt-5.5":         {},
+		})
+
+	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+		Model: "gpt-5.5", RolloutID: "pilot-1", StateID: "state-1",
+	})
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"inspect this repository"}],"max_tokens":512}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	assert.NotEmpty(t, openAIProvider.proxyBodies, "the planned candidate must be attempted")
+	assert.Empty(t, anthropicProvider.proxyBodies, "eval forcing must never dispatch the request baseline")
+	assert.Equal(t, "gpt-5.5", rec.Header().Get(proxy.HeaderRouterModel))
+}
+
+func TestService_AgentShadowEvaluationNeverRetriesSubscriptionOnDeploymentKey(t *testing.T) {
+	provider := &fakeProvider{proxyErr: &providers.UpstreamStatusError{Status: http.StatusTooManyRequests}}
+	svc := proxy.NewService(&fakeRouter{}, map[string]providers.Client{
+		providers.ProviderAnthropic: provider,
+	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-opus-4-8", nil).
+		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}}).
+		WithAvailableModels(map[string]struct{}{"claude-opus-4-8": {}})
+
+	ctx := context.WithValue(context.Background(), proxy.AgentShadowEvalContextKey{}, proxy.AgentShadowEvaluation{
+		Model: "claude-opus-4-8", RolloutID: "pilot-1", StateID: "state-1",
+	})
+	ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, "1791da5d-d0db-494c-8574-859a4cb20d97")
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, "sk-ant-oat01-subscription-token")
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"inspect this repository"}],"max_tokens":512}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_ = svc.ProxyMessages(ctx, body, rec, req)
+
+	require.Len(t, provider.proxyBodies, 1, "eval traffic must not retry on the paid deployment key")
+	require.NotNil(t, provider.proxyCreds[0])
+	assert.True(t, provider.proxyCreds[0].OAuth, "the single attempt must use the supplied subscription")
 }
 
 func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testing.T) {

@@ -89,6 +89,8 @@ type turnLoopResult struct {
 	// the client transcript on every later turn, so the emit path ORs this
 	// in to keep stripping them for the life of the session.
 	SessionEverSwitched bool
+	// StripThinkingBlocks forces signature removal when switch history is unavailable.
+	StripThinkingBlocks bool
 	// Handover captures the summarize-or-trim step when the planner switched.
 	Handover handoverOutcome
 	// SuggestionMode suppresses the routing-marker badge for requests carrying
@@ -114,7 +116,7 @@ type turnLoopResult struct {
 // otherwise 400 with "Invalid signature in thinking block" on every later turn.
 func (r turnLoopResult) modelSwitched() bool {
 	transition := r.PriorServedModel != "" && r.PriorServedModel != r.Decision.Model
-	return transition || r.SessionEverSwitched
+	return transition || r.SessionEverSwitched || r.StripThinkingBlocks
 }
 
 func isHMMDecision(dec router.Decision) bool {

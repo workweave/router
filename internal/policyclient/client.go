@@ -235,60 +235,33 @@ type routeResponse struct {
 	Error                string                 `json:"error"`
 }
 
+type previewResponse struct {
+	SchemaVersion         string                `json:"schema_version"`
+	RouteID               string                `json:"route_id"`
+	PolicyArtifactID      string                `json:"policy_artifact_id"`
+	PolicyArtifactSHA256  string                `json:"policy_artifact_sha256"`
+	RosterSHA256          string                `json:"roster_sha256"`
+	HMMStateID            int                   `json:"hmm_state_id"`
+	HMMStatePath          []int                 `json:"hmm_state_path"`
+	HMMStateProbabilities []float64             `json:"hmm_state_probabilities"`
+	ClassOrder            []string              `json:"class_order"`
+	ClassProbabilities    map[string]float64    `json:"class_probabilities"`
+	RankedFallback        []policy.PreviewGroup `json:"ranked_fallback"`
+	SelectedGroup         string                `json:"selected_group"`
+	EligibleRosterIDs     []string              `json:"eligible_roster_ids"`
+	Error                 string                `json:"error"`
+}
+
 // Decide posts the supplied candidate set and returns the sidecar selection.
 func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result, error) {
-	models := make([]string, 0, len(query.Candidates))
-	providerMap := make(map[string]string, len(query.Candidates))
-	for _, candidate := range query.Candidates {
-		models = append(models, candidate.RosterID)
-		providerMap[candidate.RosterID] = candidate.Provider
-	}
-	messages := routeMessages(query.ConversationMessages)
-	var trainingDelta []routeMessage
-	if router.IsHMMStrategy(query.Strategy) && query.TrainingAllowed {
-		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
-	}
-	body, err := json.Marshal(routeRequest{
-		SchemaVersion:             policy.SchemaVersionV1,
-		Strategy:                  string(query.Strategy),
-		ExecutionMode:             query.ExecutionMode,
-		RouteID:                   query.RouteID,
-		OrganizationID:            query.OrganizationID,
-		InstallationID:            query.InstallationID,
-		ClientApp:                 query.ClientApp,
-		Harness:                   query.ClientApp,
-		RolloutID:                 query.RolloutID,
-		RequestedModel:            query.RequestedModel,
-		PromptText:                query.PromptText,
-		LatestUserText:            latestUserText(messages),
-		TurnIndex:                 turnIndex(messages),
-		ConversationMessages:      messages,
-		TrainingConversationDelta: trainingDelta,
-		AvailableTools:            clipRouteValues(query.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
-		FeedbackKey:               query.FeedbackKey,
-		FeedbackRole:              query.FeedbackRole,
-		ClientSessionID:           query.ClientSessionID,
-		EstimatedInputTokens:      query.EstimatedInputTokens,
-		HasTools:                  query.HasTools,
-		HasImages:                 query.HasImages,
-		RoutingIntent:             query.RoutingIntent,
-		PreferredModels:           query.PreferredModels,
-		RoutingKnobs:              wireRoutingKnobs(query.RoutingKnobs),
-		QualityBias:               qualityBias(query.RoutingKnobs),
-		TrainingAllowed:           query.TrainingAllowed,
-		CaptureMode:               query.CaptureMode,
-		DebugEnabled:              query.DebugEnabled,
-		Candidates:                query.Candidates,
-		CandidateModels:           models,
-		CandidateProviders:        providerMap,
-	})
+	body, err := marshalRouteRequest(query)
 	if err != nil {
-		return policy.Result{}, fmt.Errorf("marshal policy route request: %w", err)
+		return policy.Result{}, err
 	}
 
 	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	resp, payload, err := c.doRoute(requestCtx, body)
+	resp, payload, err := c.doPolicyRequest(requestCtx, "/route", body)
 	if err != nil {
 		return policy.Result{}, err
 	}
@@ -339,10 +312,107 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	}, nil
 }
 
-func (c *Client) doRoute(ctx context.Context, body []byte) (*http.Response, []byte, error) {
+// Preview evaluates the supplied candidate set without serving or callbacks.
+func (c *Client) Preview(ctx context.Context, query policy.Query) (policy.PreviewResult, error) {
+	if query.ExecutionMode != policy.ExecutionModePreview {
+		return policy.PreviewResult{}, fmt.Errorf("policy preview requires preview execution mode")
+	}
+	body, err := marshalRouteRequest(query)
+	if err != nil {
+		return policy.PreviewResult{}, err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	resp, payload, err := c.doPolicyRequest(requestCtx, "/preview", body)
+	if err != nil {
+		return policy.PreviewResult{}, err
+	}
+	var parsed previewResponse
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return policy.PreviewResult{}, fmt.Errorf("decode policy preview response (status %d): %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		if parsed.Error != "" {
+			return policy.PreviewResult{}, fmt.Errorf("policy preview status %d: %s", resp.StatusCode, parsed.Error)
+		}
+		return policy.PreviewResult{}, fmt.Errorf("policy preview status %d", resp.StatusCode)
+	}
+	if parsed.SchemaVersion != policy.SchemaVersionV1 {
+		return policy.PreviewResult{}, fmt.Errorf("unsupported policy preview schema %q", parsed.SchemaVersion)
+	}
+	return policy.PreviewResult{
+		SchemaVersion:         parsed.SchemaVersion,
+		RouteID:               parsed.RouteID,
+		PolicyArtifactID:      parsed.PolicyArtifactID,
+		PolicyArtifactSHA256:  parsed.PolicyArtifactSHA256,
+		RosterSHA256:          parsed.RosterSHA256,
+		HMMStateID:            parsed.HMMStateID,
+		HMMStatePath:          parsed.HMMStatePath,
+		HMMStateProbabilities: parsed.HMMStateProbabilities,
+		ClassOrder:            parsed.ClassOrder,
+		ClassProbabilities:    parsed.ClassProbabilities,
+		RankedFallback:        parsed.RankedFallback,
+		SelectedGroup:         parsed.SelectedGroup,
+		EligibleRosterIDs:     parsed.EligibleRosterIDs,
+	}, nil
+}
+
+func marshalRouteRequest(query policy.Query) ([]byte, error) {
+	models := make([]string, 0, len(query.Candidates))
+	providerMap := make(map[string]string, len(query.Candidates))
+	for _, candidate := range query.Candidates {
+		models = append(models, candidate.RosterID)
+		providerMap[candidate.RosterID] = candidate.Provider
+	}
+	messages := routeMessages(query.ConversationMessages)
+	var trainingDelta []routeMessage
+	if router.IsHMMStrategy(query.Strategy) && query.TrainingAllowed {
+		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
+	}
+	body, err := json.Marshal(routeRequest{
+		SchemaVersion:             policy.SchemaVersionV1,
+		Strategy:                  string(query.Strategy),
+		ExecutionMode:             query.ExecutionMode,
+		RouteID:                   query.RouteID,
+		OrganizationID:            query.OrganizationID,
+		InstallationID:            query.InstallationID,
+		ClientApp:                 query.ClientApp,
+		Harness:                   query.ClientApp,
+		RolloutID:                 query.RolloutID,
+		RequestedModel:            query.RequestedModel,
+		PromptText:                query.PromptText,
+		LatestUserText:            latestUserText(messages),
+		TurnIndex:                 turnIndex(messages),
+		ConversationMessages:      messages,
+		TrainingConversationDelta: trainingDelta,
+		AvailableTools:            clipRouteValues(query.AvailableTools, maxRouteToolCallInputKeys, maxRouteToolCallInputChars),
+		FeedbackKey:               query.FeedbackKey,
+		FeedbackRole:              query.FeedbackRole,
+		ClientSessionID:           query.ClientSessionID,
+		EstimatedInputTokens:      query.EstimatedInputTokens,
+		HasTools:                  query.HasTools,
+		HasImages:                 query.HasImages,
+		RoutingIntent:             query.RoutingIntent,
+		PreferredModels:           query.PreferredModels,
+		RoutingKnobs:              wireRoutingKnobs(query.RoutingKnobs),
+		QualityBias:               qualityBias(query.RoutingKnobs),
+		TrainingAllowed:           query.TrainingAllowed,
+		CaptureMode:               query.CaptureMode,
+		DebugEnabled:              query.DebugEnabled,
+		Candidates:                query.Candidates,
+		CandidateModels:           models,
+		CandidateProviders:        providerMap,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal policy route request: %w", err)
+	}
+	return body, nil
+}
+
+func (c *Client) doPolicyRequest(ctx context.Context, path string, body []byte) (*http.Response, []byte, error) {
 	var lastErr error
 	for attempt := 1; attempt <= defaultRouteAttempts; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/route", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 		if err != nil {
 			return nil, nil, fmt.Errorf("build policy route request: %w", err)
 		}
@@ -616,5 +686,6 @@ func clipRouteValues(values []string, maxValues, maxChars int) []string {
 }
 
 var _ policy.Decider = (*Client)(nil)
+var _ policy.PreviewDecider = (*Client)(nil)
 var _ policy.OutcomeReporter = (*Client)(nil)
 var _ policy.FeedbackReporter = (*Client)(nil)

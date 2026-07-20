@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from hmm_sidecar.artifacts import resolve_artifacts, sha256_file
-from hmm_sidecar.policy import FrozenPolicy, select_roster_arm, selected_margin
+from hmm_sidecar.policy import (
+    FrozenPolicy,
+    select_roster_arm,
+    select_roster_group,
+    selected_margin,
+)
 
 
 class FixedEmbedder:
@@ -33,6 +38,47 @@ def test_roster_fallback_reports_the_selected_classifier_group() -> None:
     assert label == "fast"
     assert roster_id == "provider/fast"
     assert selected_margin(probabilities, label) == pytest.approx(-0.6)
+
+
+def test_group_selection_uses_class_order_ties_and_returns_every_arm() -> None:
+    group, arms, fallback = select_roster_group(
+        probabilities={"fast": 0.5, "maximum": 0.5},
+        classes=("fast", "maximum"),
+        clusters={
+            "fast": {"arms": ["provider/a", "provider/b"]},
+            "maximum": {"arms": ["provider/c"]},
+        },
+        available_roster_ids={"provider/a", "provider/b", "provider/c"},
+    )
+
+    assert group == "fast"
+    assert arms == ("provider/a", "provider/b")
+    assert tuple(item.group for item in fallback) == ("fast", "maximum")
+
+
+def test_group_selection_falls_back_and_retains_zero_arm_result() -> None:
+    group, arms, fallback = select_roster_group(
+        probabilities={"fast": 0.8, "maximum": 0.2},
+        classes=("fast", "maximum"),
+        clusters={
+            "fast": {"arms": ["provider/a"]},
+            "maximum": {"arms": ["provider/b", "provider/c"]},
+        },
+        available_roster_ids={"provider/b", "provider/c"},
+    )
+
+    assert group == "maximum"
+    assert arms == ("provider/b", "provider/c")
+    assert fallback[0].eligible_arms == ()
+
+    empty_group, empty_arms, _ = select_roster_group(
+        probabilities={"fast": 0.8, "maximum": 0.2},
+        classes=("fast", "maximum"),
+        clusters={"fast": {"arms": ["provider/a"]}, "maximum": {"arms": []}},
+        available_roster_ids=set(),
+    )
+    assert empty_group is None
+    assert empty_arms == ()
 
 
 @pytest.mark.skipif(

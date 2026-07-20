@@ -43,7 +43,10 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		)
 
 		ctx := stashClientIdentity(c.Request.Context(), c.Request.Header, body)
-		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
+		// Skip identity upsert for agent-shadow eval requests to avoid mutating production router-user state.
+		if _, agentShadow := proxy.AgentShadowEvalFromContext(ctx); !agentShadow {
+			ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
+		}
 		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyMessages(c.Request.Context(), body, c.Writer, c.Request); err != nil {

@@ -17,7 +17,42 @@ from .features import (
     tool_context_features,
 )
 from .hmm import FrozenHMM
-from .schemas import Candidate, RouteResult
+from .schemas import Candidate, RankedFallback, RoutePreviewResult, RouteResult
+
+
+def select_roster_group(
+    *,
+    probabilities: dict[str, float],
+    classes: tuple[str, ...],
+    clusters: dict[str, Any],
+    available_roster_ids: set[str],
+) -> tuple[str | None, tuple[str, ...], tuple[RankedFallback, ...]]:
+    """Select the first nonempty ranked group and retain every eligible arm."""
+    ranked_labels = sorted(
+        probabilities,
+        key=lambda label: (-probabilities[label], classes.index(label)),
+    )
+    selected_group: str | None = None
+    selected_arms: tuple[str, ...] = ()
+    fallback: list[RankedFallback] = []
+    for label in ranked_labels:
+        cluster = clusters.get(label) or {}
+        roster_arms = tuple(str(value) for value in cluster.get("arms") or [])
+        eligible_arms = tuple(
+            roster_id for roster_id in roster_arms if roster_id in available_roster_ids
+        )
+        fallback.append(
+            RankedFallback(
+                group=label,
+                probability=float(probabilities[label]),
+                roster_arms=roster_arms,
+                eligible_arms=eligible_arms,
+            )
+        )
+        if selected_group is None and eligible_arms:
+            selected_group = label
+            selected_arms = eligible_arms
+    return selected_group, selected_arms, tuple(fallback)
 
 
 def select_roster_arm(
@@ -27,16 +62,15 @@ def select_roster_arm(
     clusters: dict[str, Any],
     available_roster_ids: set[str],
 ) -> tuple[str, str]:
-    ranked_labels = sorted(
-        probabilities,
-        key=lambda label: (-probabilities[label], classes.index(label)),
+    label, arms, _ = select_roster_group(
+        probabilities=probabilities,
+        classes=classes,
+        clusters=clusters,
+        available_roster_ids=available_roster_ids,
     )
-    for label in ranked_labels:
-        cluster = clusters.get(label) or {}
-        for roster_id in cluster.get("arms") or []:
-            if roster_id in available_roster_ids:
-                return label, roster_id
-    raise ValueError("no candidate is present in the frozen HMM roster")
+    if label is None or not arms:
+        raise ValueError("no candidate is present in the frozen HMM roster")
+    return label, arms[0]
 
 
 def selected_margin(probabilities: dict[str, float], selected_label: str) -> float:
@@ -68,11 +102,13 @@ class FrozenPolicy:
             if isinstance(card, dict) and isinstance(card.get("state_id"), int)
         }
 
-    async def route(self, payload: dict[str, Any]) -> RouteResult:
+    async def _evaluate(
+        self, payload: dict[str, Any], *, allow_empty_candidates: bool
+    ) -> tuple[list[Candidate], Any, Any]:
         candidates = [
             Candidate.model_validate(value) for value in payload.get("candidates") or []
         ]
-        if not candidates:
+        if not candidates and not allow_empty_candidates:
             raise ValueError("route request has no candidates")
         by_roster = {candidate.roster_id: candidate for candidate in candidates}
         if len(by_roster) != len(candidates):
@@ -90,6 +126,38 @@ class FrozenPolicy:
             tool_context=tool_context_features(payload),
         )
         classification = self.classifier.predict(feature_row)
+        return candidates, readout, classification
+
+    async def preview(self, payload: dict[str, Any]) -> RoutePreviewResult:
+        candidates, readout, classification = await self._evaluate(
+            payload, allow_empty_candidates=True
+        )
+        selected_group, eligible_arms, ranked_fallback = select_roster_group(
+            probabilities=classification.probabilities,
+            classes=tuple(self.classifier.classes),
+            clusters=self.clusters,
+            available_roster_ids={candidate.roster_id for candidate in candidates},
+        )
+        return RoutePreviewResult(
+            route_id=str(payload.get("route_id") or ""),
+            policy_artifact_id=self.artifacts.manifest.model_id,
+            policy_artifact_sha256=self.artifacts.package_sha256,
+            roster_sha256=self.roster_version,
+            hmm_state_id=readout.state,
+            hmm_state_path=tuple(readout.state_path),
+            hmm_state_probabilities=tuple(float(value) for value in readout.gamma[-1]),
+            class_order=tuple(self.classifier.classes),
+            class_probabilities=classification.probabilities,
+            ranked_fallback=ranked_fallback,
+            selected_group=selected_group,
+            eligible_roster_ids=eligible_arms,
+        )
+
+    async def route(self, payload: dict[str, Any]) -> RouteResult:
+        candidates, readout, classification = await self._evaluate(
+            payload, allow_empty_candidates=False
+        )
+        by_roster = {candidate.roster_id: candidate for candidate in candidates}
         selected_label, selected_roster = select_roster_arm(
             probabilities=classification.probabilities,
             classes=tuple(self.classifier.classes),

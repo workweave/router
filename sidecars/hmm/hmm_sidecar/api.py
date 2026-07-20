@@ -132,3 +132,32 @@ async def route(payload: dict[str, Any]) -> JSONResponse:
             **result.model_dump(mode="json"),
         }
     )
+
+
+@app.post("/preview")
+async def preview(payload: dict[str, Any]) -> JSONResponse:
+    policy: FrozenPolicy | None = getattr(app.state, "policy", None)
+    if policy is None:
+        return JSONResponse({"error": "policy not loaded"}, status_code=503)
+    if payload.get("schema_version") not in (None, SCHEMA_VERSION):
+        return JSONResponse({"error": "unsupported policy schema"}, status_code=400)
+    if payload.get("execution_mode") != "preview":
+        return JSONResponse(
+            {"error": "preview execution mode required"}, status_code=400
+        )
+    try:
+        result = await policy.preview(payload)
+    except (ValueError, EmbeddingError) as exc:
+        log.warning("HMM preview request rejected: %s", exc)
+        return JSONResponse({"error": "preview request rejected"}, status_code=422)
+    except Exception as exc:
+        log.exception("HMM preview failed")
+        return JSONResponse(
+            {"error": f"preview failed: {type(exc).__name__}"}, status_code=503
+        )
+    return JSONResponse(
+        {
+            "schema_version": SCHEMA_VERSION,
+            **result.model_dump(mode="json"),
+        }
+    )

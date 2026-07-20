@@ -57,9 +57,9 @@ const (
 // Diagnostic describes one candidate exclusion for conformance checks and
 // debug-mode inspection. It contains no request content.
 type Diagnostic struct {
-	CatalogID string
-	RosterID  string
-	Reason    ExclusionReason
+	CatalogID string          `json:"catalog_id"`
+	RosterID  string          `json:"roster_id,omitempty"`
+	Reason    ExclusionReason `json:"reason"`
 }
 
 // Candidate is one catalog-backed model offered to a policy sidecar.

@@ -42,6 +42,10 @@ const TopUpURL = "https://app.workweave.ai/settings/billing/router-credits"
 func WithBalanceCheck(svc *billing.Service, minBalanceMicros int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := observability.FromGin(c)
+		if _, ok := proxy.AgentShadowEvalFromContext(c.Request.Context()); ok {
+			c.Next()
+			return
+		}
 
 		installation := InstallationFrom(c)
 		if installation == nil || installation.ExternalID == "" {

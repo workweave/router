@@ -3,12 +3,45 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from hmm_sidecar.api import app
+from hmm_sidecar.schemas import RoutePreviewResult
 
 
 class RejectingPolicy:
     async def route(self, payload: dict[str, object]) -> None:
         del payload
         raise ValueError("private artifact path: /secret/model.npz")
+
+
+class PreviewingPolicy:
+    async def preview(self, payload: dict[str, object]) -> object:
+        assert payload["execution_mode"] == "preview"
+        return RoutePreviewResult(
+            route_id="route",
+            policy_artifact_id="artifact",
+            policy_artifact_sha256="a" * 64,
+            roster_sha256="b" * 64,
+            hmm_state_id=1,
+            hmm_state_path=(0, 1),
+            hmm_state_probabilities=(0.3, 0.7),
+            class_order=("fast", "maximum"),
+            class_probabilities={"fast": 0.6, "maximum": 0.4},
+            ranked_fallback=(
+                {
+                    "group": "fast",
+                    "probability": 0.6,
+                    "roster_arms": ("provider/a",),
+                    "eligible_arms": ("provider/a",),
+                },
+                {
+                    "group": "maximum",
+                    "probability": 0.4,
+                    "roster_arms": ("provider/b",),
+                    "eligible_arms": (),
+                },
+            ),
+            selected_group="fast",
+            eligible_roster_ids=("provider/a",),
+        )
 
 
 def test_liveness_does_not_depend_on_model_readiness() -> None:
@@ -59,3 +92,20 @@ def test_route_rejections_do_not_expose_internal_exception_text() -> None:
     assert response.status_code == 422
     assert response.json() == {"error": "route request rejected"}
     assert "/secret/model.npz" not in response.text
+
+
+def test_preview_requires_explicit_mode_and_returns_all_selected_arms() -> None:
+    with TestClient(app) as client:
+        app.state.policy = PreviewingPolicy()
+        rejected = client.post("/preview", json={"schema_version": "policy_router_v1"})
+        response = client.post(
+            "/preview",
+            json={
+                "schema_version": "policy_router_v1",
+                "execution_mode": "preview",
+            },
+        )
+
+    assert rejected.status_code == 400
+    assert response.status_code == 200
+    assert response.json()["eligible_roster_ids"] == ["provider/a"]
