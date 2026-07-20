@@ -67,21 +67,23 @@ func (s *Service) anthropicRoutingRequest(ctx context.Context, body []byte, head
 		installationID = id.String()
 	}
 	return router.Request{
-		RequestedModel:          features.Model,
-		EstimatedInputTokens:    features.Tokens,
-		HasTools:                features.HasTools,
-		HasImages:               features.HasImages,
-		TranslationRequirements: env.TranslationRequirements(router.EndpointAnthropicMessages),
-		PromptText:              promptText,
-		ConversationMessages:    conversationMessagesForRouting(env),
-		AvailableTools:          availableToolsForRouting(env),
-		OrganizationID:          organizationID,
-		InstallationID:          installationID,
-		ClientSessionID:         env.ClientSessionID(),
-		EnabledProviders:        enabledProviders,
-		ExcludedModels:          excluded,
-		PreferredModels:         s.preferredModelsForRequest(ctx),
-		RoutingKnobs:            routingKnobsForRequest(ctx),
+		RequestedModel:               features.Model,
+		EstimatedInputTokens:         features.Tokens,
+		HasTools:                     features.HasTools,
+		HasImages:                    features.HasImages,
+		TranslationRequirements:      env.TranslationRequirements(router.EndpointAnthropicMessages),
+		ReasoningConfigurationSHA256: env.ReasoningConfigurationSHA256(),
+		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
+		PromptText:                   promptText,
+		ConversationMessages:         conversationMessagesForRouting(env),
+		AvailableTools:               availableToolsForRouting(env),
+		OrganizationID:               organizationID,
+		InstallationID:               installationID,
+		ClientSessionID:              env.ClientSessionID(),
+		EnabledProviders:             enabledProviders,
+		ExcludedModels:               excluded,
+		PreferredModels:              s.preferredModelsForRequest(ctx),
+		RoutingKnobs:                 routingKnobsForRequest(ctx),
 	}, nil
 }
 

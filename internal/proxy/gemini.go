@@ -90,18 +90,21 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeRequest := router.Request{
-		RequestedModel:       feats.Model,
-		EstimatedInputTokens: feats.Tokens,
-		HasTools:             feats.HasTools,
-		HasImages:            feats.HasImages,
-		PromptText:           promptText,
-		ConversationMessages: conversationMessagesForRouting(env),
-		AvailableTools:       availableToolsForRouting(env),
-		ClientSessionID:      env.ClientSessionID(),
-		EnabledProviders:     s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
-		ExcludedModels:       s.excludedModelsForRequest(ctx),
-		PreferredModels:      s.preferredModelsForRequest(ctx),
-		RoutingKnobs:         router.RoutingKnobsFromContext(ctx),
+		RequestedModel:               feats.Model,
+		EstimatedInputTokens:         feats.Tokens,
+		HasTools:                     feats.HasTools,
+		HasImages:                    feats.HasImages,
+		TranslationRequirements:      env.TranslationRequirements(router.EndpointGeminiGenerate),
+		ReasoningConfigurationSHA256: env.ReasoningConfigurationSHA256(),
+		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
+		PromptText:                   promptText,
+		ConversationMessages:         conversationMessagesForRouting(env),
+		AvailableTools:               availableToolsForRouting(env),
+		ClientSessionID:              env.ClientSessionID(),
+		EnabledProviders:             s.enabledProvidersForRequest(ctx, providers.ProviderGoogle, r.Header),
+		ExcludedModels:               s.excludedModelsForRequest(ctx),
+		PreferredModels:              s.preferredModelsForRequest(ctx),
+		RoutingKnobs:                 router.RoutingKnobsFromContext(ctx),
 	}
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)

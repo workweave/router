@@ -2153,17 +2153,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	routeStart := time.Now()
 	req := router.Request{
-		RequestedModel:          feats.Model,
-		ForceModel:              forceModel,
-		EstimatedInputTokens:    feats.Tokens,
-		HasTools:                feats.HasTools,
-		HasImages:               feats.HasImages,
-		TranslationRequirements: env.TranslationRequirements(router.EndpointAnthropicMessages),
-		PromptText:              promptText,
-		ConversationMessages:    conversationMessagesForRouting(env),
-		AvailableTools:          availableToolsForRouting(env),
-		HistoryTruncated:        compRes.Applied,
-		OrganizationID:          externalID,
+		RequestedModel:               feats.Model,
+		ForceModel:                   forceModel,
+		EstimatedInputTokens:         feats.Tokens,
+		HasTools:                     feats.HasTools,
+		HasImages:                    feats.HasImages,
+		TranslationRequirements:      env.TranslationRequirements(router.EndpointAnthropicMessages),
+		ReasoningConfigurationSHA256: env.ReasoningConfigurationSHA256(),
+		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
+		PromptText:                   promptText,
+		ConversationMessages:         conversationMessagesForRouting(env),
+		AvailableTools:               availableToolsForRouting(env),
+		HistoryTruncated:             compRes.Applied,
+		OrganizationID:               externalID,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
@@ -4249,15 +4251,18 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	routeRequest := router.Request{
-		RequestedModel:       feats.Model,
-		ForceModel:           forceModel,
-		EstimatedInputTokens: feats.Tokens,
-		HasTools:             feats.HasTools,
-		HasImages:            feats.HasImages,
-		PromptText:           promptText,
-		ConversationMessages: conversationMessagesForRouting(env),
-		AvailableTools:       availableToolsForRouting(env),
-		HistoryTruncated:     compResOAI.Applied,
+		RequestedModel:               feats.Model,
+		ForceModel:                   forceModel,
+		EstimatedInputTokens:         feats.Tokens,
+		HasTools:                     feats.HasTools,
+		HasImages:                    feats.HasImages,
+		TranslationRequirements:      env.TranslationRequirements(router.EndpointOpenAIChat),
+		ReasoningConfigurationSHA256: env.ReasoningConfigurationSHA256(),
+		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
+		PromptText:                   promptText,
+		ConversationMessages:         conversationMessagesForRouting(env),
+		AvailableTools:               availableToolsForRouting(env),
+		HistoryTruncated:             compResOAI.Applied,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
 		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
