@@ -303,6 +303,10 @@ type OpenAIAccountIDContextKey struct{}
 // Responses body to the Codex backend (its presence marks the passthrough).
 type codexResponsesBodyContextKey struct{}
 
+// nativeResponsesReasoningHashContextKey preserves reasoning that only native
+// Responses dispatch can represent.
+type nativeResponsesReasoningHashContextKey struct{}
+
 // InstallationExcludedModelsContextKey is the context key for the authed
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
@@ -4197,6 +4201,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// provider.
 	responsesBody, _ := ctx.Value(codexResponsesBodyContextKey{}).([]byte)
 	responsesPassthrough := len(responsesBody) > 0
+	reasoningConfigurationHash := env.ReasoningConfigurationSHA256()
+	if nativeResponsesHash, ok := ctx.Value(nativeResponsesReasoningHashContextKey{}).(string); ok {
+		reasoningConfigurationHash = nativeResponsesHash
+	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
@@ -4257,7 +4265,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		HasTools:                     feats.HasTools,
 		HasImages:                    feats.HasImages,
 		TranslationRequirements:      env.TranslationRequirements(router.EndpointOpenAIChat),
-		ReasoningConfigurationSHA256: env.ReasoningConfigurationSHA256(),
+		ReasoningConfigurationSHA256: reasoningConfigurationHash,
 		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
 		PromptText:                   promptText,
 		ConversationMessages:         conversationMessagesForRouting(env),
@@ -4851,6 +4859,13 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 	// Completions (NativeOnly) or a Codex subscription is using its direct endpoint.
 	if conversion.Requirements.NativeOnly || codexResponsesRequest(ctx, r.Header) {
 		ctx = context.WithValue(ctx, codexResponsesBodyContextKey{}, conversion.OriginalBody)
+	}
+	if conversion.Requirements.NativeOnly {
+		originalEnvelope, parseErr := translate.ParseOpenAI(conversion.OriginalBody)
+		if parseErr != nil {
+			return fmt.Errorf("parse native Responses request: %w", parseErr)
+		}
+		ctx = context.WithValue(ctx, nativeResponsesReasoningHashContextKey{}, originalEnvelope.ReasoningConfigurationSHA256())
 	}
 	ctx = context.WithValue(ctx, responsesRequirementsContextKey{}, conversion.Requirements)
 	ctx = context.WithValue(ctx, responsesTransformsContextKey{}, conversion.Report)

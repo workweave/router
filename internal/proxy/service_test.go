@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/policy"
 	"workweave/router/internal/router/sessionpin"
+	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -256,15 +257,18 @@ func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testin
 		providers.ProviderOpenAI:    provider,
 	}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
-	body := []byte(`{"model":"gpt-5.5","input":"apply a patch","tools":[{"type":"custom","name":"apply_patch"}]}`)
+	body := []byte(`{"model":"gpt-5.5","input":"apply a patch","reasoning":{"effort":"high"},"tools":[{"type":"custom","name":"apply_patch"}]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIResponses(context.Background(), body, rec, req))
 
 	require.NotNil(t, fr.capturedReq)
+	originalEnvelope, err := translate.ParseOpenAI(body)
+	require.NoError(t, err)
+	assert.Equal(t, originalEnvelope.ReasoningConfigurationSHA256(), fr.capturedReq.ReasoningConfigurationSHA256)
 	assert.Equal(t, map[string]struct{}{providers.ProviderOpenAI: {}}, fr.capturedReq.EnabledProviders)
 	require.Len(t, provider.proxyBodies, 1)
-	assert.JSONEq(t, `{"model":"gpt-5.5","input":"apply a patch","tools":[{"type":"custom","name":"apply_patch"}]}`, string(provider.proxyBodies[0]))
+	assert.JSONEq(t, `{"model":"gpt-5.5","input":"apply a patch","reasoning":{"effort":"high"},"tools":[{"type":"custom","name":"apply_patch"}]}`, string(provider.proxyBodies[0]))
 	assert.Equal(t, providers.EndpointResponses, provider.proxyEndpoints[0])
 	assert.JSONEq(t, `{"id":"resp_1","object":"response","output":[]}`, rec.Body.String())
 }
