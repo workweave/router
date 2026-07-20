@@ -9,6 +9,8 @@ internal/proxy/gemini.go
   s_0cb555d8dc2e1e::t_e0f07be85fe4fe 98-99
 internal/translate/configuration_hashes_test.go
   s_0cb555d8dc2e1e::t_455f68260377f2 1-45
+internal/proxy/route_preview.go
+  s_0cb555d8dc2e1e::t_110e21c91d6efd 75-76
 ---
 {
   "schema_version": "authorship/3.0.0",
