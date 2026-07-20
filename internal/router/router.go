@@ -122,19 +122,13 @@ type Request struct {
 	EnabledProviders map[string]struct{}
 	// Per-request model exclusion — nil or empty means no exclusion.
 	// If filtering empties eligible set, scorer returns ErrNoEligibleProvider.
-	// This is the full exclusion union: the installation's configured
-	// excluded_models plus the request-time safety filters (context-overflow,
-	// gemini-unsigned). The scorer honors all of it.
+	// Full union: installation excluded_models plus request-time safety filters.
 	ExcludedModels map[string]struct{}
-	// SafetyExcludedModels is the subset of ExcludedModels that reflects hard,
-	// request-time constraints a model physically cannot satisfy: context-window
-	// overflow and gemini-unsigned-history filtering. It deliberately excludes
-	// the installation's configured excluded_models policy list. The subscription
-	// usage-bypass gate consults this set (not the full ExcludedModels union) so
-	// a customer who opted into strict pass-through is served on their own
-	// subscription for models they merely deprioritized via excluded_models,
-	// while a model that literally can't accept the request still blocks bypass.
-	// nil or empty means no safety exclusion.
+	// SafetyExcludedModels holds only the hard request-time constraints a model
+	// physically cannot satisfy: context-window overflow and gemini-unsigned
+	// history — not the installation's excluded_models policy. The bypass gate
+	// consults this so policy exclusions don't block pass-through, but physical
+	// constraints still do. nil or empty means no safety exclusion.
 	SafetyExcludedModels map[string]struct{}
 	// PreferredModels is the per-installation priority ranking (index 0 =
 	// first). The scorer adds a small rank-decaying bonus to each preferred

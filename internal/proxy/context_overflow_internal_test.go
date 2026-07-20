@@ -1,9 +1,13 @@
 package proxy
 
 import (
+	"strings"
 	"testing"
 
+	"workweave/router/internal/translate"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestContextWindowForRequest_ExtendedContextModelsReport1M is the premise for
@@ -69,6 +73,41 @@ func TestExcludeContextOverflowModels_SignatureSavingsOnlyForStrippingTargets(t 
 	assert.Contains(t, overflowed, "claude-haiku-4-5", "Anthropic target keeps signatures, so the savings do not apply and it overflows 200K")
 	_, kimiExcluded := out["moonshotai/kimi-k2.7"]
 	assert.False(t, kimiExcluded, "stripping target must not be denylisted")
+}
+
+// TestSafetyExcludedModels_CatchesPolicyExcludedOverflow is the regression for
+// the bypass-safety hole: safetyExcludedModels must denylist a model that
+// overflows the context window even when that model is ALSO in the installation
+// excluded_models set. The routing-path overflow filter seeds excluded_models as
+// its base and skips anything already in it, so the both-excluded model never
+// reaches the routing denylist — but the bypass gate still has to block it, or a
+// pass-through turn 400s on the subscription. safetyExcludedModels re-runs the
+// filter against an empty base to close that gap.
+func TestSafetyExcludedModels_CatchesPolicyExcludedOverflow(t *testing.T) {
+	// A body large enough that ContextOverflowTokenEstimate (len/6) plus the
+	// output reserve exceeds haiku's 200K window. ~1.3MB / 6 ≈ 217K > 200K.
+	big := strings.Repeat("x", 1_300_000)
+	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"` + big + `"}]}`))
+	require.NoError(t, err)
+
+	// haiku-4-5 is a 200K-only model (no extended-context beta), so the big body
+	// overflows it. It is also the requested model AND policy-excluded here.
+	s := &Service{availableModels: map[string]struct{}{"claude-haiku-4-5": {}}}
+
+	// The routing-path filter, seeded with the policy exclusion, skips haiku (it
+	// is already excluded) — so the overflow denylist it returns is empty.
+	_, routingOverflowed := excludeContextOverflowModels(
+		env.ContextOverflowTokenEstimate(), env.SignatureTokenSavings(), 8_000,
+		map[string]struct{}{"claude-haiku-4-5": {}}, s.availableModels,
+	)
+	assert.NotContains(t, routingOverflowed, "claude-haiku-4-5",
+		"the routing filter skips a policy-excluded model — this is the gap safetyExcludedModels must close")
+
+	// safetyExcludedModels re-runs against an empty base, so it DOES catch the
+	// overflow regardless of policy exclusion.
+	safety := s.safetyExcludedModels(env, 8_000)
+	_, blocked := safety["claude-haiku-4-5"]
+	assert.True(t, blocked, "a policy-excluded model that also overflows must land in the safety set so bypass blocks it")
 }
 
 // TestShouldEnableExtendedContext gates the 1M-context beta on request size:

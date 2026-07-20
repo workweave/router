@@ -174,13 +174,11 @@ func TestUsageBypass_NoSubscription_EngagesRouting(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "no subscription credential means nothing to bypass onto — scorer must run")
 }
 
-// TestUsageBypass_InstallationExcludedModel_StillBypasses: the installation's
-// configured excluded_models is a routing-preference policy, not a hard block.
-// A caller who opted into usage bypass ("strict pass-through until low") must be
-// served on their own subscription for the requested model even when that model
-// is on the installation deny list — serving their own quota costs the router
-// nothing, and honoring the exclusion here would silently burn credits on a
-// substituted model, which is exactly the bug this guards against.
+// TestUsageBypass_InstallationExcludedModel_StillBypasses: installation
+// excluded_models is a routing preference, not a hard block. A bypass-enabled
+// caller must be served on their own subscription even for a policy-excluded
+// model — honoring the exclusion here silently burns credits on a substituted
+// model, the bug this guards against.
 func TestUsageBypass_InstallationExcludedModel_StillBypasses(t *testing.T) {
 	svc, fr, p := bypassFixture(t, 0.20)
 	svc = svc.WithExcludedModelsOverride([]string{bypassRequestedMdl})

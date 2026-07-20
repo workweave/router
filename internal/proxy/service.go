@@ -560,18 +560,22 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
-// safetyExcludedSet collects the request-time safety exclusions (context-window
-// overflow and gemini-unsigned-history) into a set. These are hard constraints a
-// model cannot satisfy on any credential, distinct from the installation's
-// configured excluded_models routing policy. The usage-bypass gate consults this
-// set so opting into pass-through overrides policy exclusions but never a hard
-// safety filter. Returns nil when neither filter fired.
-func safetyExcludedSet(ctxOverflowed, geminiUnsigned []string) map[string]struct{} {
-	if len(ctxOverflowed) == 0 && len(geminiUnsigned) == 0 {
+// safetyExcludedModels returns the request-time safety-exclusion set: the models
+// that context-overflow or gemini-unsigned-history filtering bar regardless of
+// installation policy. It re-runs both filters against an EMPTY base rather than
+// reusing the routing-path lists, because those filters skip models already in
+// excluded_models — so a model that is both policy-excluded AND over capacity
+// would be absent from the routing lists yet must still block usage bypass (it
+// would 400 on the subscription just as it would when routed). Returns nil when
+// neither filter fires.
+func (s *Service) safetyExcludedModels(env *translate.RequestEnvelope, outputReserve int) map[string]struct{} {
+	_, overflowed := excludeContextOverflowModels(env.ContextOverflowTokenEstimate(), env.SignatureTokenSavings(), outputReserve, nil, s.availableModels)
+	_, geminiUnsigned := excludeGemini3xOnUnsignedHistory(env, nil, s.availableModels)
+	if len(overflowed) == 0 && len(geminiUnsigned) == 0 {
 		return nil
 	}
-	out := make(map[string]struct{}, len(ctxOverflowed)+len(geminiUnsigned))
-	for _, m := range ctxOverflowed {
+	out := make(map[string]struct{}, len(overflowed)+len(geminiUnsigned))
+	for _, m := range overflowed {
 		out[m] = struct{}{}
 	}
 	for _, m := range geminiUnsigned {
@@ -2156,7 +2160,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		ClientSessionID:      env.ClientSessionID(),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excluded,
-		SafetyExcludedModels: safetyExcludedSet(ctxOverflowed, geminiUnsigned),
+		SafetyExcludedModels: s.safetyExcludedModels(env, outputReserve),
 		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	}
@@ -4227,7 +4231,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		ClientSessionID:      env.ClientSessionID(),
 		EnabledProviders:     enabledProviders,
 		ExcludedModels:       excludedOAI,
-		SafetyExcludedModels: safetyExcludedSet(ctxOverflowedOAI, geminiUnsignedOAI),
+		SafetyExcludedModels: s.safetyExcludedModels(env, outputReserveOAI),
 		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
 	}
