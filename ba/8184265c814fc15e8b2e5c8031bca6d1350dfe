@@ -25,6 +25,7 @@ internal/router/policy/arm_test.go
   s_0cb555d8dc2e1e::t_52fae39d4447fc 1-44
 internal/policyclient/client.go
   s_0cb555d8dc2e1e::t_64384c5ab21b06 280
+  s_0cb555d8dc2e1e::t_20a49e92cd5a44 363-366,379
 internal/router/router.go
   s_0cb555d8dc2e1e::t_1f2fb337301c1d 217-219
   s_0cb555d8dc2e1e::t_892ed15399907a 108-112
