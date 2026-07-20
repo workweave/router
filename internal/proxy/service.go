@@ -4148,6 +4148,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Snapshot the inbound tool-output size before any env rewrite (proactive
 	// compaction below, or runTurnLoop's switch handover); see toolResultBytesPtr.
 	inboundLastUser := env.LastUserMessage()
+	inboundToolCallCountOAI := len(env.AssistantToolCallSignatures())
 
 	// Proactive context-window compaction, as in ProxyMessages. Skipped for
 	// Codex passthrough bodies, which are forwarded verbatim.
@@ -4225,9 +4226,29 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(ctx, routeRes)
 
+	// Compaction-aware handover: same consumer as ProxyMessages. Detection runs
+	// pre-routing in runTurnLoop; routeRes.PrefixTrimmed carries the verdict.
+	// Skip when a model-switch handover already rewrote env, or when proactive
+	// maybeCompact already ran this turn (would false-positive and discard the
+	// recent-turn tail maybeCompact kept). Codex Responses passthrough bodies
+	// stay verbatim — do not rewrite them with a handover summary.
+	compactionHandoverRan := false
+	var compactionHandoverOutcome handoverOutcome
+	if !responsesPassthrough && decision.Provider != providers.ProviderAnthropic && !routeRes.HardPinned && !routeRes.Handover.Invoked && !compResOAI.Applied && routeRes.PrefixTrimmed {
+		log.Info("Context trimming detected on non-Anthropic route; rewriting context with handover summary",
+			"message_count", feats.MessageCount,
+			"tool_call_count", inboundToolCallCountOAI,
+			"decision_model", decision.Model,
+			"decision_provider", decision.Provider,
+		)
+		compactionHandoverOutcome = s.runCompactionHandover(ctx, env, r.Header, decision.Model)
+		compactionHandoverRan = true
+	}
+
 	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
 	// semantic cache (the key doesn't capture headroom-dependent model choice).
-	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !responsesPassthrough && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
+	// Skip when a compaction handover rewrote env (embedding predates the rewrite).
+	cacheEligible := s.semanticCache != nil && !env.Stream() && decision.Metadata != nil && externalID != "" && !bypassEval && !responsesPassthrough && !compactionHandoverRan && !billing.SubscriptionOnlyFromContext(ctx) && len(s.subsidyFactors(ctx, r.Header)) == 0
 	if cacheEligible {
 		if resp, hit := s.semanticCache.Lookup(externalID, cache.FormatOpenAI, decision.Metadata.Embedding, decision.Metadata.ClusterIDs, decision.Metadata.ClusterRouterVersion, decision.Metadata.EffectiveKnobsHash); hit {
 			s.writeCachedResponse(w, resp, decision)
@@ -4680,6 +4701,27 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 		if compResOAI.Summarized {
 			s.billCompactionSummary(ctx, requestID, externalID, compResOAI.SummaryUsage)
+		}
+		if compactionHandoverOutcome.Invoked && !compactionHandoverOutcome.FallbackToFullHistory {
+			sumUsage := compactionHandoverOutcome.SummaryUsage
+			if sumUsage.Model != "" && (sumUsage.InputTokens > 0 || sumUsage.OutputTokens > 0) {
+				sumPricing, _ := catalog.PrimaryPriceFor(sumUsage.Model)
+				apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
+				s.fireBilling(ctx, billing.DebitInferenceParams{
+					OrganizationID:  externalID,
+					RouterRequestID: requestID + "_compaction_summary",
+					Model:           sumUsage.Model,
+					Provider:        sumUsage.Provider,
+					InputTokens:     sumUsage.InputTokens,
+					OutputTokens:    sumUsage.OutputTokens,
+					CacheCreation:   sumUsage.CacheCreation,
+					CacheRead:       sumUsage.CacheRead,
+					Pricing:         sumPricing,
+					HasOverride:     billing.HasOverrideFromContext(ctx),
+					APIKeyID:        apiKeyID,
+					RouterUserID:    auth.UserIDFrom(ctx),
+				})
+			}
 		}
 	}
 

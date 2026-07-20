@@ -960,6 +960,167 @@ func TestTurnLoop_SubAgentDoesNotInheritMainLoopTrimBaseline(t *testing.T) {
 	assert.Equal(t, int32(0), sz.calls.Load())
 }
 
+// compactionHandoverAnchor is the stable first-user-message used by
+// TestService_CompactionHandover_OpenAIParityWithMessages so both turns share
+// one DeriveSessionKey and one compactionTracker bucket.
+const compactionHandoverAnchor = "ANCHOR-COMPACTION-TEST: refactor the dispatch loop"
+
+// compactionHandoverTurn builds an alternating user/assistant Anthropic body
+// with a fixed first user message (session-key stable).
+func compactionHandoverTurn(t *testing.T, msgCount int) []byte {
+	t.Helper()
+	require.True(t, msgCount%2 == 1, "odd msgCount keeps the trailing message a user turn")
+	msgs := make([]string, 0, msgCount)
+	for i := 0; i < msgCount; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, `{"role":"`+role+`","content":"compaction-handover turn `+itoa(i)+`"}`)
+	}
+	msgs[0] = `{"role":"user","content":"` + compactionHandoverAnchor + `"}`
+	return []byte(`{"model":"claude-opus-4-7","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
+}
+
+// compactionHandoverTurnOpenAI is the OpenAI chat/completions equivalent of
+// compactionHandoverTurn (same dialog shapes + same first-user anchor).
+func compactionHandoverTurnOpenAI(t *testing.T, msgCount int) []byte {
+	t.Helper()
+	require.True(t, msgCount%2 == 1, "odd msgCount keeps the trailing message a user turn")
+	msgs := make([]string, 0, msgCount+1)
+	msgs = append(msgs, `{"role":"system","content":"You are helpful."}`)
+	for i := 0; i < msgCount; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, `{"role":"`+role+`","content":"compaction-handover turn `+itoa(i)+`"}`)
+	}
+	msgs[1] = `{"role":"user","content":"` + compactionHandoverAnchor + `"}`
+	return []byte(`{"model":"gpt-4o","messages":[` + strings.Join(msgs, ",") + `]}`)
+}
+
+func openAICompatChatJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}`))
+}
+
+func anthropicMessagesJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}`))
+}
+
+// warmNonAnthropicPin keeps the planner on a non-Anthropic stay across both
+// turns so the post-routing compaction-handover consumer is eligible
+// (gated on decision.Provider != Anthropic). Pin model == fresh model so a
+// prefix-trim cold-pin free-switch still lands on the same decision.
+func warmNonAnthropicPin(provider, model string) sessionpin.Pin {
+	return sessionpin.Pin{
+		Provider:        provider,
+		Model:           model,
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 1500,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+}
+
+// TestService_CompactionHandover_OpenAIParityWithMessages asserts that a
+// client-side 9→3 history trim on a non-Anthropic STAY invokes
+// runCompactionHandover (counting stub summarizer) on both Messages and
+// OpenAI ingress. Regression for #791: OpenAI previously detected
+// PrefixTrimmed in runTurnLoop but never consumed it post-routing.
+func TestService_CompactionHandover_OpenAIParityWithMessages(t *testing.T) {
+	const (
+		orModel  = "deepseek/deepseek-chat"
+		oaiModel = "gpt-4o"
+	)
+
+	t.Run("Messages_invokes_summarizer_on_trim", func(t *testing.T) {
+		store := newFakePinStore()
+		store.hasPin = true
+		store.pin = warmNonAnthropicPin(providers.ProviderOpenRouter, orModel)
+		fr := &fakeRouter{decision: router.Decision{
+			Provider: providers.ProviderOpenRouter,
+			Model:    orModel,
+			Reason:   "cluster:v0.2",
+		}}
+		sz := &fakeSummarizer{summary: "Prior conversation summary."}
+		svc := proxy.NewService(
+			fr,
+			map[string]providers.Client{
+				providers.ProviderAnthropic:  &fakeProvider{proxyResponse: anthropicMessagesJSON},
+				providers.ProviderOpenRouter: &fakeProvider{proxyResponse: openAICompatChatJSON},
+			},
+			nil, false, nil, store, false,
+			providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+		).WithSummarizer(sz).
+			WithCompaction(nil, 0).
+			WithAvailableModels(map[string]struct{}{orModel: {}})
+
+		ctx := authedCtx(uuid.New().String())
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(ctx, compactionHandoverTurn(t, 9), rec1, req1))
+		require.Equal(t, orModel, rec1.Header().Get(proxy.HeaderRouterModel),
+			"turn 1 must stay on the non-Anthropic pin")
+		require.Equal(t, int32(0), sz.calls.Load(),
+			"first observation must not fire compaction handover")
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+		require.NoError(t, svc.ProxyMessages(ctx, compactionHandoverTurn(t, 3), rec2, req2))
+		require.Equal(t, orModel, rec2.Header().Get(proxy.HeaderRouterModel),
+			"turn 2 must stay on the non-Anthropic pin so handover is eligible")
+		assert.GreaterOrEqual(t, sz.calls.Load(), int32(1),
+			"Messages path must invoke the summarizer via runCompactionHandover on a 9→3 trim")
+	})
+
+	t.Run("OpenAI_invokes_summarizer_on_trim", func(t *testing.T) {
+		store := newFakePinStore()
+		store.hasPin = true
+		store.pin = warmNonAnthropicPin(providers.ProviderOpenAI, oaiModel)
+		fr := &fakeRouter{decision: router.Decision{
+			Provider: providers.ProviderOpenAI,
+			Model:    oaiModel,
+			Reason:   "cluster:v0.2",
+		}}
+		sz := &fakeSummarizer{summary: "Prior conversation summary."}
+		svc := proxy.NewService(
+			fr,
+			map[string]providers.Client{
+				providers.ProviderAnthropic: &fakeProvider{proxyResponse: anthropicMessagesJSON},
+				providers.ProviderOpenAI:    &fakeProvider{proxyResponse: openAICompatChatJSON},
+			},
+			nil, false, nil, store, false,
+			providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+		).WithSummarizer(sz).
+			WithCompaction(nil, 0).
+			WithAvailableModels(map[string]struct{}{oaiModel: {}})
+
+		ctx := authedCtx(uuid.New().String())
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+		require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, compactionHandoverTurnOpenAI(t, 9), rec1, req1))
+		require.Equal(t, oaiModel, rec1.Header().Get(proxy.HeaderRouterModel),
+			"turn 1 must stay on the non-Anthropic pin")
+		require.Equal(t, int32(0), sz.calls.Load(),
+			"first observation must not fire compaction handover")
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+		require.NoError(t, svc.ProxyOpenAIChatCompletion(ctx, compactionHandoverTurnOpenAI(t, 3), rec2, req2))
+		require.Equal(t, oaiModel, rec2.Header().Get(proxy.HeaderRouterModel),
+			"turn 2 must stay on the non-Anthropic pin so handover is eligible")
+		assert.GreaterOrEqual(t, sz.calls.Load(), int32(1),
+			"OpenAI path must invoke the summarizer via runCompactionHandover on a 9→3 trim (#791)")
+	})
+}
+
 // Runaway-tool-call escape hatch: when the prior turn saturated the output
 // cap, the pinned model is excluded and treated as missing before the scorer
 // runs. Without this, Claude Code's auto-continue locks the session into the
