@@ -76,9 +76,14 @@ key_spend AS (
     -- (the debit no-ops and the app sees ErrBalanceRowMissing) we must NOT bump
     -- the key's lifetime spend, or a capped key could trip its cap with no
     -- matching ledger debit.
-    UPDATE router.model_router_api_keys
+    -- Ownership: only bump a key whose installation's external_id matches the
+    -- org being debited (#796) — a mismatched api_key_id silently no-ops.
+    UPDATE router.model_router_api_keys k
     SET spent_usd_micros = spent_usd_micros - @delta_usd_micros::bigint
-    WHERE id = sqlc.narg('api_key_id')::uuid
+    FROM router.model_router_installations i
+    WHERE k.id = sqlc.narg('api_key_id')::uuid
+      AND k.installation_id = i.id
+      AND i.external_id = @organization_id::varchar
       AND EXISTS (SELECT 1 FROM updated)
 ),
 user_month_spend AS (
@@ -88,6 +93,8 @@ user_month_spend AS (
     -- Also no-ops when the user row no longer exists (stale cached id after a
     -- cascade delete mid-request) so a dangling FK can't roll back the debit
     -- after inference was already served.
+    -- Ownership: user must belong to an installation whose external_id matches
+    -- the org being debited (#796) — a mismatched router_user_id silently no-ops.
     INSERT INTO router.model_router_user_monthly_spend (router_user_id, month, spent_usd_micros, updated_at)
     SELECT
         sqlc.narg('router_user_id')::uuid,
@@ -97,8 +104,11 @@ user_month_spend AS (
     WHERE sqlc.narg('router_user_id')::uuid IS NOT NULL
       AND EXISTS (SELECT 1 FROM updated)
       AND EXISTS (
-          SELECT 1 FROM router.model_router_users
-          WHERE id = sqlc.narg('router_user_id')::uuid
+          SELECT 1
+          FROM router.model_router_users u
+          JOIN router.model_router_installations i ON i.id = u.installation_id
+          WHERE u.id = sqlc.narg('router_user_id')::uuid
+            AND i.external_id = @organization_id::varchar
       )
     ON CONFLICT (router_user_id, month) DO UPDATE
     SET spent_usd_micros = router.model_router_user_monthly_spend.spent_usd_micros + EXCLUDED.spent_usd_micros,
