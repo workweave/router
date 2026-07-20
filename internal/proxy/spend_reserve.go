@@ -9,9 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// ArmSpendReservations reserves all applicable spend caps in one transaction
-// before Proxy*. Shadow eval skips entirely — synthetic traffic must not consume
-// production spend budget (parity with billing middleware, #787).
+// ArmSpendReservations reserves applicable spend caps before Proxy*.
+// Shadow eval skips — synthetic traffic must not consume production budget.
 func (s *Service) ArmSpendReservations(ctx context.Context) (context.Context, func(), error) {
 	if s == nil || s.billing == nil {
 		return ctx, func() {}, nil
