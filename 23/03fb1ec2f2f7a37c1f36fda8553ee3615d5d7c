@@ -18,6 +18,8 @@ internal/router/policy/resolver.go
   s_0cb555d8dc2e1e::t_2d65029ae4bd0f 147-155,172-179,181,184-185
   s_0cb555d8dc2e1e::t_69c4f3a601058a 180
   s_0cb555d8dc2e1e::t_ad01e20960d9f7 182-183
+internal/router/policy/sidecar_router.go
+  s_0cb555d8dc2e1e::t_ca5bcbfbb6f34c 353-354
 ---
 {
   "schema_version": "authorship/3.0.0",
