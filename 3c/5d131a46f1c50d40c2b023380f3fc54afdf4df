@@ -1,0 +1,27 @@
+internal/api/openai/completions.go
+  s_d3fc1c517ba243::t_2bc8cf0e2435c8 80,84
+  s_d3fc1c517ba243::t_23e898d67cf14b 48
+  s_d3fc1c517ba243::t_b3d3e2b24b1639 69
+  s_d3fc1c517ba243::t_b21150ed7ba7f7 30,34
+internal/api/openai/responses.go
+  s_d3fc1c517ba243::t_18d6fddc628310 31,35
+  s_d3fc1c517ba243::t_89cffbc27ac2bc 70
+  s_d3fc1c517ba243::t_9f0dd25bd20863 49
+  s_d3fc1c517ba243::t_5445574e67482d 81,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3c5d131a46f1c50d40c2b023380f3fc54afdf4df",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

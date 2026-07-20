@@ -1,0 +1,55 @@
+internal/proxy/gemini.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-182
+cmd/router/main.go
+  s_b19420d3dd2686::t_3edadbbb25d611 224-233,235
+internal/server/server.go
+  s_b19420d3dd2686::t_3edadbbb25d611 11,112-116
+internal/translate/envelope_extras_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-237
+internal/proxy/gemini_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-39,41-72,74-85
+  s_b19420d3dd2686::t_24c1396fe5a3aa 40,73
+internal/proxy/session_route.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-185
+internal/translate/emit_gemini.go
+  s_b19420d3dd2686::t_3edadbbb25d611 13,26-48
+internal/router/turntype/detect.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-4,10,19,32-47,50,53,61-62,67-73,76,79-80
+internal/api/gemini/generate_content_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-68
+internal/router/turntype/detect_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 7,10,13,17,87-92,121-124,129-269
+internal/translate/gemini_envelope_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-176
+internal/proxy/service_session_pin_test.go
+  s_b19420d3dd2686::t_3edadbbb25d611 306-479
+internal/translate/features.go
+  s_b19420d3dd2686::t_3edadbbb25d611 34-35,88-91,95,100,107-257,322
+internal/translate/features_gemini.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-194
+internal/translate/envelope.go
+  s_b19420d3dd2686::t_3edadbbb25d611 34,71-81,111-115,136-141,143-150,155-188,191-193
+internal/api/gemini/generate_content.go
+  s_b19420d3dd2686::t_3edadbbb25d611 1-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "3b7ef47d2150d46c901ffcc29ede99df712c62bc",
+  "prompts": {},
+  "humans": {
+    "h_16c9377d4ebc00": {
+      "author": "steventohme <steven@workweave.ai>"
+    }
+  },
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,148 @@
+internal/proxy/usage/CLAUDE.md
+  s_14149f8f972376::t_c496f74c4cb59a 19
+docs/TRANSLATION_COMPATIBILITY.md
+  s_14149f8f972376::t_c496f74c4cb59a 1-40
+internal/translate/emit_gemini.go
+  s_14149f8f972376::t_c496f74c4cb59a 6,9-10,14,20-31,35-37,86-88,114-118,122-129,134,137,139-141,144,149,152-153,156,159-162,165-175,177-181,185,187-204,224-225,279-280,303,323-325,327-329,455,458,461-462,472,474,478-485,487,489,492-500,507-512,517,530-531,569-571,573-576,580,589,596,635-636,652,662,668,674-676,678-681,684,686-687,690,701,952,955,958-959,965,967,971-973,975-980,982,985-994,1001-1006,1011,1066-1067,1094-1096,1098-1101,1105,1114,1155-1167,1169-1173,1175-1189,1192,1274-1281,1284-1327,1329-1334,1337-1341,1343-1347,1349-1354,1357-1361,1363-1364,1366-1368,1370-1374,1376-1408,1411,1414-1422,1424-1452,1455-1456,1459-1484,1489-1495,1497,1499-1500,1502,1504-1507,1509-1512,1514,1516-1517,1519-1527,1529-1543,1546-1587,1589,1591-1593,1596,1599-1600,1602-1610,1612-1697,1700-1701,1703
+internal/translate/requirements.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-148
+internal/translate/tool_call_ledger.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-102
+internal/translate/responses_outbound_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 66-68,223,262,299-302,318-319,322-324,332-333,396-398,407-408,423
+internal/translate/force_effort_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 26,28-31,43-46
+internal/observability/apm/translation_metrics.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-60
+internal/proxy/conformance_responses_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 5,59-60,68
+internal/translate/cache_control.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-158
+internal/proxy/translation_plan_internal_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-168
+internal/proxy/testdata/conformance/responses/effort_medium_preserved.golden
+  s_14149f8f972376::t_c496f74c4cb59a 1-163
+internal/proxy/service.go
+  s_14149f8f972376::t_c496f74c4cb59a 54-59,900-916,931-941,1591-1595,1686-1696,2134-2143,2163-2165,2171,2186-2188,2194-2195,2199-2202,2207,3226-3234,3242,3249,3874,4111,4118-4119,4135,4210,4337,4349-4350,4357,4374,4392,4418,4420-4422,4427-4434,4458,4462,4761,4765-4769,4771-4774
+internal/proxy/service_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 35-38,48,56-103
+  s_14149f8f972376::t_87196e3fb0190c 104
+internal/proxy/CLAUDE.md
+  s_14149f8f972376::t_c496f74c4cb59a 36
+internal/proxy/dispatch_error.go
+  s_14149f8f972376::t_c496f74c4cb59a 40-41,98-114,203
+internal/translate/requirements_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-66
+internal/translate/strict_decode_emit_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 25-27
+internal/proxy/translation_plan.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-358
+internal/proxy/AGENTS.md
+  s_14149f8f972376::t_c496f74c4cb59a 36
+internal/providers/google/native_client_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 6,126-151
+  s_14149f8f972376::t_ecffe8213ca643 152
+internal/translate/fidelity_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-202
+internal/translate/reasoning.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-180
+internal/proxy/turnloop.go
+  s_14149f8f972376::t_c496f74c4cb59a 12-13,211-243,310-318,512-514,565-570,953-961
+internal/translate/emit_openai_responses.go
+  s_14149f8f972376::t_c496f74c4cb59a 52-53,66-67,69-74,79-80,125-134,136-137
+internal/translate/stream_incomplete_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-68
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 6,366,370-371,388,392-393,396-397,414,417-419,623-640
+  s_14149f8f972376::t_eb365f8956a39d 641-642
+internal/translate/gemini_stream.go
+  s_14149f8f972376::t_c496f74c4cb59a 28-35,59,117-118,124-131,133,135,186-194,284,288-293,308-313,332-337,393-414,416-417
+  s_14149f8f972376::t_e29701fdd754cc 415,418
+internal/translate/gemini_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 607-608,636-637,712-713,774-775,806-807,852-854,884,888,891-893,918,921,949-950,972-973
+internal/proxy/testdata/conformance/responses/invalid_toolcall.golden
+  s_14149f8f972376::t_c496f74c4cb59a 61-62
+internal/proxy/fallback.go
+  s_14149f8f972376::t_c496f74c4cb59a 72-73,490-496
+  s_14149f8f972376::t_85bd1d56d1f0e6 497-498
+internal/proxy/usage/AGENTS.md
+  s_14149f8f972376::t_c496f74c4cb59a 19
+internal/router/model.go
+  s_14149f8f972376::t_c496f74c4cb59a 3-6,25-34,51-88,116,119-120,124,130-131,203-207,220-230
+internal/proxy/conformance_gemini_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 58
+internal/translate/responses_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 97-126
+internal/config/config_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-26
+internal/proxy/usage_bypass_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 113-146,378-383,386,398-400
+internal/translate/stream_lifecycle_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-42
+internal/translate/stream_lifecycle.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-114
+internal/providers/provider.go
+  s_14149f8f972376::t_c496f74c4cb59a 425-459
+internal/proxy/gemini.go
+  s_14149f8f972376::t_c496f74c4cb59a 193-202,204-217,219-226
+internal/translate/emit_anthropic.go
+  s_14149f8f972376::t_c496f74c4cb59a 34-41,195,206,219,235,239,248,257,264,271-274,278-281,288-294,311,334,345-351
+  s_14149f8f972376::t_c7f13a322b54cf 352
+cmd/router/main.go
+  s_14149f8f972376::t_c496f74c4cb59a 63-66,108-114,686
+internal/proxy/gemini_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 57-80,105-149
+internal/proxy/usage_bypass.go
+  s_14149f8f972376::t_c496f74c4cb59a 9,22-23,25-26,30,37-38,42-47,55,58,61-77,80-81,85,87-88,94,96,98-99,101,108,111
+internal/translate/responses_response.go
+  s_14149f8f972376::t_c496f74c4cb59a 29-31,54
+internal/proxy/turnloop_internal_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 258-352
+internal/translate/responses_to_anthropic_writer.go
+  s_14149f8f972376::t_c496f74c4cb59a 94-95,116-117,206-208,223-233,266-276,329-336,353,369,372-374,376,384-386,395-397,567,645-648,651,745,779-791,1023-1027
+internal/proxy/dispatch_error_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 96-115
+.github/workflows/comment_length_review.yml
+  s_14149f8f972376::t_c496f74c4cb59a 42
+internal/providers/google/native_client.go
+  s_14149f8f972376::t_c496f74c4cb59a 118,121-135,138-139
+  s_14149f8f972376::t_1eaa29aa5e11fe 140
+docs/CONFIGURATION.md
+  s_14149f8f972376::t_c496f74c4cb59a 76
+internal/proxy/usage_bypass_internal_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 16,19,22,79-148
+  s_14149f8f972376::t_fb5b57463c1c38 149
+internal/translate/gemini_marker.go
+  s_14149f8f972376::t_c496f74c4cb59a 42-49
+internal/translate/tool_call_ledger_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 1-38
+internal/router/router.go
+  s_14149f8f972376::t_c496f74c4cb59a 6-59,99-104
+internal/translate/crossformat_request_test.go
+  s_14149f8f972376::t_c496f74c4cb59a 641-642,646-647,650,667-668
+internal/translate/stream.go
+  s_14149f8f972376::t_c496f74c4cb59a 42,55,101-111,164-172,191-198,205-210,254-256,278-280,290-292,323-325,366-373,520-521,542-543,723-725,779-787,790-798,851-859,866-877,906-908,927-929,1022-1024,1034-1036,1073-1076,1084-1086,1378-1385
+  s_14149f8f972376::t_73da8abb053ae0 1386
+internal/config/config.go
+  s_14149f8f972376::t_c496f74c4cb59a 7,10-21
+  s_14149f8f972376::t_b3899cd68326db 22
+internal/translate/responses.go
+  s_14149f8f972376::t_c496f74c4cb59a 15,21-40,56-57,60-69,72-82,86,92-93,110-120,123-125,140,144-146,149,201,203-204,209-210,266,268,352-353,400-401,492-494,523-525,546-547,549-553,555,557,589-593,617-625,632-634,639-641,685-691,712-714,734,742-743,751-754,757,807-819
+  s_14149f8f972376::t_eae56cdb8a18cd 820
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1e1374cc12ede39a781299b129653c4e59a300b6",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+internal/translate/stream.go
+  s_838f318952ec2a::t_fef3e66f9a1153 712
+  s_838f318952ec2a::t_ce87279c6481d3 402-437
+  s_838f318952ec2a::t_9ba627e98017bc 679
+  s_838f318952ec2a::t_10f8f76763e3b4 503-505
+  s_838f318952ec2a::t_885cc542187de7 356-369
+cmd/router/main.go
+  s_838f318952ec2a::t_42f806454cc5b0 536
+  s_838f318952ec2a::t_8d470dc91a1482 535
+internal/proxy/service.go
+  s_838f318952ec2a::t_a472380086a27b 4
+  s_838f318952ec2a::t_c337e92b0de5db 618-681
+  s_838f318952ec2a::t_4bc8177836702a 902-906,912
+  s_838f318952ec2a::t_e7644dc3926bf0 930-934,942
+  s_838f318952ec2a::t_aa777543402c57 105-110
+internal/translate/translate_test.go
+  s_838f318952ec2a::t_dbd9444c82189e 4
+  s_838f318952ec2a::t_479c41c0c7fb99 473-533
+scripts/repro-empty-response.sh
+  s_838f318952ec2a::t_355a6ba7143408 80
+  s_838f318952ec2a::t_9a9d87cc79260f 1-51,56-57,59-71,73-79,81-110
+  s_838f318952ec2a::t_62203d10fdd56c 52-55,58
+  s_838f318952ec2a::t_011f8ee7229818 72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "424c28287273b8e2c91dff782aa3b6250c5f5615",
+  "prompts": {},
+  "sessions": {
+    "s_838f318952ec2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "583af56d-abba-4520-9462-ee80e138da7c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

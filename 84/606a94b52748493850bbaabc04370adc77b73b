@@ -1,0 +1,44 @@
+internal/router/sessionpin/store.go
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 82-84
+internal/postgres/session_pin_repo.go
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 77
+internal/sqlc/session_pins.sql.go
+  s_d6e9d9ff2ee677::t_91fa2dfcf9e753 182-185
+  s_d6e9d9ff2ee677::t_5a54c4294a6aad 150,194
+  s_d6e9d9ff2ee677::t_57de2d0ee20e5f 151-155,164,195-199,207
+internal/proxy/turnloop_internal_test.go
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 111,131-135,141-143
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 5,13,549-553,556
+  s_d6e9d9ff2ee677::t_06691eeb84131e 638-650
+internal/translate/responses_to_anthropic_writer.go
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 795-798,815,1032-1036
+  s_d6e9d9ff2ee677::t_1d2845468b2e18 1024-1025
+  s_d6e9d9ff2ee677::t_eeafc51fd6f9e1 1037-1038
+db/queries/session_pins.sql
+  s_d6e9d9ff2ee677::t_1d2845468b2e18 96-97
+  s_d6e9d9ff2ee677::t_2c0cefbff08485 108
+  s_d6e9d9ff2ee677::t_1765a00cae4955 98-99
+internal/proxy/failover_integration_test.go
+  s_d6e9d9ff2ee677::t_35ba0ea1f53adf 14,284-334
+  s_d6e9d9ff2ee677::t_c8c9a3aa665f3a 335-336
+internal/proxy/service.go
+  s_d6e9d9ff2ee677::t_57de2d0ee20e5f 3194-3200,3252-3258
+  s_d6e9d9ff2ee677::t_7c9dff6aaf6b4a 3201,3259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "84606a94b52748493850bbaabc04370adc77b73b",
+  "prompts": {},
+  "sessions": {
+    "s_d6e9d9ff2ee677": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7118-1319-7f02-9c04-5766e409e87c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+internal/proxy/subscription_internal_test.go
+  s_95241084cc4056::t_b3b9416d8ce886 109-190
+cmd/router/main.go
+  s_95241084cc4056::t_18655fec356cff 207-210
+internal/server/middleware/auth.go
+  s_95241084cc4056::t_57ff82ce11613b 31-42
+  s_95241084cc4056::t_00d6e6fbe61f2a 136-144
+internal/proxy/credentials.go
+  s_95241084cc4056::t_41455c323227af 114-125
+  s_95241084cc4056::t_c076ad69b5e062 164-187
+  s_95241084cc4056::t_babf8862395059 26-29,35-39,41-44
+  s_95241084cc4056::t_c610f34a6c36c4 17-22
+internal/proxy/enabled_providers_internal_test.go
+  s_95241084cc4056::t_01c0983cd5a796 149-198
+internal/observability/otel/usage_test.go
+  s_95241084cc4056::t_7955a75433c36d 79-116
+internal/providers/openai/codex_internal_test.go
+  s_95241084cc4056::t_848e77558d2c0a 1-94
+internal/observability/otel/usage.go
+  s_95241084cc4056::t_e44b04f510cce4 255-259,271-283
+internal/proxy/credentials_test.go
+  s_95241084cc4056::t_016e81d54f8793 267-336
+internal/proxy/service.go
+  s_95241084cc4056::t_97e3c37fbc93b8 570-588
+  s_95241084cc4056::t_442579b0cf7720 196-203
+  s_95241084cc4056::t_09a46b7dc0ed48 2835-2839
+  s_95241084cc4056::t_21b7eb5d7f5c24 541-543,550-569
+  s_95241084cc4056::t_22c5e4646d2a2d 2871-2891,2908-2912
+  s_95241084cc4056::t_72447f155d5738 30
+  s_95241084cc4056::t_4dc710d528475d 2724
+  s_95241084cc4056::t_7866e24fb55842 2252-2269
+  s_95241084cc4056::t_e935447ba37a04 204-209
+  s_95241084cc4056::t_93c6c1ca91736c 2663-2673
+  s_95241084cc4056::t_62c1785eec87e6 3151-3161
+  s_95241084cc4056::t_7c62bd83c6bd2a 2159-2171
+internal/providers/openai/client.go
+  s_95241084cc4056::t_71dabaa02dedba 374
+  s_95241084cc4056::t_ab64a01c97a639 196,398
+  s_95241084cc4056::t_979716a6b50c07 26-30,40-53
+  s_95241084cc4056::t_33f656e38e200a 31-39
+  s_95241084cc4056::t_a5e4b683f34ac3 94-97
+  s_95241084cc4056::t_7c82ba864e940b 174
+  s_95241084cc4056::t_f5732883dacf2b 164-168,173,175-177,189-195
+  s_95241084cc4056::t_fa21ff7219f7f3 74-77
+  s_95241084cc4056::t_642dde03fb7cd7 368-371,373,375,394-397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "0ea10ec903e5b6f28e53acc1e3ad104571bd8ac5",
+  "prompts": {},
+  "sessions": {
+    "s_95241084cc4056": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbbdbe6a-260e-4a54-a444-863744ac2f0c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

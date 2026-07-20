@@ -1,0 +1,19 @@
+internal/api/admin/config.go
+  s_fa4a442294e030::t_1c85c084889900 13-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e26791af81dcf0c9e3cba97fda64fef168ecfcd3",
+  "prompts": {},
+  "sessions": {
+    "s_fa4a442294e030": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f58c034-3915-4752-9df1-c191b196a6c3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

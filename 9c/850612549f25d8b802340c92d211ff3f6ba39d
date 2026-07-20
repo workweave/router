@@ -1,0 +1,46 @@
+internal/proxy/unified_limit_capture_test.go
+  s_78d861ce362aaa::t_47941b4e67ee67 129-130
+  s_78d861ce362aaa::t_c6d49027c0d008 105-106
+  s_78d861ce362aaa::t_22dab4da924ff5 16
+internal/proxy/service.go
+  s_78d861ce362aaa::t_b51d269ba7f975 2169
+internal/proxy/unified_limit_capture.go
+  s_78d861ce362aaa::t_51473d96d3fa35 37-38
+  s_78d861ce362aaa::t_aecca092853923 13-15,17-22
+  s_78d861ce362aaa::t_b0b3e805209850 16
+  s_78d861ce362aaa::t_0f2a53aaec8527 30-31
+internal/proxy/telemetry.go
+  s_78d861ce362aaa::t_7a64c83b8d978e 126-127
+internal/proxy/subsidy.go
+  s_78d861ce362aaa::t_081d56449cf3a2 157-161
+internal/proxy/usage_bypass_internal_test.go
+  s_78d861ce362aaa::t_20ec3746b8d2ce 5
+  s_78d861ce362aaa::t_147d104cdfb2af 21
+  s_78d861ce362aaa::t_2ccf50eaed42c6 452-556
+  s_78d861ce362aaa::t_6a037aa4865e43 170,195,212,231,254,419
+internal/proxy/usage_bypass.go
+  s_78d861ce362aaa::t_c8fc820c0219a7 363-394,396-403,406-408
+  s_78d861ce362aaa::t_b55a384af06896 244
+  s_78d861ce362aaa::t_203ed9a09c5a29 12-13
+  s_78d861ce362aaa::t_147d104cdfb2af 21
+  s_78d861ce362aaa::t_3d930684c3165a 395
+  s_78d861ce362aaa::t_82cda72146cd32 404-405
+internal/proxy/usage/raw_headers.go
+  s_78d861ce362aaa::t_61e637cea5619a 16-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "9c850612549f25d8b802340c92d211ff3f6ba39d",
+  "prompts": {},
+  "sessions": {
+    "s_78d861ce362aaa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d83bc4f-4a28-42de-bca5-de8b8180f5c6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "munir-weave <munir@workweave.ai>"
+    }
+  }
+}

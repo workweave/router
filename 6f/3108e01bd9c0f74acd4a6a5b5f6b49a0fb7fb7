@@ -1,0 +1,24 @@
+internal/router/cluster/artifacts/v0.38/metadata.yaml
+  s_124bf81c6b9738::t_1a4429671b8385 29
+  s_124bf81c6b9738::t_00fa3658d469f3 30
+  s_124bf81c6b9738::t_39b90e1f47f9da 69
+install/install.sh
+  s_124bf81c6b9738::t_a6cdb5701832dd 622,624-625,660,662-663
+internal/router/pricing/pricing.go
+  s_124bf81c6b9738::t_24a9b79e1d941a 88-92,96
+  s_124bf81c6b9738::t_f2e14b10738d8c 94
+internal/router/cluster/artifacts/v0.38/model_registry.json
+  s_124bf81c6b9738::t_b957490e0c9c2e 20-21,25
+  s_124bf81c6b9738::t_29393fe6ecea58 23
+  s_124bf81c6b9738::t_5f3fb96f750535 3
+install/cc-statusline.sh
+  s_124bf81c6b9738::t_a6cdb5701832dd 164,166-167,202,204-205
+internal/router/capability/tier_test.go
+  s_124bf81c6b9738::t_c60124b6b431f4 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "6f3108e01bd9c0f74acd4a6a5b5f6b49a0fb7fb7",
+  "prompts": {}
+}

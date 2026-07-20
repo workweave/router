@@ -1,0 +1,33 @@
+internal/router/cluster/scorer.go
+  0d755795d2ad318b 23-30,256-279,282,285,289
+internal/api/anthropic/messages.go
+  0d755795d2ad318b 96-100
+internal/router/cluster/scorer_test.go
+  0d755795d2ad318b 468-557
+internal/proxy/service.go
+  0d755795d2ad318b 264,488-513,586
+internal/router/router.go
+  0d755795d2ad318b 15-21
+internal/api/openai/completions.go
+  0d755795d2ad318b 65-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "48941a1c379c0ca13446aa5f1ec80d7c24ea4af5",
+  "prompts": {
+    "0d755795d2ad318b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4359b286-e5bb-49f4-b406-383cf87ac60c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 206,
+      "total_deletions": 71,
+      "accepted_lines": 172,
+      "overriden_lines": 0
+    }
+  }
+}

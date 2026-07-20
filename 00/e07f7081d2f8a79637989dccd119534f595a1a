@@ -1,0 +1,66 @@
+internal/router/cluster/artifacts/v0.73/quality_means.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-449
+internal/router/catalog/family_test.go
+  s_aec95a8ffbca65::t_d1027c15798425 48-49
+  s_aec95a8ffbca65::t_5f5fae3e57ddea 1-47,50-115
+internal/router/cluster/artifacts/v0.73/metadata.yaml
+  s_aec95a8ffbca65::t_01fff37efd75b8 189-193
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 2-4,7-187,197-229
+  s_aec95a8ffbca65::t_c52be3e10ff71e 188,194-196
+  s_aec95a8ffbca65::t_aa780ade21efdf 1,5-6
+internal/router/cluster/artifacts/v0.73/rankings.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-455
+internal/router/catalog/family.go
+  s_aec95a8ffbca65::t_5ea1c5cdc12904 50
+  s_aec95a8ffbca65::t_abcde2f93aa3ac 11-13,16-20
+  s_aec95a8ffbca65::t_1499e0c334f687 1-7,9-10,15,21-36,38-49,51-103
+  s_aec95a8ffbca65::t_8be58c53f7eb33 8,14,37
+internal/router/cluster/artifacts/v0.73/model_registry.json
+  s_aec95a8ffbca65::t_f1f8113ceaf5be 3
+  s_aec95a8ffbca65::t_f4fc0a37a5a226 4-5
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-2,6-180
+internal/router/cluster/artifacts/v0.73/model_axes.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-230
+internal/router/cluster/artifacts_test.go
+  s_aec95a8ffbca65::t_c1c2f73eb10c49 229-245
+  s_aec95a8ffbca65::t_e9a64f0b639c04 225-228
+  s_aec95a8ffbca65::t_1b49bb2dc4d7b5 7
+internal/router/cluster/artifacts/v0.73/model_features.json
+  s_aec95a8ffbca65::t_e2fdf2fff4d86d 1-578
+internal/router/cluster/artifacts/v0.71-rerank/metadata.yaml
+  s_6ac53b8de8c1dc::t_e34676e9b537dd 1-221
+internal/router/cluster/artifacts/v0.71-rerank/model_axes.json
+  s_6ac53b8de8c1dc::t_98eb2f28daed8e 1-214
+internal/router/cluster/artifacts/v0.71-rerank/model_features.json
+  s_6ac53b8de8c1dc::t_bd168111dae61c 1-535
+internal/router/cluster/artifacts/v0.71-rerank/model_registry.json
+  s_6ac53b8de8c1dc::t_268cda719c03e7 1-185
+internal/router/cluster/artifacts/v0.71-rerank/quality_means.json
+  s_6ac53b8de8c1dc::t_5788b4562d42e4 1-428
+internal/router/cluster/artifacts/v0.71-rerank/rankings.json
+  s_6ac53b8de8c1dc::t_b115f560771d94 1-432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "00e07f7081d2f8a79637989dccd119534f595a1a",
+  "prompts": {},
+  "sessions": {
+    "s_6ac53b8de8c1dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2aad668b-ef69-498d-b1eb-8c906cf85738",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": null
+    }
+  }
+}
