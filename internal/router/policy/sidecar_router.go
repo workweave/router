@@ -274,6 +274,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 	}
 	requestRouteID := uuid.NewString()
 	res, err := r.decider.Decide(ctx, Query{
+		SchemaVersion:        r.resolver.SchemaVersion(),
 		Strategy:             strategy,
 		ExecutionMode:        executionMode,
 		RouteID:              requestRouteID,
@@ -362,6 +363,9 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 			SidecarSchemaVersion:          res.SchemaVersion,
 			DebugRef:                      debugRef,
 			AuthoritativePerTurnSelection: capabilities.AuthoritativePerTurnSelection,
+			SelectedUpstreamID:            binding.UpstreamID,
+			BindingIndex:                  binding.BindingIndex,
+			CandidateArmIDs:               resolved.CandidateArmIDs(),
 		},
 	}, nil
 }

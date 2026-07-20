@@ -51,17 +51,41 @@ func ResolveBinding(id string, available map[string]struct{}) (ProviderBinding, 
 // is in `available`, in catalog order. Used by the proxy's failover loop:
 // index 0 is primary, indexes >0 are ordered fallbacks.
 func AvailableBindings(id string, available map[string]struct{}) []ProviderBinding {
+	indexed := EnumerateBindings(id, available)
+	out := make([]ProviderBinding, 0, len(indexed))
+	for _, binding := range indexed {
+		out = append(out, binding.ProviderBinding)
+	}
+	return out
+}
+
+// IndexedBinding identifies a provider binding by its stable catalog order.
+type IndexedBinding struct {
+	Index int
+	ProviderBinding
+}
+
+// EnumerateBindings returns every enabled binding in stable catalog order.
+func EnumerateBindings(id string, available map[string]struct{}) []IndexedBinding {
 	m, ok := ByID(id)
 	if !ok {
 		return nil
 	}
-	out := make([]ProviderBinding, 0, len(m.Providers))
-	for _, b := range m.Providers {
+	out := make([]IndexedBinding, 0, len(m.Providers))
+	for index, b := range m.Providers {
 		if _, ok := available[b.Provider]; ok {
-			out = append(out, b)
+			out = append(out, IndexedBinding{Index: index, ProviderBinding: b})
 		}
 	}
 	return out
+}
+
+// UpstreamIDFor returns the upstream model ID for a catalog binding.
+func UpstreamIDFor(catalogID, bindingID string) string {
+	if bindingID != "" {
+		return bindingID
+	}
+	return catalogID
 }
 
 // PriceFor returns the per-(provider, model) pricing.

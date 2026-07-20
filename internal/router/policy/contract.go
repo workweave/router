@@ -9,6 +9,10 @@ import (
 // SchemaVersionV1 is the first stable policy-sidecar wire contract.
 const SchemaVersionV1 = "policy_router_v1"
 
+// SchemaVersionV2 identifies sidecar requests that carry configuration-level
+// arm identities and require arm-aware selection when a roster is ambiguous.
+const SchemaVersionV2 = "policy_router_v2"
+
 const (
 	ExecutionModeServing = "serving"
 	ExecutionModeShadow  = "shadow"
@@ -47,6 +51,7 @@ type StrategySpec struct {
 
 // Query contains the strategy-neutral request context supplied to a policy.
 type Query struct {
+	SchemaVersion        string
 	Strategy             router.Strategy
 	ExecutionMode        string
 	RouteID              string

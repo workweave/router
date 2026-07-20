@@ -106,6 +106,7 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.True(t, decision.Metadata.AuthoritativePerTurnSelection)
 	assert.Empty(t, decision.Metadata.DebugRef)
 	assert.Equal(t, strategy, decider.query.Strategy)
+	assert.Equal(t, policy.SchemaVersionV1, decider.query.SchemaVersion)
 	assert.Equal(t, policy.ExecutionModeServing, decider.query.ExecutionMode)
 	assert.Equal(t, "org-1", decider.query.OrganizationID)
 	assert.Equal(t, "cursor", decider.query.ClientApp)
@@ -150,6 +151,7 @@ func TestSidecarRouterDispatchesSidecarSelectedArm(t *testing.T) {
 	assert.Equal(t, selected.CatalogID, decision.Model)
 	assert.Equal(t, selected.Provider, decision.Provider)
 	assert.Equal(t, selected.ArmID, decision.Metadata.SelectedArmID)
+	assert.Equal(t, policy.SchemaVersionV2, decider.query.SchemaVersion)
 }
 
 func TestSidecarRouterMarksShadowDecisionsNonLearning(t *testing.T) {

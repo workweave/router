@@ -678,6 +678,21 @@ func TestResolveBindingsForDispatch(t *testing.T) {
 		assert.Equal(t, "fireworks", bs[0].Provider, "catalog order: fireworks primary")
 		assert.Equal(t, "openrouter", bs[1].Provider, "catalog order: openrouter fallback")
 	})
+	t.Run("selected temporal arm is first dispatch attempt", func(t *testing.T) {
+		s := &Service{deploymentKeyedProviders: map[string]struct{}{"fireworks": {}, "openrouter": {}}}
+		bs := s.resolveBindingsForDispatch(context.Background(), router.Decision{
+			Model:    "deepseek/deepseek-v4-pro",
+			Provider: "openrouter",
+			Metadata: &router.RoutingMetadata{
+				SelectedArmID:      "tq_arm_selected",
+				SelectedUpstreamID: "deepseek/deepseek-v4-pro",
+				BindingIndex:       3,
+			},
+		})
+		require.GreaterOrEqual(t, len(bs), 2)
+		assert.Equal(t, "openrouter", bs[0].Provider)
+		assert.Equal(t, "fireworks", bs[1].Provider)
+	})
 	t.Run("single-binding Anthropic model returns one binding even with multiple keys wired", func(t *testing.T) {
 		s := &Service{deploymentKeyedProviders: map[string]struct{}{"anthropic": {}, "openrouter": {}}}
 		bs := s.resolveBindingsForDispatch(context.Background(), router.Decision{Model: "claude-opus-4-7", Provider: "anthropic"})

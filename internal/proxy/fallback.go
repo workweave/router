@@ -386,7 +386,11 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 		available = filtered
 	}
 	_, primaryExcluded := excluded[decision.Provider]
-	bindings := catalog.AvailableBindings(decision.Model, available)
+	indexedBindings := catalog.EnumerateBindings(decision.Model, available)
+	bindings := make([]catalog.ProviderBinding, 0, len(indexedBindings))
+	for _, binding := range indexedBindings {
+		bindings = append(bindings, binding.ProviderBinding)
+	}
 	if len(bindings) == 0 {
 		if primaryExcluded {
 			// Decision names an excluded provider with no other bindings (a
@@ -400,6 +404,18 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 			}
 		}
 		return []catalog.ProviderBinding{primary}
+	}
+	if decision.Metadata != nil && decision.Metadata.SelectedArmID != "" {
+		bindings, found := prioritizeSelectedArmBinding(
+			indexedBindings,
+			decision.Model,
+			decision.Provider,
+			decision.Metadata.SelectedUpstreamID,
+			decision.Metadata.BindingIndex,
+		)
+		if found {
+			return bindings
+		}
 	}
 	if len(bindings) == 1 && !primaryExcluded {
 		return []catalog.ProviderBinding{primary}
@@ -420,6 +436,35 @@ func (s *Service) resolveBindingsForDispatch(ctx context.Context, decision route
 		return out
 	}
 	return bindings
+}
+
+func prioritizeSelectedArmBinding(
+	bindings []catalog.IndexedBinding,
+	catalogID string,
+	provider string,
+	upstreamID string,
+	bindingIndex int,
+) ([]catalog.ProviderBinding, bool) {
+	ordered := make([]catalog.ProviderBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.Index != bindingIndex || binding.Provider != provider {
+			continue
+		}
+		if catalog.UpstreamIDFor(catalogID, binding.UpstreamID) != upstreamID {
+			return nil, false
+		}
+		ordered = append(ordered, binding.ProviderBinding)
+		break
+	}
+	if len(ordered) == 0 {
+		return nil, false
+	}
+	for _, binding := range bindings {
+		if binding.Index != bindingIndex {
+			ordered = append(ordered, binding.ProviderBinding)
+		}
+	}
+	return ordered, true
 }
 
 // flushBufferedIfPresent writes an *UpstreamErrorResponse through to the

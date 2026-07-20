@@ -1,0 +1,109 @@
+package policy
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+	"strings"
+
+	"workweave/router/internal/router"
+)
+
+const catalogModelRevision = "catalog-v1"
+
+// ArmIdentity is the complete immutable identity of one dispatchable temporal-Q
+// action. It intentionally mirrors temporal_q.ids.make_arm_id.
+type ArmIdentity struct {
+	CanonicalModel               string `json:"canonical_model"`
+	Endpoint                     string `json:"endpoint"`
+	ModelRevision                string `json:"model_revision"`
+	Provider                     string `json:"provider"`
+	ReasoningConfigurationSHA256 string `json:"reasoning_configuration_sha256"`
+	ToolConfigurationSHA256      string `json:"tool_configuration_sha256"`
+	UpstreamID                   string `json:"upstream_id"`
+}
+
+// ArmContext identifies request-scoped compatibility settings that affect a
+// dispatched model action.
+type ArmContext struct {
+	Endpoint                     string
+	ModelRevision                string
+	ReasoningConfigurationSHA256 string
+	ToolConfigurationSHA256      string
+}
+
+// MakeArmID returns a deterministic cross-language identity for an arm.
+func MakeArmID(identity ArmIdentity) string {
+	payload, err := json.Marshal(identity)
+	if err != nil {
+		panic("marshal temporal-Q arm identity: " + err.Error())
+	}
+	sum := sha256.Sum256(payload)
+	return "tq_arm_" + hex.EncodeToString(sum[:])
+}
+
+// DeriveArmContext derives a privacy-safe action context from router-visible
+// request configuration. Ingress may provide stronger hashes; the fallback
+// only uses normalized routing metadata.
+func DeriveArmContext(req router.Request) ArmContext {
+	context := ArmContext{
+		Endpoint:                     string(req.TranslationRequirements.Endpoint),
+		ModelRevision:                catalogModelRevision,
+		ReasoningConfigurationSHA256: req.ReasoningConfigurationSHA256,
+		ToolConfigurationSHA256:      req.ToolConfigurationSHA256,
+	}
+	if context.Endpoint == "" {
+		context.Endpoint = "unknown"
+	}
+	if context.ReasoningConfigurationSHA256 == "" {
+		context.ReasoningConfigurationSHA256 = hashReasoningConfiguration(req)
+	}
+	if context.ToolConfigurationSHA256 == "" {
+		context.ToolConfigurationSHA256 = hashToolConfiguration(req)
+	}
+	return context
+}
+
+func hashReasoningConfiguration(req router.Request) string {
+	forceEffort := ""
+	if req.RoutingKnobs != nil {
+		forceEffort = strings.ToLower(strings.TrimSpace(req.RoutingKnobs.ForceEffort))
+	}
+	payload := struct {
+		ForceEffort        string `json:"force_effort"`
+		ReasoningReplay    bool   `json:"reasoning_replay"`
+		ReasoningSignature bool   `json:"reasoning_signature"`
+	}{
+		ForceEffort:        forceEffort,
+		ReasoningReplay:    req.TranslationRequirements.ReasoningReplay,
+		ReasoningSignature: req.TranslationRequirements.ReasoningSignature,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic("marshal temporal-Q reasoning configuration: " + err.Error())
+	}
+	return sha256Bytes(encoded)
+}
+
+func hashToolConfiguration(req router.Request) string {
+	tools := append([]string(nil), req.AvailableTools...)
+	sort.Strings(tools)
+	payload := struct {
+		HasTools bool     `json:"has_tools"`
+		Tools    []string `json:"tools"`
+	}{
+		HasTools: req.HasTools,
+		Tools:    tools,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic("marshal temporal-Q tool configuration: " + err.Error())
+	}
+	return sha256Bytes(encoded)
+}
+
+func sha256Bytes(encoded []byte) string {
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}

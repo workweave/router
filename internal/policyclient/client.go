@@ -291,7 +291,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		}
 		return policy.Result{}, fmt.Errorf("policy sidecar status %d", resp.StatusCode)
 	}
-	if parsed.SchemaVersion != "" && parsed.SchemaVersion != policy.SchemaVersionV1 {
+	if parsed.SchemaVersion != "" && parsed.SchemaVersion != policy.SchemaVersionV1 && parsed.SchemaVersion != policy.SchemaVersionV2 {
 		return policy.Result{}, fmt.Errorf("unsupported policy route schema %q", parsed.SchemaVersion)
 	}
 	selectedModel := firstNonEmpty(parsed.SelectedRosterID, parsed.Model)
@@ -374,6 +374,10 @@ func (c *Client) Preview(ctx context.Context, query policy.Query) (policy.Previe
 }
 
 func marshalRouteRequest(query policy.Query) ([]byte, error) {
+	schemaVersion := query.SchemaVersion
+	if schemaVersion == "" {
+		schemaVersion = policy.SchemaVersionV1
+	}
 	models := make([]string, 0, len(query.Candidates))
 	providerMap := make(map[string]string, len(query.Candidates))
 	for _, candidate := range query.Candidates {
@@ -411,7 +415,7 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 		trainingDelta = trainingRouteMessageDelta(query.ConversationMessages)
 	}
 	body, err := json.Marshal(routeRequest{
-		SchemaVersion:             policy.SchemaVersionV1,
+		SchemaVersion:             schemaVersion,
 		Strategy:                  string(query.Strategy),
 		ExecutionMode:             query.ExecutionMode,
 		RouteID:                   query.RouteID,

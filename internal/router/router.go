@@ -105,7 +105,12 @@ type Request struct {
 	// ingress. Routing implementations must not turn their empty result into
 	// an incompatible fallback pool.
 	TranslationRequirements TranslationRequirements
-	PromptText              string
+	// ReasoningConfigurationSHA256 and ToolConfigurationSHA256 are
+	// privacy-safe ingress hashes of the request semantics that constrain an
+	// arm. They never contain raw request content.
+	ReasoningConfigurationSHA256 string
+	ToolConfigurationSHA256      string
+	PromptText                   string
 	// ConversationMessages is provider-neutral visible history for sidecar
 	// routers that need multi-turn context.
 	ConversationMessages []ConversationMessage
@@ -239,6 +244,9 @@ type RoutingMetadata struct {
 	PolicyArtifactSHA256 string
 	RosterVersion        string
 	SelectedArmID        string
+	SelectedUpstreamID   string
+	BindingIndex         int
+	CandidateArmIDs      []string
 	SidecarSchemaVersion string
 	DebugRef             string
 	// AuthoritativePerTurnSelection means downstream orchestration may retry
