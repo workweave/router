@@ -560,6 +560,26 @@ func routingKnobsForRequest(ctx context.Context) *router.Overrides {
 	return nil
 }
 
+// safetyExcludedSet collects the request-time safety exclusions (context-window
+// overflow and gemini-unsigned-history) into a set. These are hard constraints a
+// model cannot satisfy on any credential, distinct from the installation's
+// configured excluded_models routing policy. The usage-bypass gate consults this
+// set so opting into pass-through overrides policy exclusions but never a hard
+// safety filter. Returns nil when neither filter fired.
+func safetyExcludedSet(ctxOverflowed, geminiUnsigned []string) map[string]struct{} {
+	if len(ctxOverflowed) == 0 && len(geminiUnsigned) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(ctxOverflowed)+len(geminiUnsigned))
+	for _, m := range ctxOverflowed {
+		out[m] = struct{}{}
+	}
+	for _, m := range geminiUnsigned {
+		out[m] = struct{}{}
+	}
+	return out
+}
+
 // excludedModelsForRequest returns the request's model exclusion set.
 // Env override wins; otherwise the installation list is converted to a set.
 func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
@@ -2131,13 +2151,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		OrganizationID:          externalID,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
-		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
-		FeedbackRole:     roleForTier(catalog.TierFor(feats.Model)),
-		ClientSessionID:  env.ClientSessionID(),
-		EnabledProviders: enabledProviders,
-		ExcludedModels:   excluded,
-		PreferredModels:  s.preferredModelsForRequest(ctx),
-		RoutingKnobs:     routingKnobsForRequest(ctx),
+		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
+		FeedbackRole:         roleForTier(catalog.TierFor(feats.Model)),
+		ClientSessionID:      env.ClientSessionID(),
+		EnabledProviders:     enabledProviders,
+		ExcludedModels:       excluded,
+		SafetyExcludedModels: safetyExcludedSet(ctxOverflowed, geminiUnsigned),
+		PreferredModels:      s.preferredModelsForRequest(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	}
 	if installationID != uuid.Nil {
 		req.InstallationID = installationID.String()
@@ -4201,13 +4222,14 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		AvailableTools:       availableToolsForRouting(env),
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.
-		FeedbackKey:      hex.EncodeToString(sessionKey[:]),
-		FeedbackRole:     roleForTier(catalog.TierFor(feats.Model)),
-		ClientSessionID:  env.ClientSessionID(),
-		EnabledProviders: enabledProviders,
-		ExcludedModels:   excludedOAI,
-		PreferredModels:  s.preferredModelsForRequest(ctx),
-		RoutingKnobs:     routingKnobsForRequest(ctx),
+		FeedbackKey:          hex.EncodeToString(sessionKey[:]),
+		FeedbackRole:         roleForTier(catalog.TierFor(feats.Model)),
+		ClientSessionID:      env.ClientSessionID(),
+		EnabledProviders:     enabledProviders,
+		ExcludedModels:       excludedOAI,
+		SafetyExcludedModels: safetyExcludedSet(ctxOverflowedOAI, geminiUnsignedOAI),
+		PreferredModels:      s.preferredModelsForRequest(ctx),
+		RoutingKnobs:         routingKnobsForRequest(ctx),
 	}
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)

@@ -84,7 +84,14 @@ func (s *Service) usageBypassEngaged(ctx context.Context, headers http.Header, r
 			return "", false
 		}
 	}
-	if _, excluded := req.ExcludedModels[model]; excluded {
+	// Consult only the safety-exclusion subset (context-overflow, gemini-unsigned),
+	// not the full ExcludedModels union. The installation's configured
+	// excluded_models is a routing-preference policy the caller can override by
+	// opting into usage bypass ("strict pass-through until low"); serving their
+	// own subscription for a deprioritized model costs the router nothing and is
+	// exactly what the bypass toggle promises. A hard safety exclusion still
+	// disengages the gate — that model can't accept this request on any credential.
+	if _, excluded := req.SafetyExcludedModels[model]; excluded {
 		return "", false
 	}
 	if token == "" {

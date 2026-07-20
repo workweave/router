@@ -174,17 +174,23 @@ func TestUsageBypass_NoSubscription_EngagesRouting(t *testing.T) {
 	assert.Equal(t, 1, fr.routeCalls, "no subscription credential means nothing to bypass onto — scorer must run")
 }
 
-// TestUsageBypass_ExcludedModel_EngagesRouting: a model on the installation's
-// deny list must force routing even under threshold, so the bypass can't serve
-// a policy-blocked model.
-func TestUsageBypass_ExcludedModel_EngagesRouting(t *testing.T) {
-	svc, fr, _ := bypassFixture(t, 0.20)
+// TestUsageBypass_InstallationExcludedModel_StillBypasses: the installation's
+// configured excluded_models is a routing-preference policy, not a hard block.
+// A caller who opted into usage bypass ("strict pass-through until low") must be
+// served on their own subscription for the requested model even when that model
+// is on the installation deny list — serving their own quota costs the router
+// nothing, and honoring the exclusion here would silently burn credits on a
+// substituted model, which is exactly the bug this guards against.
+func TestUsageBypass_InstallationExcludedModel_StillBypasses(t *testing.T) {
+	svc, fr, p := bypassFixture(t, 0.20)
 	svc = svc.WithExcludedModelsOverride([]string{bypassRequestedMdl})
 	rec, req, body := bypassRequest(t)
 
 	require.NoError(t, svc.ProxyMessages(bypassCtx(0.80), body, rec, req))
 
-	assert.Equal(t, 1, fr.routeCalls, "an excluded requested model must force routing even under threshold")
+	assert.Equal(t, 0, fr.routeCalls, "an installation-excluded model must still bypass — the exclusion is a routing preference, not a hard block")
+	require.Len(t, p.proxyBodies, 1, "the requested model must be dispatched to the subscription exactly once")
+	assert.Equal(t, bypassRequestedMdl, rec.Header().Get("x-router-model"), "bypass must serve the requested model, not a substituted one")
 }
 
 // TestUsageBypass_ToolResult_BeatsStalePin: a session that previously routed

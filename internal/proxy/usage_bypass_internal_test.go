@@ -108,6 +108,67 @@ func TestUsageBypassDecision_CodexSubscriptionPreservesRequestedModel(t *testing
 	}, decision)
 }
 
+// TestUsageBypassEngaged_SafetyExclusionBlocks_PolicyExclusionDoesNot pins the
+// exclusion contract of the bypass gate: the installation's configured
+// excluded_models (carried in ExcludedModels) must NOT block bypass, but a hard
+// safety exclusion (context-overflow / gemini-unsigned, carried in
+// SafetyExcludedModels) MUST. The both-excluded case is the load-bearing one —
+// a model on the installation deny list that ALSO can't fit the context window
+// must stay blocked, because it would 400 on the subscription just as it would
+// when routed.
+func TestUsageBypassEngaged_SafetyExclusionBlocks_PolicyExclusionDoesNot(t *testing.T) {
+	const token = "sk-ant-oat01-test-subscription-token"
+	const model = "claude-sonnet-4-6"
+	threshold := 0.80
+	newObs := func() *usage.Observer {
+		obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+		obs.Record(obs.Key([]byte(token)), usage.Snapshot{
+			Primary: usage.Window{UsedPercent: 0.20, WindowMinutes: 300},
+		})
+		return obs
+	}
+	baseCtx := func() context.Context {
+		ctx := context.WithValue(context.Background(), AnthropicSubscriptionContextKey{}, token)
+		return context.WithValue(ctx, InstallationUsageBypassContextKey{}, UsageBypassConfig{
+			Enabled:   true,
+			Threshold: &threshold,
+		})
+	}
+	enabled := map[string]struct{}{providers.ProviderAnthropic: {}}
+
+	t.Run("installation excluded_models does not block bypass", func(t *testing.T) {
+		svc := &Service{usageObserver: newObs()}
+		provider, ok := svc.usageBypassEngaged(baseCtx(), http.Header{}, router.Request{
+			RequestedModel:   model,
+			EnabledProviders: enabled,
+			ExcludedModels:   map[string]struct{}{model: {}},
+		})
+		assert.True(t, ok, "an installation-excluded model must still bypass under threshold")
+		assert.Equal(t, providers.ProviderAnthropic, provider)
+	})
+
+	t.Run("safety exclusion blocks bypass", func(t *testing.T) {
+		svc := &Service{usageObserver: newObs()}
+		_, ok := svc.usageBypassEngaged(baseCtx(), http.Header{}, router.Request{
+			RequestedModel:       model,
+			EnabledProviders:     enabled,
+			SafetyExcludedModels: map[string]struct{}{model: {}},
+		})
+		assert.False(t, ok, "a safety-excluded model (context overflow / gemini-unsigned) must block bypass")
+	})
+
+	t.Run("both excluded: safety exclusion still blocks", func(t *testing.T) {
+		svc := &Service{usageObserver: newObs()}
+		_, ok := svc.usageBypassEngaged(baseCtx(), http.Header{}, router.Request{
+			RequestedModel:       model,
+			EnabledProviders:     enabled,
+			ExcludedModels:       map[string]struct{}{model: {}},
+			SafetyExcludedModels: map[string]struct{}{model: {}},
+		})
+		assert.False(t, ok, "a model that is both policy- and safety-excluded must stay blocked — it would 400 on the subscription too")
+	})
+}
+
 func TestUsageBypass_PreservesSwitchHistory(t *testing.T) {
 	const token = "sk-ant-oat01-test-subscription-token"
 	threshold := 0.80
