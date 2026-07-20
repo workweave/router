@@ -73,6 +73,27 @@ func TestArmResolverEnumeratesEachAllowedProviderBinding(t *testing.T) {
 	}
 }
 
+func TestArmResolverRejectsRosterOnlySelectionForThreeBindings(t *testing.T) {
+	resolver := policy.NewArmResolver(
+		set("deepseek/deepseek-v4-pro"),
+		set(
+			providers.ProviderMakora,
+			providers.ProviderTogether,
+			providers.ProviderFireworks,
+			providers.ProviderOpenRouter,
+		),
+		func(catalog.Model) string { return "shared/arm" },
+		policy.ProviderPolicy{},
+	)
+
+	resolved := resolver.Resolve(router.Request{})
+
+	require.Len(t, resolved.Candidates, 4)
+	assert.Empty(t, resolved.ByRosterID)
+	_, ok := resolved.BindingForSelection("", "shared/arm")
+	assert.False(t, ok)
+}
+
 func TestResolverAppliesHardFiltersAndPreferenceRanks(t *testing.T) {
 	resolver := policy.NewResolver(
 		set("claude-opus-4-8", "gpt-5.5"),

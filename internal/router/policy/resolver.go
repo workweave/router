@@ -321,6 +321,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		ByRosterID:  make(map[string]Binding, len(base)),
 		Diagnostics: diagnostics,
 	}
+	ambiguousRosterIDs := make(map[string]struct{})
 	for _, candidate := range base {
 		if selectionCounts[candidate.ArmID] > 1 {
 			resolved.Diagnostics = append(resolved.Diagnostics, Diagnostic{
@@ -343,10 +344,14 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			ToolConfigurationSHA256:      candidate.ToolConfigurationSHA256,
 		}
 		resolved.ByArmID[candidate.ArmID] = binding
+		if _, ambiguous := ambiguousRosterIDs[candidate.RosterID]; ambiguous {
+			continue
+		}
 		if _, exists := resolved.ByRosterID[candidate.RosterID]; !exists {
 			resolved.ByRosterID[candidate.RosterID] = binding
 		} else {
 			delete(resolved.ByRosterID, candidate.RosterID)
+			ambiguousRosterIDs[candidate.RosterID] = struct{}{}
 		}
 	}
 	return resolved
