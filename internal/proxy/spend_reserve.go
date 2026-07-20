@@ -10,11 +10,8 @@ import (
 )
 
 // ArmSpendReservations reserves all applicable spend caps in one transaction
-// after identity is on ctx and before Proxy*. Returns a release func for
-// defer (no-ops after DebitForInference settles). Nil billing is a no-op.
-// Agent-shadow evaluation traffic skips entirely (no reservation, no gate),
-// matching the billing middleware skips from #787 — synthetic eval must not
-// consume production spend budget.
+// before Proxy*. Shadow eval skips entirely — synthetic traffic must not consume
+// production spend budget (parity with billing middleware, #787).
 func (s *Service) ArmSpendReservations(ctx context.Context) (context.Context, func(), error) {
 	if s == nil || s.billing == nil {
 		return ctx, func() {}, nil

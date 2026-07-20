@@ -404,9 +404,8 @@ func decrementReservedForScope(ctx context.Context, q *sqlc.Queries, scopeKind, 
 	}
 }
 
-// utcNow is the clock for reservation month bucketing. Tests override it to
-// prove Ensure/Bump/Insert share one Go-computed month even when Postgres
-// NOW() would land in a different UTC month.
+// utcNow is the clock for reservation month bucketing; tests override it so
+// Ensure/Bump/Insert share one Go-computed month even across a UTC midnight.
 var utcNow = time.Now
 
 func utcMonthDate() pgtype.Date {

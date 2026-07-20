@@ -9,9 +9,8 @@ import (
 	"workweave/router/internal/observability"
 )
 
-// checkUserMonthlySpendLimit is retained for unit tests and as a read-only
-// helper. Request-path enforcement uses billing.ArmSpendReservations (combined
-// reserve of org/key/user caps) in API handlers before Proxy*.
+// checkUserMonthlySpendLimit is retained for unit tests only; request-path
+// enforcement moved to ArmSpendReservations in API handlers.
 func (s *Service) checkUserMonthlySpendLimit(ctx context.Context) error {
 	if s.billing == nil {
 		return nil

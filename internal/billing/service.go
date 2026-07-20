@@ -275,9 +275,7 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 	return balanceAfter, nil
 }
 
-// ReserveApplicableCaps reserves every applicable spend cap (org monthly,
-// api-key lifetime, user monthly) in one transaction. Returns a SpendHold
-// (possibly with empty IDs when no caps apply). Billing override skips all.
+// ReserveApplicableCaps reserves all applicable caps in one TX. Billing override skips all.
 func (s *Service) ReserveApplicableCaps(ctx context.Context, organizationID, apiKeyID, routerUserID, requestID string) (*SpendHold, error) {
 	if s == nil || s.repo == nil {
 		return &SpendHold{}, nil
@@ -315,9 +313,8 @@ func (s *Service) SweepExpiredReservations(ctx context.Context, now time.Time) (
 	return s.repo.SweepExpiredSpendReservations(ctx, now)
 }
 
-// ArmSpendReservations reserves applicable caps and returns a release func
-// for defer. Call after identity is resolved and before Proxy*. The release
-// func no-ops after a successful DebitForInference (MarkSettled).
+// ArmSpendReservations reserves applicable caps and returns a defer-safe release func
+// that no-ops once MarkSettled is called by DebitForInference.
 func (s *Service) ArmSpendReservations(ctx context.Context, organizationID, apiKeyID, routerUserID, requestID string) (context.Context, func(), error) {
 	if s == nil {
 		return ctx, func() {}, nil

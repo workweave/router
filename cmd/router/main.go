@@ -1390,10 +1390,8 @@ func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
 	}
 }
 
-// runSpendReservationSweep releases expired spend-cap reservations every
-// minute. Stuck reserved incorrectly blocks spend, so this is much more
-// aggressive than the session-pin GC. Every replica runs its own ticker;
-// DELETE … RETURNING is idempotent across replicas.
+// runSpendReservationSweep releases expired spend reservations every minute.
+// Stuck reserved headroom incorrectly blocks spend; DELETE … RETURNING is idempotent across replicas.
 func runSpendReservationSweep(ctx context.Context, svc *billing.Service) {
 	logger := observability.Get()
 	ticker := time.NewTicker(1 * time.Minute)
