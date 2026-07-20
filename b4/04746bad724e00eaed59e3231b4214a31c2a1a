@@ -1,0 +1,19 @@
+.github/workflows/publish_npm.yml
+  s_4ad267093efaa5::t_6d1297d3861a44 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "b404746bad724e00eaed59e3231b4214a31c2a1a",
+  "prompts": {},
+  "sessions": {
+    "s_4ad267093efaa5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f0f6d10d-31dd-47b4-b7af-5a28449ce986",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

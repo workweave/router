@@ -1,0 +1,21 @@
+internal/policyclient/auth_test.go
+  s_a81d8efc38ee57::t_7dd186ef97aea7 69-99
+internal/policyclient/auth.go
+  s_a81d8efc38ee57::t_7dd186ef97aea7 6,15-16,18-20,33-52,56-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "2b6af7443174a2bf48a5d95ef6834f41cfad7eb8",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

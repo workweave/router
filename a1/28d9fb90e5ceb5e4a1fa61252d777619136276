@@ -1,0 +1,30 @@
+internal/auth/service.go
+  s_31c42848655666::t_0682235b033e57 100-126
+internal/server/server.go
+  s_31c42848655666::t_f47105ef994563 90
+frontend/src/lib/api.ts
+  s_31c42848655666::t_8595198080f16e 153-157
+frontend/src/app/(app)/settings/page.tsx
+  s_31c42848655666::t_7106ab0f7c8286 100,104,109-114,118-125,132,146-163,165-168
+  s_31c42848655666::t_ee2a54dea020b4 215-247,249,252,257-258,262,270-290,296,298
+  s_31c42848655666::t_c87d593d864471 18
+internal/api/admin/keys.go
+  s_31c42848655666::t_203b5f14215a7f 64-68,75-86,95-98,104-121
+  s_31c42848655666::t_d9433fa665a0e8 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a128d9fb90e5ceb5e4a1fa61252d777619136276",
+  "prompts": {},
+  "sessions": {
+    "s_31c42848655666": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "313f0d67-15b7-431a-8c69-c0d98360b5b4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

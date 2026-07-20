@@ -1,0 +1,37 @@
+frontend/src/components/ResponsiveGrid/index.ts
+  s_b19420d3dd2686::t_c6d1712f4c577c 1
+frontend/src/components/molecules/Button/index.ts
+  s_b19420d3dd2686::t_3c6690a0b0f004 1
+frontend/src/components/atoms/Kbd/index.ts
+  s_b19420d3dd2686::t_e06bc47db34d2b 1
+frontend/src/components/DashboardPageFilters/index.ts
+  s_b19420d3dd2686::t_c785cfb8a718b7 1-2
+frontend/src/components/molecules/Card/index.ts
+  s_b19420d3dd2686::t_ca23d9d7a72404 1
+frontend/src/components/molecules/Tooltip/index.ts
+  s_b19420d3dd2686::t_2da255c8dab0eb 1
+frontend/src/components/Page/index.ts
+  s_b19420d3dd2686::t_077929cecce787 1
+frontend/src/components/PageHeader/index.ts
+  s_b19420d3dd2686::t_6442af32ccea59 1
+frontend/src/components/molecules/Command/index.ts
+  s_b19420d3dd2686::t_ae266b1387db06 1
+frontend/src/components/molecules/Popover/index.ts
+  s_b19420d3dd2686::t_1b3ff15b811a5b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6ea158aeac3e224bba90a67fa79245f6008dc553",
+  "prompts": {},
+  "sessions": {
+    "s_b19420d3dd2686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24be8415-a425-4b0d-916e-5c4cbe1ca9f9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

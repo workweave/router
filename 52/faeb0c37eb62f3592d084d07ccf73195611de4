@@ -1,0 +1,33 @@
+internal/router/catalog/catalog.go
+  s_e0d782d7352f9d::t_3f392923e7b437 186-192
+install/install.sh
+  s_e0d782d7352f9d::t_cb28640cff348d 688
+  s_e0d782d7352f9d::t_85cb723142179f 1964,2016
+  s_e0d782d7352f9d::t_356bd400a06c9e 595
+install/cc-statusline.sh
+  s_e0d782d7352f9d::t_85cb723142179f 132,184
+internal/translate/translate.go
+  s_e0d782d7352f9d::t_2d71f5f005cc12 131-134
+internal/proxy/force_model.go
+  s_e0d782d7352f9d::t_1ade560a87c584 40-43
+internal/router/model.go
+  s_e0d782d7352f9d::t_b332c889744afb 74-77
+internal/observability/otel/pricing_test.go
+  s_e0d782d7352f9d::t_3671d636b055e4 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "52faeb0c37eb62f3592d084d07ccf73195611de4",
+  "prompts": {},
+  "sessions": {
+    "s_e0d782d7352f9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47439573-f58f-49ec-bee2-52c2c8311ac6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+internal/server/server.go
+  44f8aeec331db047 25,68-78
+cmd/router/main.go
+  663b5dd12e1f7f48 108,433-434,438,446-447,455
+internal/api/anthropic/route.go
+  44f8aeec331db047 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "9586edf3d835a0b61a92353a373c4903d764764c",
+  "prompts": {
+    "44f8aeec331db047": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2497e777-6a8f-45a4-886d-0915ffcc2896",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 298,
+      "overriden_lines": 3
+    },
+    "663b5dd12e1f7f48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "41869338-409a-4a5e-8e1a-a6888a00ccd9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 45,
+      "total_deletions": 15,
+      "accepted_lines": 7,
+      "overriden_lines": 2
+    }
+  },
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  }
+}

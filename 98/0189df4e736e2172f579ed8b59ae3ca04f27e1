@@ -1,0 +1,21 @@
+install/cc-statusline.sh
+  s_d3fc1c517ba243::t_b6bc8277afb0de 3
+install/install.sh
+  s_d3fc1c517ba243::t_0b858b7f8373e6 1835
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "980189df4e736e2172f579ed8b59ae3ca04f27e1",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

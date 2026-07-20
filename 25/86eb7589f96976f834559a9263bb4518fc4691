@@ -1,0 +1,21 @@
+internal/translate/handover.go
+  s_345838d581d61d::t_acc349cd6d203a 99
+  s_345838d581d61d::t_dff00b981050c6 307
+  s_345838d581d61d::t_50c283d44fd2f2 207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "2586eb7589f96976f834559a9263bb4518fc4691",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
