@@ -2,10 +2,8 @@ package proxy
 
 import (
 	"context"
-	"errors"
 
 	"workweave/router/internal/auth"
-	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
 
 	"github.com/google/uuid"
@@ -35,12 +33,6 @@ func (s *Service) ArmSpendReservations(ctx context.Context) (context.Context, fu
 			"organization_id", orgID,
 			"router_user_id", userID,
 		)
-		// Preserve sentinel identity for ClassifyDispatchError.
-		if errors.Is(err, billing.ErrOrgMonthlySpendLimitReached) ||
-			errors.Is(err, billing.ErrAPIKeySpendCapReached) ||
-			errors.Is(err, billing.ErrUserMonthlySpendLimitReached) {
-			return ctx, nil, err
-		}
 		return ctx, nil, err
 	}
 	return ctx, release, nil
