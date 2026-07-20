@@ -9,6 +9,7 @@ import (
 	"workweave/router/internal/router/sessionpin"
 	"workweave/router/internal/sqlc"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -24,11 +25,12 @@ func NewSessionPinRepo(tx sqlc.DBTX) *SessionPinRepo {
 
 var _ sessionpin.Store = (*SessionPinRepo)(nil)
 
-func (r *SessionPinRepo) Get(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
+func (r *SessionPinRepo) Get(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID) (sessionpin.Pin, bool, error) {
 	q := sqlc.New(r.tx)
 	row, err := q.GetSessionPin(ctx, sqlc.GetSessionPinParams{
-		SessionKey: sessionKey[:],
-		Role:       role,
+		SessionKey:     sessionKey[:],
+		Role:           role,
+		InstallationID: installationID,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -56,9 +58,10 @@ func (r *SessionPinRepo) Upsert(ctx context.Context, p sessionpin.Pin) error {
 }
 
 // UpdateUsage records the previous turn's usage on the pin row. A missing
-// pin (evicted/swept/never created) is a no-op, not an error. A zero
-// EndedAt is stamped with time.Now so the column is always populated.
-func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, usage sessionpin.Usage) error {
+// pin (evicted/swept/never created) or ownership mismatch is a no-op, not
+// an error. A zero EndedAt is stamped with time.Now so the column is always
+// populated.
+func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID, usage sessionpin.Usage) error {
 	endedAt := usage.EndedAt
 	if endedAt.IsZero() {
 		endedAt = time.Now()
@@ -67,6 +70,7 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 	return q.UpdateSessionPinUsage(ctx, sqlc.UpdateSessionPinUsageParams{
 		SessionKey:            sessionKey[:],
 		Role:                  role,
+		InstallationID:        installationID,
 		LastInputTokens:       int32(usage.InputTokens),
 		LastCachedReadTokens:  int32(usage.CachedReadTokens),
 		LastCachedWriteTokens: int32(usage.CachedWriteTokens),
@@ -79,13 +83,15 @@ func (r *SessionPinRepo) UpdateUsage(ctx context.Context, sessionKey [sessionpin
 }
 
 // IncrementUpstreamErrors atomically bumps the consecutive-error counter.
-// A missing pin (already evicted or never created) returns (0, nil): the
-// two-strike check treats it as a no-op since there's no row left to evict.
-func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (int, error) {
+// A missing pin (already evicted, never created, or ownership mismatch)
+// returns (0, nil): the two-strike check treats it as a no-op since there's
+// no row left to evict.
+func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID) (int, error) {
 	q := sqlc.New(r.tx)
 	count, err := q.IncrementSessionPinUpstreamErrors(ctx, sqlc.IncrementSessionPinUpstreamErrorsParams{
-		SessionKey: sessionKey[:],
-		Role:       role,
+		SessionKey:     sessionKey[:],
+		Role:           role,
+		InstallationID: installationID,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -97,12 +103,14 @@ func (r *SessionPinRepo) IncrementUpstreamErrors(ctx context.Context, sessionKey
 }
 
 // ResetUpstreamErrors clears the consecutive-error counter after a
-// successful turn. Missing pin is a no-op, same as UpdateUsage.
-func (r *SessionPinRepo) ResetUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) error {
+// successful turn. Missing pin / ownership mismatch is a no-op, same as
+// UpdateUsage.
+func (r *SessionPinRepo) ResetUpstreamErrors(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID) error {
 	q := sqlc.New(r.tx)
 	return q.ResetSessionPinUpstreamErrors(ctx, sqlc.ResetSessionPinUpstreamErrorsParams{
-		SessionKey: sessionKey[:],
-		Role:       role,
+		SessionKey:     sessionKey[:],
+		Role:           role,
+		InstallationID: installationID,
 	})
 }
 

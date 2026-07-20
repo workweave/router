@@ -281,7 +281,7 @@ func (s *Service) runTurnLoop(
 	threadSessionKey := DeriveSessionKey(env, apiKeyID)
 	hardPinnedTurn := s.isHardPinnedTurn(ctx, res.TurnType)
 	if s.pinStore != nil && hardPinnedTurn {
-		if forcedPin, found := s.loadPin(ctx, threadSessionKey, res.PinRole); found &&
+		if forcedPin, found := s.loadPin(ctx, threadSessionKey, res.PinRole, installationID); found &&
 			isUserForcedReason(forcedPin.Reason) && forcedPinEligible(forcedPin, req) {
 			res.SessionKey = threadSessionKey
 			res.PinModel = forcedPin.Model
@@ -384,8 +384,8 @@ func (s *Service) runTurnLoop(
 
 	res.SessionKey = sessionKey
 
-	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole)
-	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole)
+	pin, pinFound := s.loadPin(ctx, res.SessionKey, res.PinRole, installationID)
+	hmmHistory := s.loadHMMHistory(ctx, res.SessionKey, res.PinRole, installationID)
 	res.PriorServedModel, res.SessionEverSwitched = switchHistoryFromPins(pin, hmmHistory)
 	// Computed before any same-turn pin-drop guards below so it reflects the
 	// prior turn's outcome; Service.effortEscalation gates whether it's acted on.
@@ -1050,10 +1050,12 @@ func roleForTier(t catalog.Tier) string {
 // loadPin returns the stored pin and whether it may actively serve this turn.
 // Expired rows are misses for routing, but their history fields still protect
 // Anthropic emit from stale thinking-block signatures in the client transcript.
-func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool) {
+// An installation_id mismatch is treated as not-found (defense-in-depth for
+// #796); callers then fall through to the same miss path as an absent pin.
+func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID) (sessionpin.Pin, bool) {
 	log := observability.FromContext(ctx)
 	log.Debug("loadPin called", "role", role, "session_key_hex", fmt.Sprintf("%x", sessionKey))
-	pin, found, err := s.pinStore.Get(ctx, sessionKey, role)
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, role, installationID)
 	if err != nil {
 		log.Error("session pin store unavailable; falling through to cluster scorer", "err", err)
 		return sessionpin.Pin{}, false
@@ -1067,9 +1069,9 @@ func (s *Service) loadPin(ctx context.Context, sessionKey [sessionpin.SessionKey
 	return pin, true
 }
 
-func (s *Service) loadHMMHistory(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string) sessionpin.Pin {
+func (s *Service) loadHMMHistory(ctx context.Context, sessionKey [sessionpin.SessionKeyLen]byte, role string, installationID uuid.UUID) sessionpin.Pin {
 	log := observability.FromContext(ctx)
-	pin, found, err := s.pinStore.Get(ctx, sessionKey, hmmHistoryRole(role))
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, hmmHistoryRole(role), installationID)
 	if err != nil {
 		log.Error("HMM switch-history store unavailable", "err", err)
 		return sessionpin.Pin{}

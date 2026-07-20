@@ -51,7 +51,7 @@ func newFakePinStore() *fakePinStore {
 	}
 }
 
-func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
+func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) (sessionpin.Pin, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls++
@@ -87,7 +87,7 @@ func (f *fakePinStore) Upsert(ctx context.Context, p sessionpin.Pin) error {
 	return nil
 }
 
-func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, usage sessionpin.Usage) error {
+func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID, usage sessionpin.Usage) error {
 	f.mu.Lock()
 	f.usages = append(f.usages, usage)
 	f.mu.Unlock()
@@ -98,7 +98,7 @@ func (f *fakePinStore) UpdateUsage(ctx context.Context, key [sessionpin.SessionK
 	return nil
 }
 
-func (f *fakePinStore) IncrementUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) (int, error) {
+func (f *fakePinStore) IncrementUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.incrementCalls++
@@ -108,7 +108,7 @@ func (f *fakePinStore) IncrementUpstreamErrors(ctx context.Context, key [session
 	return f.incrementReturns, nil
 }
 
-func (f *fakePinStore) ResetUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) error {
+func (f *fakePinStore) ResetUpstreamErrors(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resetCalls++

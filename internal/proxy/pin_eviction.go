@@ -140,7 +140,7 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 	if proxyErr == nil {
 		// context.Background(): the request ctx is already canceled by the
 		// time streaming finishes, but this reset must still go through.
-		if err := s.pinStore.ResetUpstreamErrors(context.Background(), sessionKey, role); err != nil {
+		if err := s.pinStore.ResetUpstreamErrors(context.Background(), sessionKey, role, installationID); err != nil {
 			log.Error("pin error-counter reset failed", "err", err, "role", role)
 		}
 		return
@@ -156,7 +156,7 @@ func (s *Service) maybeEvictPinAfterUpstreamErr(
 		return
 	}
 
-	count, err := s.pinStore.IncrementUpstreamErrors(context.Background(), sessionKey, role)
+	count, err := s.pinStore.IncrementUpstreamErrors(context.Background(), sessionKey, role, installationID)
 	if err != nil {
 		log.Error("pin error-counter increment failed", "err", err, "role", role, "upstream_status", status)
 		return

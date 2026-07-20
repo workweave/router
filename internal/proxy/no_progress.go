@@ -262,7 +262,7 @@ func (s *Service) handleNoProgressBreak(
 	log := observability.FromContext(ctx)
 	preserveForcedPin := false
 	if s.pinStore != nil && installationID != uuid.Nil && sessionKey != ([sessionpin.SessionKeyLen]byte{}) {
-		pin, found := s.loadPin(ctx, sessionKey, role)
+		pin, found := s.loadPin(ctx, sessionKey, role, installationID)
 		preserveForcedPin = found && isUserForcedReason(pin.Reason)
 	}
 	pinAction := "clearing the session pin so the next message re-routes"

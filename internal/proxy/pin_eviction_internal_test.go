@@ -27,7 +27,7 @@ type evictionStubPinStore struct {
 	upserts        []sessionpin.Pin
 }
 
-func (s *evictionStubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string) (sessionpin.Pin, bool, error) {
+func (s *evictionStubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (sessionpin.Pin, bool, error) {
 	return sessionpin.Pin{}, false, nil
 }
 
@@ -38,11 +38,11 @@ func (s *evictionStubPinStore) Upsert(_ context.Context, p sessionpin.Pin) error
 	return nil
 }
 
-func (s *evictionStubPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, sessionpin.Usage) error {
+func (s *evictionStubPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID, sessionpin.Usage) error {
 	return nil
 }
 
-func (s *evictionStubPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (s *evictionStubPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.incrementCalls++
@@ -54,7 +54,7 @@ func (s *evictionStubPinStore) IncrementUpstreamErrors(context.Context, [session
 	return v, nil
 }
 
-func (s *evictionStubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (s *evictionStubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resetCalls++

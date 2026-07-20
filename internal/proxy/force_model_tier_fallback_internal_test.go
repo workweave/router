@@ -49,20 +49,20 @@ type forcedPinStore struct {
 	pin sessionpin.Pin
 }
 
-func (s *forcedPinStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
+func (s *forcedPinStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) (sessionpin.Pin, bool, error) {
 	p := s.pin
 	p.SessionKey = key
 	p.Role = role
 	return p, true, nil
 }
 func (s *forcedPinStore) Upsert(context.Context, sessionpin.Pin) error { return nil }
-func (s *forcedPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, sessionpin.Usage) error {
+func (s *forcedPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID, sessionpin.Usage) error {
 	return nil
 }
-func (s *forcedPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (s *forcedPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (s *forcedPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (s *forcedPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	return nil
 }
 func (s *forcedPinStore) SweepExpired(context.Context) error { return nil }
@@ -72,7 +72,7 @@ type overwritingPinStore struct {
 	found bool
 }
 
-func (s *overwritingPinStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
+func (s *overwritingPinStore) Get(_ context.Context, key [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID) (sessionpin.Pin, bool, error) {
 	if !s.found {
 		return sessionpin.Pin{}, false, nil
 	}
@@ -87,13 +87,13 @@ func (s *overwritingPinStore) Upsert(_ context.Context, p sessionpin.Pin) error 
 	s.found = true
 	return nil
 }
-func (s *overwritingPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, sessionpin.Usage) error {
+func (s *overwritingPinStore) UpdateUsage(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID, sessionpin.Usage) error {
 	return nil
 }
-func (s *overwritingPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (s *overwritingPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (s *overwritingPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (s *overwritingPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	return nil
 }
 func (s *overwritingPinStore) SweepExpired(context.Context) error { return nil }

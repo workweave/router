@@ -33,7 +33,7 @@ func newStubPinStore() *stubPinStore {
 	return &stubPinStore{}
 }
 
-func (s *stubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string) (sessionpin.Pin, bool, error) {
+func (s *stubPinStore) Get(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (sessionpin.Pin, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.getPin, s.getFound, nil
@@ -49,7 +49,7 @@ func (s *stubPinStore) Upsert(_ context.Context, p sessionpin.Pin) error {
 	return nil
 }
 
-func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLen]byte, role string, u sessionpin.Usage) error {
+func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLen]byte, role string, _ uuid.UUID, u sessionpin.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastUsage = u
@@ -58,11 +58,11 @@ func (s *stubPinStore) UpdateUsage(_ context.Context, _ [sessionpin.SessionKeyLe
 	return nil
 }
 
-func (s *stubPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) (int, error) {
+func (s *stubPinStore) IncrementUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) (int, error) {
 	return 0, nil
 }
 
-func (s *stubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string) error {
+func (s *stubPinStore) ResetUpstreamErrors(context.Context, [sessionpin.SessionKeyLen]byte, string, uuid.UUID) error {
 	return nil
 }
 
@@ -970,7 +970,7 @@ func TestLoadPin_DoesNotServeExpiredPostgresPinButKeepsEmitHistory(t *testing.T)
 	}
 	store.getFound = true
 
-	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole)
+	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole, uuid.Nil)
 	assert.False(t, found, "expired Postgres row must not be served")
 	assert.Equal(t, "claude-opus-4-7", pin.LastServedModel, "expired row history must be available for emit")
 	assert.True(t, pin.HasEverSwitched, "expired row latch must be available for emit")
@@ -1015,7 +1015,7 @@ func TestLoadPin_ServesFreshPostgresPin(t *testing.T) {
 	}
 	store.getFound = true
 
-	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole)
+	pin, found := svc.loadPin(context.Background(), sessionKey, sessionpin.DefaultRole, uuid.Nil)
 	require.True(t, found, "non-expired Postgres row must be returned")
 	assert.Equal(t, "claude-opus-4-7", pin.Model)
 	assert.Equal(t, "anthropic", pin.Provider)

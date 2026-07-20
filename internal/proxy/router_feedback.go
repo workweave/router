@@ -80,7 +80,7 @@ func (s *Service) handleRouterFeedbackCommand(
 	// last served, falling back to the pin's target model.
 	var servedModel string
 	if s.pinStore != nil {
-		if pin, found, err := s.pinStore.Get(ctx, sessionKey, role); err != nil {
+		if pin, found, err := s.pinStore.Get(ctx, sessionKey, role, installationID); err != nil {
 			log.Error("/router-feedback: pin lookup failed", "err", err)
 		} else if found {
 			servedModel = pin.LastServedModel
