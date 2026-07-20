@@ -1,0 +1,32 @@
+internal/router/router.go
+  s_fda934ac21796f::t_eef00625c80d8c 27,31
+  s_fda934ac21796f::t_83d456b6a02fdc 28-30
+internal/router/banditexplore/explorer.go
+  s_fda934ac21796f::t_83d456b6a02fdc 66-68
+internal/proxy/service.go
+  s_fda934ac21796f::t_eef00625c80d8c 2091,4063
+  s_fda934ac21796f::t_83d456b6a02fdc 1998,3969
+internal/proxy/service_session_pin_test.go
+  s_fda934ac21796f::t_83d456b6a02fdc 1156-1157
+internal/router/banditexplore/explorer_test.go
+  s_fda934ac21796f::t_83d456b6a02fdc 80-97
+internal/proxy/force_model.go
+  s_fda934ac21796f::t_83d456b6a02fdc 202,211,219,228
+  s_fda934ac21796f::t_9bc9fadfc3ae71 199,212-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2448da3acb4f9656613f189c1d3e15e5e631f54d",
+  "prompts": {},
+  "sessions": {
+    "s_fda934ac21796f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f688b-f842-7c60-8992-04920a608980",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+db/migrations/0001_init.up.sql
+  s_545b5c23565088::t_69fa592cfd08ae 3-13,16-19,22,27,30-31,33-34,37-44,48,59-61,64,69-72,76-225
+db/migrations/0001_init.down.sql
+  s_545b5c23565088::t_bce89fea98d257 2-19,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f81f3c2294e4e1360fb86e66b859a8b6994068d6",
+  "prompts": {},
+  "sessions": {
+    "s_545b5c23565088": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "882fea91-b847-43e0-8bea-504b2d7a0b5c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

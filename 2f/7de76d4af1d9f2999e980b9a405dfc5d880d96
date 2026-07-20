@@ -1,0 +1,50 @@
+internal/proxy/router_feedback_proxy_test.go
+  s_1d4b0f522bc37f::t_c1784c3cd41fd8 250,270,274-278,282
+internal/router/hmm/hmm_test.go
+  s_1d4b0f522bc37f::t_4b1e6c20b85bd2 106-123
+internal/router/hmm/hmm.go
+  s_1d4b0f522bc37f::t_d240561208ea6d 31-36,40
+internal/proxy/service.go
+  s_1d4b0f522bc37f::t_a0a0bea0074270 1646
+cmd/router/policy_sidecars_test.go
+  s_1d4b0f522bc37f::t_4b1e6c20b85bd2 75
+internal/proxy/turnloop.go
+  s_1d4b0f522bc37f::t_a0a0bea0074270 121,167
+internal/policyclient/client_test.go
+  s_1d4b0f522bc37f::t_4b1e6c20b85bd2 51,86
+internal/router/strategy.go
+  s_1d4b0f522bc37f::t_d240561208ea6d 26-29,36-40
+  s_1d4b0f522bc37f::t_d1391594edac4b 41
+internal/policyclient/client.go
+  s_1d4b0f522bc37f::t_d240561208ea6d 248
+internal/server/middleware/router_strategy_override_test.go
+  s_1d4b0f522bc37f::t_4b1e6c20b85bd2 59-63
+internal/proxy/router_feedback.go
+  s_1d4b0f522bc37f::t_a0a0bea0074270 121,200
+internal/router/strategy_test.go
+  s_1d4b0f522bc37f::t_c1784c3cd41fd8 1-14
+cmd/router/policy_sidecars.go
+  s_1d4b0f522bc37f::t_7d53c71e26c331 26-28,30
+  s_1d4b0f522bc37f::t_d240561208ea6d 29
+internal/server/middleware/router_strategy_override.go
+  s_1d4b0f522bc37f::t_d240561208ea6d 31-36
+cmd/router/main.go
+  s_1d4b0f522bc37f::t_45fc80794ae651 607,628-634,644,655-663,665,709-710
+  s_1d4b0f522bc37f::t_22979d34b51e5d 711-712
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2f7de76d4af1d9f2999e980b9a405dfc5d880d96",
+  "prompts": {},
+  "sessions": {
+    "s_1d4b0f522bc37f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f721c-5455-78d2-8ddf-bcc0b1e2c551",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+internal/policyclient/client_test.go
+  s_181299bbd674e9::t_a367f637fcec76 138-183
+  s_181299bbd674e9::t_202fd1f71b0113 10
+internal/policyclient/client.go
+  s_181299bbd674e9::t_a367f637fcec76 23-26,39,44-46,48,50,259-261,263,312-364
+  s_181299bbd674e9::t_c6e6a627d66953 22
+  s_181299bbd674e9::t_9af327103b51e9 365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5d7f0144d04eb76499e73e9e1a0862e82d7a44be",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

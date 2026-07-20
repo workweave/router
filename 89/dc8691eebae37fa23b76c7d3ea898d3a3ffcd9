@@ -1,0 +1,19 @@
+internal/proxy/service.go
+  s_0ec32d14caf17e::t_ec7e8bd3496b50 4283-4284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "89dc8691eebae37fa23b76c7d3ea898d3a3ffcd9",
+  "prompts": {},
+  "sessions": {
+    "s_0ec32d14caf17e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f2ef114-0da3-4256-81ea-16f0a83d52b1",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

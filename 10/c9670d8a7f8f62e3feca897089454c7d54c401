@@ -1,0 +1,37 @@
+sidecars/hmm/tests/test_policy.py
+  s_1bd9528555e07b::t_33f9d9ccf32310 3-5,8-17,36-76
+sidecars/hmm/Dockerfile
+  s_1bd9528555e07b::t_335bae3548168d 20-22
+cmd/router/main.go
+  s_1bd9528555e07b::t_335bae3548168d 575,584-593,637
+.github/workflows/test.yml
+  s_1bd9528555e07b::t_33f9d9ccf32310 146-147
+sidecars/hmm/tests/test_api.py
+  s_1bd9528555e07b::t_335bae3548168d 35-45
+sidecars/hmm/AGENTS.md
+  s_1bd9528555e07b::t_f4d23fce7dc606 1-49,51-53
+  s_1bd9528555e07b::t_b8c2b1eec701b2 50
+docs/CONFIGURATION.md
+  s_1bd9528555e07b::t_59d3990292bfdd 123
+sidecars/hmm/CLAUDE.md
+  s_1bd9528555e07b::t_f4d23fce7dc606 1-49,51-53
+  s_1bd9528555e07b::t_b8c2b1eec701b2 50
+sidecars/hmm/hmm_sidecar/api.py
+  s_1bd9528555e07b::t_335bae3548168d 102-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "10c9670d8a7f8f62e3feca897089454c7d54c401",
+  "prompts": {},
+  "sessions": {
+    "s_1bd9528555e07b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f591f-df79-7591-94f9-edeb03c45610",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

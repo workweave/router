@@ -1,0 +1,55 @@
+internal/proxy/subsidy.go
+  s_09ca5e2e44a0ed::t_dc7a7c1e84c120 1-32,34-37,39-41,43-110
+  s_09ca5e2e44a0ed::t_ecca0d0bb636d3 33,38,42
+internal/providers/provider.go
+  s_09ca5e2e44a0ed::t_dc9e820ae2d183 16-40
+internal/router/cluster/distribution.go
+  s_09ca5e2e44a0ed::t_4a9b5a18311a3b 96
+cmd/router/main.go
+  s_09ca5e2e44a0ed::t_aef9decad13b5b 653-688
+  s_09ca5e2e44a0ed::t_5ec5a63a508e1e 9
+  s_09ca5e2e44a0ed::t_b8653e0cdff6de 36
+internal/providers/openai/client.go
+  s_09ca5e2e44a0ed::t_264d88797c4c3b 244-247
+internal/router/router.go
+  s_09ca5e2e44a0ed::t_aba50f2e2fcc7f 44-50
+internal/proxy/turnloop.go
+  s_09ca5e2e44a0ed::t_14497f5b205909 160-164
+internal/router/cluster/scorer_test.go
+  s_09ca5e2e44a0ed::t_4f46a798a6075b 176-177,179,181,186-187,191-192
+  s_09ca5e2e44a0ed::t_fc369935557d67 168-175,178,180,182,184-185,188-190
+  s_09ca5e2e44a0ed::t_32ca716ce573b5 183
+internal/providers/anthropic/client.go
+  s_09ca5e2e44a0ed::t_59b36459a952c8 138-141
+internal/proxy/usage/usage_test.go
+  s_09ca5e2e44a0ed::t_ac2d4c6172ea9d 1-118
+internal/router/cluster/scorer.go
+  s_09ca5e2e44a0ed::t_f53f9e18232730 844,862-868
+  s_09ca5e2e44a0ed::t_29f6bcdce21b96 634
+  s_09ca5e2e44a0ed::t_134ff382d2f6a2 265
+internal/proxy/usage/usage.go
+  s_09ca5e2e44a0ed::t_790f2701896aa0 1-5,7-23,25-54,57-65,67-82,87-108,110-171,174-184,188-199,201-206,209-216,218-246
+  s_09ca5e2e44a0ed::t_eed4077be3bf7f 6,24,55-56,66,83-86,109,172-173,185-187,200,207-208,217
+internal/proxy/service.go
+  s_09ca5e2e44a0ed::t_ba5c2edf062e9f 169-178
+  s_09ca5e2e44a0ed::t_d9a93e32dac045 2862
+  s_09ca5e2e44a0ed::t_6f16e8df320ea3 20
+  s_09ca5e2e44a0ed::t_98db383b605fa2 1293
+  s_09ca5e2e44a0ed::t_9e48cc61ac7dcd 3504
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "c6d784536ac81a8ed66fe85cfae8bcbd1d338ac0",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
