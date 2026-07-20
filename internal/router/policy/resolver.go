@@ -295,6 +295,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		}
 		for _, binding := range allowedBindings {
 			upstreamID := catalog.UpstreamIDFor(id, binding.UpstreamID)
+			modelRevision := upstreamID
 			armID := rosterID
 			if r.enumerateBindings {
 				armID = MakeArmID(ArmIdentity{
@@ -302,7 +303,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 					Provider:                     binding.Provider,
 					UpstreamID:                   upstreamID,
 					Endpoint:                     armContext.Endpoint,
-					ModelRevision:                armContext.ModelRevision,
+					ModelRevision:                modelRevision,
 					ReasoningConfigurationSHA256: armContext.ReasoningConfigurationSHA256,
 					ToolConfigurationSHA256:      armContext.ToolConfigurationSHA256,
 				})
@@ -319,7 +320,7 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 				UpstreamID:                   upstreamID,
 				BindingIndex:                 binding.Index,
 				Endpoint:                     armContext.Endpoint,
-				ModelRevision:                armContext.ModelRevision,
+				ModelRevision:                modelRevision,
 				ReasoningConfigurationSHA256: armContext.ReasoningConfigurationSHA256,
 				ToolConfigurationSHA256:      armContext.ToolConfigurationSHA256,
 				PreferenceRank:               preferenceRanks[id],

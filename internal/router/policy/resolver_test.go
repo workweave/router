@@ -47,6 +47,7 @@ func TestResolverDefaultsUpstreamIDToCatalogID(t *testing.T) {
 
 	require.Len(t, resolved.Candidates, 1)
 	assert.Equal(t, "claude-opus-4-8", resolved.Candidates[0].UpstreamID)
+	assert.Equal(t, "claude-opus-4-8", resolved.Candidates[0].ModelRevision)
 	assert.Equal(t, resolved.Candidates[0].RosterID, resolved.Candidates[0].ArmID)
 }
 
@@ -86,6 +87,7 @@ func TestArmResolverEnumeratesEachAllowedProviderBinding(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, candidate.Provider, binding.Provider)
 		assert.Equal(t, candidate.UpstreamID, binding.UpstreamID)
+		assert.Equal(t, candidate.UpstreamID, candidate.ModelRevision)
 	}
 }
 
