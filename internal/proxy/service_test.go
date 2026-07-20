@@ -266,6 +266,7 @@ func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testin
 	originalEnvelope, err := translate.ParseOpenAI(body)
 	require.NoError(t, err)
 	assert.Equal(t, originalEnvelope.ReasoningConfigurationSHA256(), fr.capturedReq.ReasoningConfigurationSHA256)
+	assert.Equal(t, originalEnvelope.ToolConfigurationSHA256(), fr.capturedReq.ToolConfigurationSHA256)
 	assert.Equal(t, map[string]struct{}{providers.ProviderOpenAI: {}}, fr.capturedReq.EnabledProviders)
 	require.Len(t, provider.proxyBodies, 1)
 	assert.JSONEq(t, `{"model":"gpt-5.5","input":"apply a patch","reasoning":{"effort":"high"},"tools":[{"type":"custom","name":"apply_patch"}]}`, string(provider.proxyBodies[0]))

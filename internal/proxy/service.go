@@ -307,6 +307,9 @@ type codexResponsesBodyContextKey struct{}
 // Responses dispatch can represent.
 type nativeResponsesReasoningHashContextKey struct{}
 
+// nativeResponsesToolHashContextKey preserves native Responses tool identity.
+type nativeResponsesToolHashContextKey struct{}
+
 // InstallationExcludedModelsContextKey is the context key for the authed
 // installation's model exclusion list. Carried as []string.
 type InstallationExcludedModelsContextKey struct{}
@@ -4205,6 +4208,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if nativeResponsesHash, ok := ctx.Value(nativeResponsesReasoningHashContextKey{}).(string); ok {
 		reasoningConfigurationHash = nativeResponsesHash
 	}
+	toolConfigurationHash := env.ToolConfigurationSHA256()
+	if nativeResponsesHash, ok := ctx.Value(nativeResponsesToolHashContextKey{}).(string); ok {
+		toolConfigurationHash = nativeResponsesHash
+	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	outputReserveOAI := contextWindowOutputReserve
@@ -4266,7 +4273,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		HasImages:                    feats.HasImages,
 		TranslationRequirements:      env.TranslationRequirements(router.EndpointOpenAIChat),
 		ReasoningConfigurationSHA256: reasoningConfigurationHash,
-		ToolConfigurationSHA256:      env.ToolConfigurationSHA256(),
+		ToolConfigurationSHA256:      toolConfigurationHash,
 		PromptText:                   promptText,
 		ConversationMessages:         conversationMessagesForRouting(env),
 		AvailableTools:               availableToolsForRouting(env),
@@ -4866,6 +4873,7 @@ func (s *Service) ProxyOpenAIResponses(ctx context.Context, body []byte, w http.
 			return fmt.Errorf("parse native Responses request: %w", parseErr)
 		}
 		ctx = context.WithValue(ctx, nativeResponsesReasoningHashContextKey{}, originalEnvelope.ReasoningConfigurationSHA256())
+		ctx = context.WithValue(ctx, nativeResponsesToolHashContextKey{}, originalEnvelope.ToolConfigurationSHA256())
 	}
 	ctx = context.WithValue(ctx, responsesRequirementsContextKey{}, conversion.Requirements)
 	ctx = context.WithValue(ctx, responsesTransformsContextKey{}, conversion.Report)
