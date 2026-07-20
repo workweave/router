@@ -2,6 +2,9 @@ internal/router/policy/resolver.go
   s_0cb555d8dc2e1e::t_c022905f380978 196-203
   s_0cb555d8dc2e1e::t_6973dbdbe446cf 67-80,86,100-108,214,247,253,264,267-275,282-295,336-344
   s_0cb555d8dc2e1e::t_d2c3583618ae25 128-136
+  s_0cb555d8dc2e1e::t_288bd4d1c91b18 81-83,85
+  s_0cb555d8dc2e1e::t_40454d35df823c 296-300
+  s_0cb555d8dc2e1e::t_fc38ac4d34527c 84
 internal/router/policy/sidecar_router_test.go
   s_0cb555d8dc2e1e::t_eacd4862078ba4 109,154
 internal/proxy/fallback.go
@@ -10,6 +13,7 @@ internal/proxy/fallback.go
   s_0cb555d8dc2e1e::t_2ea46274cbcd7f 468-469
 internal/router/policy/sidecar_router.go
   s_0cb555d8dc2e1e::t_3743ce04e59bdc 277
+  s_0cb555d8dc2e1e::t_bc660ea7af7570 366-368
 internal/proxy/fallback_test.go
   s_0cb555d8dc2e1e::t_2296627b31486a 681-695
 internal/router/policy/contract.go
