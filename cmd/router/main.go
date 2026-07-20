@@ -183,6 +183,10 @@ func main() {
 				"reserve_usd_micros", reserveAmount,
 				"reserve_ttl", reserveTTL.String(),
 			)
+			safeGo(logger, "spend-reservation-sweep", func() {
+				runSpendReservationSweep(context.Background(), billingSvc)
+			})
+			logger.Info("Spend reservation TTL sweeper enabled", "interval", "1m")
 		}
 	}
 
@@ -1380,6 +1384,31 @@ func runSessionPinSweep(ctx context.Context, store sessionpin.Store) {
 			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := store.SweepExpired(sweepCtx); err != nil {
 				logger.Error("Session pin sweep failed", "err", err)
+			}
+			cancel()
+		}
+	}
+}
+
+// runSpendReservationSweep releases expired spend-cap reservations every
+// minute. Stuck reserved incorrectly blocks spend, so this is much more
+// aggressive than the session-pin GC. Every replica runs its own ticker;
+// DELETE … RETURNING is idempotent across replicas.
+func runSpendReservationSweep(ctx context.Context, svc *billing.Service) {
+	logger := observability.Get()
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			n, err := svc.SweepExpiredReservations(sweepCtx, time.Now().UTC())
+			if err != nil {
+				logger.Error("Spend reservation sweep failed", "err", err)
+			} else if n > 0 {
+				logger.Info("Spend reservation sweep released expired holds", "released", n)
 			}
 			cancel()
 		}
