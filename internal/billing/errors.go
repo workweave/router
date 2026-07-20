@@ -22,8 +22,7 @@ var ErrBalanceRowMissing = errors.New("billing: balance row missing")
 var ErrUserMonthlySpendLimitReached = errors.New("billing: engineer monthly spend limit reached")
 
 // ErrOrgMonthlySpendLimitReached is returned when the org's current UTC-month
-// spend (including in-flight reservations) cannot fit another reserve slot.
-// Mapped to HTTP 402.
+// spend (including in-flight reservations) cannot fit another reserve slot. Mapped to HTTP 402.
 var ErrOrgMonthlySpendLimitReached = errors.New("billing: organization monthly spend limit reached")
 
 // ErrAPIKeySpendCapReached is returned when a key's lifetime spend (including
