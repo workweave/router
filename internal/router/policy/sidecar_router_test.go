@@ -230,12 +230,52 @@ func TestSidecarRouterPreviewReturnsAllEligibleArmsWithoutLifecycleCallbacks(t *
 	assert.Equal(t, []string{"claude-opus-4-8", "gpt-5.5"}, result.EligibleRosterIDs)
 	assert.Equal(t, router.StrategyHMM, result.Strategy)
 	assert.NotEmpty(t, result.RouteID)
+	assert.Equal(t, policy.SchemaVersionV1, decider.previewQuery.SchemaVersion)
 	assert.Equal(t, policy.ExecutionModePreview, decider.previewQuery.ExecutionMode)
 	assert.False(t, decider.previewQuery.TrainingAllowed)
 	assert.True(t, decider.previewQuery.DebugEnabled)
 	assert.Len(t, decider.previewQuery.Candidates, 2)
 	assert.Nil(t, decider.outcome)
 	assert.Nil(t, decider.feedback)
+}
+
+func TestSidecarRouterPreviewUsesArmSchemaAndIDs(t *testing.T) {
+	resolver := policy.NewArmResolver(
+		set("deepseek/deepseek-v4-pro"),
+		set(providers.ProviderMakora, providers.ProviderFireworks),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+	resolved := resolver.Resolve(router.Request{})
+	require.Len(t, resolved.Candidates, 2)
+	selectedArmID := resolved.Candidates[0].ArmID
+	decider := &recordingPolicy{preview: policy.PreviewResult{
+		SchemaVersion:         policy.SchemaVersionV2,
+		PolicyArtifactID:      "temporal-q-v1",
+		PolicyArtifactSHA256:  "sha256:artifact",
+		RosterSHA256:          "sha256:roster",
+		HMMStateID:            0,
+		HMMStatePath:          []int{0},
+		HMMStateProbabilities: []float64{1},
+		ClassOrder:            []string{"provider-aware"},
+		ClassProbabilities:    map[string]float64{"provider-aware": 1},
+		RankedFallback: []policy.PreviewGroup{{
+			Group:        "provider-aware",
+			Probability:  1,
+			EligibleArms: []string{selectedArmID},
+		}},
+		SelectedGroup:     "provider-aware",
+		EligibleRosterIDs: []string{selectedArmID},
+	}}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("temporal-q"),
+	}, decider, resolver).WithCapabilities(policy.Capabilities{SupportsPreview: true})
+
+	result, err := adapter.PreviewRoute(context.Background(), router.Request{})
+
+	require.NoError(t, err)
+	assert.Equal(t, policy.SchemaVersionV2, decider.previewQuery.SchemaVersion)
+	assert.Equal(t, []string{selectedArmID}, result.EligibleRosterIDs)
 }
 
 func TestSidecarRouterPreviewRecordsZeroEligibleArms(t *testing.T) {

@@ -377,7 +377,7 @@ func (c *Client) Preview(ctx context.Context, query policy.Query) (policy.Previe
 		}
 		return policy.PreviewResult{}, fmt.Errorf("policy preview status %d", resp.StatusCode)
 	}
-	if parsed.SchemaVersion != policy.SchemaVersionV1 {
+	if parsed.SchemaVersion != policy.SchemaVersionV1 && parsed.SchemaVersion != policy.SchemaVersionV2 {
 		return policy.PreviewResult{}, fmt.Errorf("unsupported policy preview schema %q", parsed.SchemaVersion)
 	}
 	return policy.PreviewResult{

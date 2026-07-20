@@ -240,6 +240,27 @@ func TestClientPostsArmProviderMapForV2(t *testing.T) {
 	assert.Equal(t, "arm-fireworks", got.Candidates[0].ArmID)
 }
 
+func TestClientPreviewAcceptsV2Schema(t *testing.T) {
+	var got routeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(previewResponse{
+			SchemaVersion: policy.SchemaVersionV2,
+		})
+	}))
+	defer server.Close()
+
+	result, err := New(server.URL, server.Client(), 0).Preview(context.Background(), policy.Query{
+		SchemaVersion: policy.SchemaVersionV2,
+		ExecutionMode: policy.ExecutionModePreview,
+		Candidates:    []policy.Candidate{{ArmID: "arm-a", RosterID: "model-a"}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, policy.SchemaVersionV2, got.SchemaVersion)
+	assert.Equal(t, policy.SchemaVersionV2, result.SchemaVersion)
+}
+
 func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"model": "anthropic/claude-opus-4-8"})

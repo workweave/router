@@ -109,6 +109,7 @@ func (r *SidecarRouter) PreviewRoute(ctx context.Context, req router.Request) (P
 	resolved := r.resolver.Resolve(req)
 	requestRouteID := uuid.NewString()
 	result, err := previewer.Preview(ctx, Query{
+		SchemaVersion:        r.resolver.SchemaVersion(),
 		Strategy:             strategy,
 		ExecutionMode:        ExecutionModePreview,
 		RouteID:              requestRouteID,
@@ -141,17 +142,21 @@ func (r *SidecarRouter) PreviewRoute(ctx context.Context, req router.Request) (P
 	if result.RouteID != "" && result.RouteID != requestRouteID {
 		return PreviewResult{}, fmt.Errorf("%s: preview route id mismatch: %w", strategy, r.config.Unavailable)
 	}
-	if err := validatePreviewResult(result); err != nil {
+	if err := validatePreviewResult(result, r.resolver.SchemaVersion()); err != nil {
 		return PreviewResult{}, fmt.Errorf("%s: invalid preview result: %v: %w", strategy, err, r.config.Unavailable)
 	}
 
+	eligibleCandidates := resolved.ByRosterID
+	if r.resolver.SchemaVersion() == SchemaVersionV2 {
+		eligibleCandidates = resolved.ByArmID
+	}
 	seen := make(map[string]struct{}, len(result.EligibleRosterIDs))
 	for _, rosterID := range result.EligibleRosterIDs {
 		if _, duplicate := seen[rosterID]; duplicate {
 			return PreviewResult{}, fmt.Errorf("%s: preview returned duplicate roster id %q: %w", strategy, rosterID, r.config.Unavailable)
 		}
 		seen[rosterID] = struct{}{}
-		if _, offered := resolved.ByRosterID[rosterID]; !offered {
+		if _, offered := eligibleCandidates[rosterID]; !offered {
 			return PreviewResult{}, fmt.Errorf("%s: preview returned unknown roster id %q: %w", strategy, rosterID, r.config.Unavailable)
 		}
 	}
@@ -166,8 +171,8 @@ func (r *SidecarRouter) PreviewRoute(ctx context.Context, req router.Request) (P
 	return result, nil
 }
 
-func validatePreviewResult(result PreviewResult) error {
-	if result.SchemaVersion != SchemaVersionV1 {
+func validatePreviewResult(result PreviewResult, expectedSchemaVersion string) error {
+	if result.SchemaVersion != expectedSchemaVersion {
 		return fmt.Errorf("unsupported schema %q", result.SchemaVersion)
 	}
 	if result.PolicyArtifactID == "" || result.PolicyArtifactSHA256 == "" || result.RosterSHA256 == "" {
