@@ -688,6 +688,7 @@ func main() {
 	configuredPolicySpecs, err := buildConfiguredPolicySidecars(
 		context.Background(),
 		config.GetOr("ROUTER_POLICY_SIDECARS", ""),
+		config.GetOr("ROUTER_POLICY_SIDECAR_AUTH", ""),
 		parseEnvDurationMs("ROUTER_POLICY_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout),
 		availableModels,
 		availableProviders,

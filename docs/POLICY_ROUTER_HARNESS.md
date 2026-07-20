@@ -201,13 +201,16 @@ Example registration:
 
 ```bash
 export ROUTER_POLICY_SIDECARS='{"quality-v2":"https://quality-v2.internal"}'
+export ROUTER_POLICY_SIDECAR_AUTH='{"quality-v2":"google-id-token"}'
 export ROUTER_POLICY_SIDECAR_TIMEOUT_MS=3000
 ```
 
 The strategy ID must match `[a-z][a-z0-9_-]{0,63}` and cannot be `cluster`,
 `rl`, `hmm`, or `bandit`. New policies use catalog IDs as roster IDs at the
 wire boundary; an artifact with different internal labels translates them
-inside the sidecar.
+inside the sidecar. `google-id-token` authentication uses the exact configured
+origin as the token audience and fails router startup when credentials cannot
+build an authenticated client.
 
 ## Release gates
 

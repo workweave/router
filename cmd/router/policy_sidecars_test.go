@@ -51,6 +51,7 @@ func TestBuildConfiguredPolicySidecarsOnboardsFutureStrategy(t *testing.T) {
 	registrations, err := buildConfiguredPolicySidecars(
 		context.Background(),
 		`{"future-policy":"`+server.URL+`"}`,
+		"",
 		time.Second,
 		map[string]struct{}{"gpt-5.5": {}},
 		map[string]struct{}{providers.ProviderOpenAI: {}},
@@ -78,8 +79,44 @@ func TestBuildConfiguredPolicySidecarsRejectsReservedAndInvalidConfiguration(t *
 		`{"Future":"https://one.internal","future":"https://two.internal"}`,
 	} {
 		_, err := buildConfiguredPolicySidecars(
-			context.Background(), raw, time.Second, nil, nil, nil, logger,
+			context.Background(), raw, "", time.Second, nil, nil, nil, logger,
 		)
 		require.Error(t, err, raw)
 	}
+}
+
+func TestParseConfiguredPolicySidecarAuthNormalizesStrategies(t *testing.T) {
+	authModes, err := parseConfiguredPolicySidecarAuth(
+		`{" Future-Policy ":"google-id-token"}`,
+		map[router.Strategy]struct{}{"future-policy": {}},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, policySidecarAuthGoogleIDToken, authModes["future-policy"])
+}
+
+func TestParseConfiguredPolicySidecarAuthRejectsUnknownStrategy(t *testing.T) {
+	_, err := parseConfiguredPolicySidecarAuth(
+		`{"unknown":"google-id-token"}`,
+		map[router.Strategy]struct{}{"future-policy": {}},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not configured")
+}
+
+func TestBuildConfiguredPolicySidecarsRejectsAuthWithoutSidecars(t *testing.T) {
+	_, err := buildConfiguredPolicySidecars(
+		context.Background(),
+		"",
+		`{"future-policy":"google-id-token"}`,
+		time.Second,
+		nil,
+		nil,
+		nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires ROUTER_POLICY_SIDECARS")
 }
