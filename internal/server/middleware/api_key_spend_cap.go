@@ -53,10 +53,11 @@ func WithAPIKeySpendCap(svc *billing.Service) gin.HandlerFunc {
 			return
 		}
 
-		if result.SpentMicros >= *result.CapMicros {
+		if result.SpentMicros+result.ReservedMicros >= *result.CapMicros {
 			log.Info("Request rejected: api key spend cap reached",
 				"api_key_id", apiKey.ID,
 				"spent_usd_micros", result.SpentMicros,
+				"reserved_usd_micros", result.ReservedMicros,
 				"spend_cap_usd_micros", *result.CapMicros,
 			)
 			c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
