@@ -1,0 +1,22 @@
+internal/router/policy/resolver.go
+  s_181299bbd674e9::t_f8d46023c5502f 186
+internal/router/policy/resolver_test.go
+  s_181299bbd674e9::t_f8d46023c5502f 99,109-120
+  s_181299bbd674e9::t_4dd8668f7d7764 121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c2dee2011ec51bd57718f9692a4f37eedd657ab4",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

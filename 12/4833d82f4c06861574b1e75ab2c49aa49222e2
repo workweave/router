@@ -1,0 +1,24 @@
+internal/translate/envelope.go
+  s_13f8c85dce1040::t_d126d955f95ab5 891-902
+  s_13f8c85dce1040::t_81ce994571c820 1059
+internal/router/catalog/catalog.go
+  s_13f8c85dce1040::t_a12363e4652615 274
+internal/translate/emit_same_format_test.go
+  s_13f8c85dce1040::t_b398feffe8ca22 153-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "124833d82f4c06861574b1e75ab2c49aa49222e2",
+  "prompts": {},
+  "sessions": {
+    "s_13f8c85dce1040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "982ea22a-b50a-41ed-9a66-70ac8f95451d",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
