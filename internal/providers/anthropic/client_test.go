@@ -322,6 +322,28 @@ func TestProxy_BuffersRetryable429(t *testing.T) {
 	assert.Empty(t, rec.Body.String(), "retryable upstream errors must not commit response bytes")
 }
 
+func TestProxy_BuffersHTTP200SSEOverloadBeforeCommit(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"))
+	}))
+	defer upstream.Close()
+
+	c := anthropic.NewClient("k", upstream.URL)
+	rec := httptest.NewRecorder()
+	clientReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	prep := providers.PreparedRequest{Body: []byte(`{"model":"x","stream":true}`), Headers: make(http.Header)}
+
+	err := c.Proxy(context.Background(), router.Decision{Model: "claude-haiku-4-5"}, prep, rec, clientReq)
+
+	var buffered *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &buffered)
+	assert.Equal(t, 529, buffered.Status)
+	assert.True(t, providers.IsRetryable(err))
+	assert.Empty(t, rec.Body.String(), "the HTTP 200 error event must remain pre-commit so dispatch can retry")
+}
+
 func TestProxy_StripsDynamicHopByHopHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "Keep-Alive, X-Internal-Trace")

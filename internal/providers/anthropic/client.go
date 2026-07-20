@@ -4,6 +4,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -212,6 +213,26 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 	}
 
+	streamBody := io.Reader(resp.Body)
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("content-type")), "text/event-stream") {
+		streamBody, err = inspectSSEPrelude(ctx, cancel, c.idleTimeout(), resp.Body, t)
+		if err != nil {
+			var buffered *providers.UpstreamErrorResponse
+			if errors.As(err, &buffered) {
+				errHeaders := http.Header{}
+				providers.CopyUpstreamHeaders(httputil.HeaderCapture{H: errHeaders}, resp)
+				buffered.Headers = errHeaders
+				httputil.LogUpstreamStatus(
+					"Upstream Anthropic returned SSE error event",
+					buffered.Status,
+					"routed_model", decision.Model,
+					"body_preview", httputil.PreviewBytes(buffered.Body),
+				)
+			}
+			return err
+		}
+	}
+
 	providers.CopyUpstreamHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 
@@ -235,7 +256,7 @@ func (c *Client) Proxy(ctx context.Context, decision router.Decision, prep provi
 		}
 	}
 
-	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), resp.Body, resp.StatusCode, w, t)
+	return httputil.StreamBody(ctx, cancel, c.idleTimeout(), streamBody, resp.StatusCode, w, t)
 }
 
 func (c *Client) Passthrough(ctx context.Context, prep providers.PreparedRequest, w http.ResponseWriter, r *http.Request) error {

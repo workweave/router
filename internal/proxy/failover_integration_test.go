@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"workweave/router/internal/providers"
+	"workweave/router/internal/providers/anthropic"
 	"workweave/router/internal/providers/openai"
 	"workweave/router/internal/providers/openaicompat"
 	"workweave/router/internal/proxy"
@@ -279,6 +280,92 @@ func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 		"routing marker discarded with the prelude buffer")
 	assert.Contains(t, respBody, `"type":"error"`, "Anthropic-shape error envelope")
 	assert.Contains(t, respBody, "upstream unavailable", "translated upstream message reaches the client")
+}
+
+func TestProxyMessages_AnthropicSSEOverloadRetriesSameBinding(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		attempt := calls
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if attempt == 1 {
+			_, _ = io.WriteString(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_recovered\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-haiku-4-5\",\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"recovered\"}}\n\n")
+		_, _ = io.WriteString(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer upstream.Close()
+
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}},
+		map[string]providers.Client{providers.ProviderAnthropic: anthropic.NewClient("test-key", upstream.URL)},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil,
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-haiku-4-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	require.NoError(t, svc.ProxyMessages(context.Background(), body, rec, req))
+	mu.Lock()
+	assert.Equal(t, 2, calls, "the first HTTP 200 overload is retried on the sole Anthropic binding")
+	mu.Unlock()
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "recovered")
+	assert.NotContains(t, rec.Body.String(), "overloaded_error", "the failed attempt must never commit bytes")
+}
+
+func TestProxyMessages_AnthropicSSEOverloadExhaustionRecords529(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n")
+	}))
+	defer upstream.Close()
+
+	telemetry := newCaptureTelemetry()
+	svc := proxy.NewService(
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5"}},
+		map[string]providers.Client{providers.ProviderAnthropic: anthropic.NewClient("test-key", upstream.URL)},
+		nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", telemetry,
+	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
+	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, "11111111-1111-1111-1111-111111111111")
+	ctx = context.WithValue(ctx, proxy.ExternalIDContextKey{}, "org-test")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	body := []byte(`{"model":"claude-haiku-4-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+
+	err := svc.ProxyMessages(ctx, body, rec, req)
+
+	var upstreamErr *providers.UpstreamErrorResponse
+	require.ErrorAs(t, err, &upstreamErr, "exhaustion must remain an error so router.call records is_error")
+	assert.Equal(t, 529, upstreamErr.Status)
+	mu.Lock()
+	assert.Equal(t, 3, calls, "initial attempt plus two same-binding retries")
+	mu.Unlock()
+	assert.Equal(t, 529, rec.Code)
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	assert.NotContains(t, rec.Body.String(), "event: message_start")
+	assert.Contains(t, rec.Body.String(), "overloaded_error")
+	row := telemetry.firstRow(t)
+	assert.Equal(t, int32(529), row.UpstreamStatusCode)
 }
 
 func TestProxyMessages_ResponsesFailureBeforeOutputFallsBackToBaseline(t *testing.T) {
