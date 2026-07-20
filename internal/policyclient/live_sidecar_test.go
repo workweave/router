@@ -40,7 +40,7 @@ func TestLiveGenericPolicySidecarContract(t *testing.T) {
 		ConversationMessages: []router.ConversationMessage{
 			{Role: "system", Text: "Work in repository."},
 			{Role: "user", Text: "Fix the failing test."},
-			{Role: "assistant", ToolResults: []router.ConversationToolResult{{
+			{Role: "user", ToolResults: []router.ConversationToolResult{{
 				ToolUseID:     "toolu_live",
 				Text:          "raw tool result must remain masked",
 				ResultPresent: true,
@@ -50,7 +50,7 @@ func TestLiveGenericPolicySidecarContract(t *testing.T) {
 			}}},
 		},
 		TurnContext: &router.PolicyTurnContext{
-			VisibleTurnIndex:    1,
+			VisibleTurnIndex:    0,
 			SessionTurnCount:    1,
 			TurnType:            "tool_result",
 			CacheState:          router.PolicyCacheStateUnknown,
