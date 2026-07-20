@@ -1,0 +1,28 @@
+internal/proxy/service.go
+  s_0cb555d8dc2e1e::t_a27a0765ffccd8 2150-2151,4225-4226
+  s_0cb555d8dc2e1e::t_8b3c87ef2dcc2f 2144-2149,2152-2155,4219-4224,4227-4229
+internal/translate/configuration_hashes.go
+  s_0cb555d8dc2e1e::t_123d04b265bb7f 1-6,9-51
+  s_0cb555d8dc2e1e::t_8e31a7a438a8f6 7-8
+internal/proxy/gemini.go
+  s_0cb555d8dc2e1e::t_8b3c87ef2dcc2f 93-97,100-107
+  s_0cb555d8dc2e1e::t_e0f07be85fe4fe 98-99
+internal/translate/configuration_hashes_test.go
+  s_0cb555d8dc2e1e::t_455f68260377f2 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d816d5c798070824c8d8f4e110d273d27cd17772",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

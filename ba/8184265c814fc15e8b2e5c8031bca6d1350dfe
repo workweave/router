@@ -1,0 +1,48 @@
+internal/router/policy/resolver.go
+  s_0cb555d8dc2e1e::t_c022905f380978 194-201
+  s_0cb555d8dc2e1e::t_6973dbdbe446cf 67-68,70-84,98-106,212,245,251,262,265-273,276-289,325-333
+  s_0cb555d8dc2e1e::t_d2c3583618ae25 126-134
+internal/router/policy/sidecar_router_test.go
+  s_0cb555d8dc2e1e::t_eacd4862078ba4 93,135
+internal/proxy/fallback.go
+  s_0cb555d8dc2e1e::t_c1da60204c99d0 411,443,453
+  s_0cb555d8dc2e1e::t_290ba3e27c7059 389-393,408-410,412-419,441-442,444-452,454-467
+  s_0cb555d8dc2e1e::t_2ea46274cbcd7f 468-469
+internal/router/policy/sidecar_router.go
+  s_0cb555d8dc2e1e::t_3743ce04e59bdc 275
+  s_0cb555d8dc2e1e::t_7ad2c9f9e857bb 360-362
+internal/proxy/fallback_test.go
+  s_0cb555d8dc2e1e::t_2296627b31486a 681-695
+internal/router/policy/contract.go
+  s_0cb555d8dc2e1e::t_ebd5d5060fc872 12-15,51
+internal/router/policy/arm.go
+  s_0cb555d8dc2e1e::t_0174d3e99d90b4 74-75,78-79,82-86,101,103-106
+  s_0cb555d8dc2e1e::t_061ae83550dc20 1-73,76-77,80-81,87-100,102,107-109
+internal/router/catalog/lookup.go
+  s_0cb555d8dc2e1e::t_16e95446e52906 54-69,74-75,77,83-89
+  s_0cb555d8dc2e1e::t_35f292bade4b88 90
+internal/router/policy/arm_test.go
+  s_0cb555d8dc2e1e::t_52fae39d4447fc 1-44
+internal/policyclient/client.go
+  s_0cb555d8dc2e1e::t_64384c5ab21b06 280
+internal/router/router.go
+  s_0cb555d8dc2e1e::t_1f2fb337301c1d 217-219
+  s_0cb555d8dc2e1e::t_892ed15399907a 108-112
+  s_0cb555d8dc2e1e::t_19c3cde3b87d76 113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "ba8184265c814fc15e8b2e5c8031bca6d1350dfe",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
