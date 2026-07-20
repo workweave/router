@@ -47,6 +47,19 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 		if _, agentShadow := proxy.AgentShadowEvalFromContext(ctx); !agentShadow {
 			ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		}
+		ctx, release, armErr := svc.ArmSpendReservations(ctx)
+		if armErr != nil {
+			cls, ok := proxy.ClassifyDispatchError(armErr)
+			if ok {
+				proxy.LogDispatchErrorClass(log, cls, armErr)
+				writeAnthropicError(c, cls.Status, anthropicErrorType(cls.Kind), cls.Message)
+				return
+			}
+			log.Error("Spend reservation failed", "err", armErr)
+			writeAnthropicError(c, http.StatusServiceUnavailable, "api_error", "Billing system is temporarily unavailable. Retry in a few moments.")
+			return
+		}
+		defer release()
 		c.Request = c.Request.WithContext(ctx)
 
 		if err := svc.ProxyMessages(c.Request.Context(), body, c.Writer, c.Request); err != nil {

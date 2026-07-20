@@ -161,6 +161,29 @@ func main() {
 			billingSvc = billing.NewService(billingRepo)
 			logger.Info("Router billing enabled", "min_balance_usd_micros", billing.MinBalanceMicros)
 		}
+		if billingSvc != nil {
+			reserveAmount := billing.DefaultReserveAmountMicros
+			if v := config.GetOr("ROUTER_SPEND_RESERVE_USD_MICROS", ""); v != "" {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+					reserveAmount = n
+				} else {
+					logger.Warn("Invalid ROUTER_SPEND_RESERVE_USD_MICROS; using default", "value", v, "default", billing.DefaultReserveAmountMicros)
+				}
+			}
+			reserveTTL := billing.DefaultReserveTTL
+			if v := config.GetOr("ROUTER_SPEND_RESERVE_TTL", ""); v != "" {
+				if d, err := time.ParseDuration(v); err == nil && d > 0 {
+					reserveTTL = d
+				} else {
+					logger.Warn("Invalid ROUTER_SPEND_RESERVE_TTL; using default", "value", v, "default", billing.DefaultReserveTTL.String())
+				}
+			}
+			billingSvc.WithReservationConfig(reserveAmount, reserveTTL)
+			logger.Info("Spend reservation config",
+				"reserve_usd_micros", reserveAmount,
+				"reserve_ttl", reserveTTL.String(),
+			)
+		}
 	}
 
 	// Managed without billing stays BYOK-only (avoids spending platform-key

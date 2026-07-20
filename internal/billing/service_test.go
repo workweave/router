@@ -8,12 +8,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"workweave/router/internal/billing"
 	"workweave/router/internal/observability"
 	"workweave/router/internal/providers"
 	"workweave/router/internal/router/catalog"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,22 +94,34 @@ func (r *fakeRepo) DebitInference(_ context.Context, p billing.DebitParams) (int
 
 func (r *fakeRepo) BillingTablesExist(_ context.Context) (bool, error) { return true, nil }
 
-func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
-	return 0, nil, false, nil
+func (r *fakeRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, int64, *int64, bool, error) {
+	return 0, 0, nil, false, nil
 }
 
-func (r *fakeRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, *int64, error) {
+func (r *fakeRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, int64, *int64, error) {
 	if r.userMonthErr != nil {
-		return 0, nil, r.userMonthErr
+		return 0, 0, nil, r.userMonthErr
 	}
-	return r.userMonthSpent, r.userMonthLimit, nil
+	return r.userMonthSpent, 0, r.userMonthLimit, nil
 }
 
-func (r *fakeRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, *int64, error) {
+func (r *fakeRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, int64, *int64, error) {
 	if r.orgMonthErr != nil {
-		return 0, nil, r.orgMonthErr
+		return 0, 0, nil, r.orgMonthErr
 	}
-	return r.orgMonthSpent, r.orgMonthLimit, nil
+	return r.orgMonthSpent, 0, r.orgMonthLimit, nil
+}
+
+func (r *fakeRepo) ReserveSpendCaps(_ context.Context, _ billing.ReserveSpendCapsParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (r *fakeRepo) ReleaseSpendReservations(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
+
+func (r *fakeRepo) SweepExpiredSpendReservations(_ context.Context, _ time.Time) (int, error) {
+	return 0, nil
 }
 
 func (r *fakeRepo) GetAutopayConfig(_ context.Context, _ string) (bool, int64, error) {

@@ -19,18 +19,15 @@ import (
 )
 
 // TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot is the
-// permanent #793 regression: N concurrent CheckOrgMonthlySpend + DebitForInference
-// must not multiply past the hard monthly cap unboundedly.
+// permanent #793 regression: N concurrent reserve-then-settle turns must not
+// multiply past the hard monthly cap unboundedly.
 //
 // Fixture matches the issue reproduction: $1 limit, $0.90 starting spend,
 // $6.75 notional per debit (1M in @ $3/MTok + 250K out @ $15/MTok), N=20.
-// Soft-overshoot bound after the reserve-then-settle fix is roughly one
-// under-reserved turn (or zero when remaining headroom < R); before the fix
-// this assertion fails with ~$100+ overshoot.
+// With fixed R=$1 and only $0.10 headroom, zero reserves succeed and spend
+// stays at $0.90. Soft overshoot bound remains limit + one turn.
 //
-// Gated on ROUTER_TEST_DATABASE_URL (falls back to DATABASE_URL). Skips when
-// neither is set so unit CI without Postgres stays green. Requires a migrated
-// router schema (docker compose postgres on :5433 is the local fixture).
+// Gated on ROUTER_TEST_DATABASE_URL (falls back to DATABASE_URL).
 func TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot(t *testing.T) {
 	dsn := os.Getenv("ROUTER_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -79,18 +76,20 @@ func TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot(t *testing.T)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO organization_credit_balance (organization_id, balance_usd_micros)
-		VALUES ($1, $2)`, orgID, int64(1_000_000_000)) // $1000 — not under test
+		VALUES ($1, $2)`, orgID, int64(1_000_000_000))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM spend_reservations WHERE scope_id = $1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM organization_credit_ledger WHERE organization_id = $1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM organization_credit_balance WHERE organization_id = $1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM organization_monthly_spend WHERE organization_id = $1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM organization_spend_limits WHERE organization_id = $1`, orgID)
 	})
 
-	svc := billing.NewService(postgres.NewBillingRepo(pool))
+	svc := billing.NewService(postgres.NewBillingRepo(pool)).
+		WithReservationConfig(billing.DefaultReserveAmountMicros, billing.DefaultReserveTTL)
 
 	var (
 		wg       sync.WaitGroup
@@ -105,15 +104,13 @@ func TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot(t *testing.T)
 			reqCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
-			res, err := svc.CheckOrgMonthlySpend(reqCtx, orgID)
+			reqCtx, release, err := svc.ArmSpendReservations(reqCtx, orgID, "", "", fmt.Sprintf("%s-%d", orgID, i))
 			if err != nil {
-				t.Errorf("CheckOrgMonthlySpend: %v", err)
-				return
-			}
-			if res.LimitReached() {
 				rejected.Add(1)
 				return
 			}
+			defer release()
+
 			_, err = svc.DebitForInference(reqCtx, billing.DebitInferenceParams{
 				OrganizationID:  orgID,
 				RouterRequestID: fmt.Sprintf("%s-%d", orgID, i),
@@ -121,27 +118,32 @@ func TestOrgMonthlySpend_ConcurrentCheckThenDebit_BoundedOvershoot(t *testing.T)
 				InputTokens:     inputTokens,
 				OutputTokens:    outputTokens,
 				Pricing:         pricing,
+				ReservationIDs:  billing.SpendHoldFrom(reqCtx).IDs,
 			})
 			if err != nil {
 				t.Errorf("DebitForInference: %v", err)
 				return
+			}
+			if hold := billing.SpendHoldFrom(reqCtx); hold != nil {
+				hold.MarkSettled()
 			}
 			debited.Add(1)
 		}()
 	}
 	wg.Wait()
 
-	final, _, err := postgres.NewBillingRepo(pool).GetOrgMonthlySpendAndLimit(ctx, orgID)
+	final, reserved, err := func() (int64, int64, error) {
+		s, r, _, e := postgres.NewBillingRepo(pool).GetOrgMonthlySpendAndLimit(ctx, orgID)
+		return s, r, e
+	}()
 	require.NoError(t, err)
 
-	// Soft overshoot bound: at most one in-flight turn past the limit (the
-	// product promise before concurrency multiplied it). Equivalent to
-	// start + N*cost when every check races — that path must fail this assert.
 	maxAllowed := limitMicros + perCallMicros
-	t.Logf("org=%s debited=%d rejected=%d final_spent_usd_micros=%d overshoot_usd_micros=%d max_allowed=%d",
-		orgID, debited.Load(), rejected.Load(), final, final-limitMicros, maxAllowed)
+	t.Logf("org=%s debited=%d rejected=%d final_spent_usd_micros=%d reserved=%d overshoot_usd_micros=%d max_allowed=%d",
+		orgID, debited.Load(), rejected.Load(), final, reserved, final-limitMicros, maxAllowed)
 
 	require.LessOrEqual(t, final, maxAllowed,
 		"org monthly spend TOCTOU (#793): final=%d ($%.2f) exceeds limit+one_turn=%d ($%.2f); overshoot=$%.2f from %d concurrent debits",
 		final, float64(final)/1e6, maxAllowed, float64(maxAllowed)/1e6, float64(final-limitMicros)/1e6, debited.Load())
+	require.Equal(t, int64(0), reserved, "all reservations must be settled or released")
 }
