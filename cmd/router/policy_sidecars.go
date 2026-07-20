@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"workweave/router/internal/policyclient"
 	"workweave/router/internal/router"
 	"workweave/router/internal/router/catalog"
 	"workweave/router/internal/router/policy"
@@ -33,13 +32,16 @@ var reservedPolicyStrategies = map[router.Strategy]struct{}{
 // buildConfiguredPolicySidecars turns a JSON strategy-to-URL map into policy.StrategySpec registrations; sidecars own model logic, the router owns candidate resolution and lifecycle.
 func buildConfiguredPolicySidecars(
 	ctx context.Context,
-	raw string,
+	raw, rawAuth string,
 	timeout time.Duration,
 	deployed, availableProviders map[string]struct{},
 	httpClient *http.Client,
 	logger *slog.Logger,
 ) ([]policy.StrategySpec, error) {
 	if strings.TrimSpace(raw) == "" {
+		if strings.TrimSpace(rawAuth) != "" {
+			return nil, fmt.Errorf("ROUTER_POLICY_SIDECAR_AUTH requires ROUTER_POLICY_SIDECARS")
+		}
 		return nil, nil
 	}
 	var configured map[string]string
@@ -56,7 +58,7 @@ func buildConfiguredPolicySidecars(
 	}
 	sort.Strings(strategies)
 	seen := make(map[router.Strategy]struct{}, len(strategies))
-	registrations := make([]policy.StrategySpec, 0, len(strategies))
+	normalized := make(map[string]router.Strategy, len(strategies))
 	for _, configuredName := range strategies {
 		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(configuredName)))
 		if strategy == "" {
@@ -72,14 +74,26 @@ func buildConfiguredPolicySidecars(
 			return nil, fmt.Errorf("ROUTER_POLICY_SIDECARS strategy %q is duplicated after normalization", strategy)
 		}
 		seen[strategy] = struct{}{}
+		normalized[configuredName] = strategy
+	}
+	authModes, err := parseConfiguredPolicySidecarAuth(rawAuth, seen)
+	if err != nil {
+		return nil, err
+	}
 
+	registrations := make([]policy.StrategySpec, 0, len(strategies))
+	for _, configuredName := range strategies {
+		strategy := normalized[configuredName]
 		sidecarURL := strings.TrimSpace(configured[configuredName])
 		parsed, err := url.Parse(sidecarURL)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return nil, fmt.Errorf("ROUTER_POLICY_SIDECARS strategy %q has invalid URL %q", strategy, sidecarURL)
 		}
 
-		client := policyclient.New(sidecarURL, httpClient, timeout)
+		client, err := buildConfiguredPolicyClient(sidecarURL, authModes[strategy], timeout, httpClient)
+		if err != nil {
+			return nil, fmt.Errorf("build %s policy sidecar client: %w", strategy, err)
+		}
 		capabilityCtx, cancel := context.WithTimeout(ctx, timeout)
 		capabilities, capabilityErr := client.Capabilities(capabilityCtx)
 		cancel()
@@ -111,4 +125,29 @@ func buildConfiguredPolicySidecars(
 		})
 	}
 	return registrations, nil
+}
+
+func parseConfiguredPolicySidecarAuth(
+	raw string,
+	configured map[router.Strategy]struct{},
+) (map[router.Strategy]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("parse ROUTER_POLICY_SIDECAR_AUTH: %w", err)
+	}
+	authModes := make(map[router.Strategy]string, len(values))
+	for configuredName, authMode := range values {
+		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(configuredName)))
+		if _, ok := configured[strategy]; !ok {
+			return nil, fmt.Errorf("ROUTER_POLICY_SIDECAR_AUTH strategy %q is not configured", strategy)
+		}
+		if _, duplicate := authModes[strategy]; duplicate {
+			return nil, fmt.Errorf("ROUTER_POLICY_SIDECAR_AUTH strategy %q is duplicated after normalization", strategy)
+		}
+		authModes[strategy] = authMode
+	}
+	return authModes, nil
 }
