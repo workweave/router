@@ -24,6 +24,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// addToSet returns set with model added, copying first so a caller-shared or nil
+// map is never mutated in place (req.SafetyExcludedModels may be shared across
+// requests or nil when no safety filter fired). Returns a fresh single-entry map
+// when set is nil/empty.
+func addToSet(set map[string]struct{}, model string) map[string]struct{} {
+	out := make(map[string]struct{}, len(set)+1)
+	for k := range set {
+		out[k] = struct{}{}
+	}
+	out[model] = struct{}{}
+	return out
+}
+
 // installationIDFromContext reads the installation ID stashed by auth
 // middleware. Returns uuid.Nil (which skips the async pin upsert) if missing or invalid.
 func installationIDFromContext(ctx context.Context) uuid.UUID {
@@ -458,6 +471,12 @@ func (s *Service) runTurnLoop(
 		}
 		excluded[maxedModel] = struct{}{}
 		req.ExcludedModels = excluded
+		// Also bar it from usage bypass: the maxed-out exclusion is a hard
+		// loop-breaking constraint, not an installation preference, so it belongs
+		// in the set the bypass gate honors. Without this, an auto-continue turn
+		// re-requesting the saturated subscription model would bypass straight back
+		// to it and reopen the degenerate max-output loop this guard breaks.
+		req.SafetyExcludedModels = addToSet(req.SafetyExcludedModels, maxedModel)
 		pinFound = false
 		pin = sessionpin.Pin{}
 	}
@@ -475,6 +494,9 @@ func (s *Service) runTurnLoop(
 		}
 		excluded[maxedModel] = struct{}{}
 		req.ExcludedModels = excluded
+		// See the active-pin path above: the maxed-out model must also block usage
+		// bypass, or an auto-continue turn re-requesting it reopens the loop.
+		req.SafetyExcludedModels = addToSet(req.SafetyExcludedModels, maxedModel)
 	}
 
 	// If the pre-filter excluded the pinned model for context overflow,
@@ -525,11 +547,7 @@ func (s *Service) runTurnLoop(
 					}
 					// Keep SafetyExcludedModels consistent: the fit-check just
 					// cleared this model's context-overflow exclusion, so it must
-					// not linger in the safety set and refuse usage bypass for the
-					// pinned model at usageBypassDecision below. The two are computed
-					// from the same estimate/window, so in practice pin.Model is
-					// absent here — this makes the invariant explicit and robust if
-					// the two fit formulas ever drift.
+					// not linger in the safety set and block usage bypass.
 					delete(req.SafetyExcludedModels, pin.Model)
 				}
 				log.Info("Session pin preserved despite context-window pre-filter exclusion",
