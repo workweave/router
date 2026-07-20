@@ -258,10 +258,14 @@ type RoutingMetadata struct {
 	// CandidateScores: full pre-argmax blended score per eligible model, for
 	// off-policy analysis (contextual bandit substrate). Doesn't affect routing.
 	CandidateScores map[string]float32
+	// CandidateArmScores preserves scores for configuration-level actions.
+	CandidateArmScores map[string]float32
 	// CandidateProviders: per-request resolved provider per eligible model, so
 	// an exploration policy can switch to an in-band peer using this request's
 	// binding (correct under BYOK) rather than a boot-time default.
 	CandidateProviders map[string]string
+	// CandidateArmProviders preserves providers for configuration-level actions.
+	CandidateArmProviders map[string]string
 	// Propensity is the probability the chosen model was selected under the
 	// acting policy: 1.0 for deterministic argmax, <1.0 under exploration.
 	// Logged as the importance weight an off-policy estimator needs.

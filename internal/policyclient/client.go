@@ -382,7 +382,11 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 	providerMap := make(map[string]string, len(query.Candidates))
 	for _, candidate := range query.Candidates {
 		models = append(models, candidate.RosterID)
-		providerMap[candidate.RosterID] = candidate.Provider
+		providerKey := candidate.RosterID
+		if schemaVersion == policy.SchemaVersionV2 {
+			providerKey = candidate.ArmID
+		}
+		providerMap[providerKey] = candidate.Provider
 	}
 	messages := routeMessages(query.ConversationMessages)
 	wireTurnIndex := turnIndex(messages)

@@ -43,24 +43,40 @@ func MakeArmID(identity ArmIdentity) string {
 	return "tq_arm_" + hex.EncodeToString(sum[:])
 }
 
-// DeriveArmContext derives a privacy-safe action context; ingress hashes take priority over fallback normalization.
+// DeriveArmContext combines privacy-safe ingress and routing-level configuration.
 func DeriveArmContext(req router.Request) ArmContext {
 	context := ArmContext{
 		Endpoint:                     string(req.TranslationRequirements.Endpoint),
 		ModelRevision:                catalogModelRevision,
-		ReasoningConfigurationSHA256: req.ReasoningConfigurationSHA256,
+		ReasoningConfigurationSHA256: combineReasoningConfigurationHash(req),
 		ToolConfigurationSHA256:      req.ToolConfigurationSHA256,
 	}
 	if context.Endpoint == "" {
 		context.Endpoint = "unknown"
 	}
-	if context.ReasoningConfigurationSHA256 == "" {
-		context.ReasoningConfigurationSHA256 = hashReasoningConfiguration(req)
-	}
 	if context.ToolConfigurationSHA256 == "" {
 		context.ToolConfigurationSHA256 = hashToolConfiguration(req)
 	}
 	return context
+}
+
+func combineReasoningConfigurationHash(req router.Request) string {
+	routingHash := hashReasoningConfiguration(req)
+	if req.ReasoningConfigurationSHA256 == "" {
+		return routingHash
+	}
+	payload := struct {
+		IngressHash string `json:"ingress_hash"`
+		RoutingHash string `json:"routing_hash"`
+	}{
+		IngressHash: req.ReasoningConfigurationSHA256,
+		RoutingHash: routingHash,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic("marshal combined temporal-Q reasoning configuration: " + err.Error())
+	}
+	return sha256Bytes(encoded)
 }
 
 func hashReasoningConfiguration(req router.Request) string {

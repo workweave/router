@@ -350,6 +350,8 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 			CandidateModels:               resolved.CandidateModels(),
 			CandidateProviders:            resolved.CandidateProviders(),
 			CandidateScores:               resolved.CatalogCandidateScores(res.CandidateScores),
+			CandidateArmProviders:         resolved.CandidateArmProviders(),
+			CandidateArmScores:            resolved.ArmCandidateScores(res.CandidateScores),
 			ChosenScore:                   float32(res.Score),
 			Propensity:                    propensity,
 			DisplayMarker:                 res.DisplayMarker,

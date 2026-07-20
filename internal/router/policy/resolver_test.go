@@ -65,6 +65,17 @@ func TestArmResolverEnumeratesEachAllowedProviderBinding(t *testing.T) {
 	assert.Equal(t, "deepseek/deepseek-v4-pro", resolved.Candidates[1].RosterID)
 	assert.NotEqual(t, resolved.Candidates[0].ArmID, resolved.Candidates[1].ArmID)
 	assert.Empty(t, resolved.ByRosterID)
+	assert.Equal(t, map[string]string{
+		resolved.Candidates[0].ArmID: resolved.Candidates[0].Provider,
+		resolved.Candidates[1].ArmID: resolved.Candidates[1].Provider,
+	}, resolved.CandidateArmProviders())
+	assert.Equal(t, map[string]float32{
+		resolved.Candidates[0].ArmID: 0.1,
+		resolved.Candidates[1].ArmID: 0.2,
+	}, resolved.ArmCandidateScores(map[string]float32{
+		resolved.Candidates[0].ArmID: 0.1,
+		resolved.Candidates[1].ArmID: 0.2,
+	}))
 	for _, candidate := range resolved.Candidates {
 		binding, ok := resolved.BindingForSelection(candidate.ArmID, "")
 		require.True(t, ok)

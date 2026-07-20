@@ -162,6 +162,43 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7-code": 0.91}, result.CandidateScores)
 }
 
+func TestClientPostsArmProviderMapForV2(t *testing.T) {
+	var got routeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&got))
+		_ = json.NewEncoder(w).Encode(routeResponse{
+			SchemaVersion:    policy.SchemaVersionV2,
+			SelectedArmID:    "arm-fireworks",
+			SelectedRosterID: "deepseek/deepseek-v4-pro",
+		})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client(), 0).Decide(context.Background(), policy.Query{
+		SchemaVersion: policy.SchemaVersionV2,
+		Candidates: []policy.Candidate{
+			{
+				ArmID:     "arm-fireworks",
+				RosterID:  "deepseek/deepseek-v4-pro",
+				CatalogID: "deepseek/deepseek-v4-pro",
+				Provider:  providers.ProviderFireworks,
+			},
+			{
+				ArmID:     "arm-makora",
+				RosterID:  "deepseek/deepseek-v4-pro",
+				CatalogID: "deepseek/deepseek-v4-pro",
+				Provider:  providers.ProviderMakora,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"arm-fireworks": providers.ProviderFireworks,
+		"arm-makora":    providers.ProviderMakora,
+	}, got.CandidateProviders)
+}
+
 func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"model": "anthropic/claude-opus-4-8"})

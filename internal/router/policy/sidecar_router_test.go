@@ -140,6 +140,10 @@ func TestSidecarRouterDispatchesSidecarSelectedArm(t *testing.T) {
 		ArmID:    selected.ArmID,
 		Provider: selected.Provider,
 		Score:    0.9,
+		CandidateScores: map[string]float32{
+			resolved.Candidates[0].ArmID: 0.1,
+			resolved.Candidates[1].ArmID: 0.9,
+		},
 	}}
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
 		Strategy: router.Strategy("future-policy"),
@@ -151,6 +155,14 @@ func TestSidecarRouterDispatchesSidecarSelectedArm(t *testing.T) {
 	assert.Equal(t, selected.CatalogID, decision.Model)
 	assert.Equal(t, selected.Provider, decision.Provider)
 	assert.Equal(t, selected.ArmID, decision.Metadata.SelectedArmID)
+	assert.Equal(t, map[string]string{
+		resolved.Candidates[0].ArmID: resolved.Candidates[0].Provider,
+		resolved.Candidates[1].ArmID: resolved.Candidates[1].Provider,
+	}, decision.Metadata.CandidateArmProviders)
+	assert.Equal(t, map[string]float32{
+		resolved.Candidates[0].ArmID: 0.1,
+		resolved.Candidates[1].ArmID: 0.9,
+	}, decision.Metadata.CandidateArmScores)
 	assert.Equal(t, policy.SchemaVersionV2, decider.query.SchemaVersion)
 }
 

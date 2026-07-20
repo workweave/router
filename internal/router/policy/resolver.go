@@ -144,6 +144,15 @@ func (r ResolvedCandidates) CandidateProviders() map[string]string {
 	return result
 }
 
+// CandidateArmProviders returns the resolved provider for every configuration-level arm.
+func (r ResolvedCandidates) CandidateArmProviders() map[string]string {
+	result := make(map[string]string, len(r.Candidates))
+	for _, candidate := range r.Candidates {
+		result[candidate.ArmID] = candidate.Provider
+	}
+	return result
+}
+
 // CatalogCandidateScores translates sidecar roster IDs to telemetry catalog IDs.
 func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) map[string]float32 {
 	result := make(map[string]float32, len(scores))
@@ -154,6 +163,20 @@ func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) ma
 		}
 		if binding, ok := r.ByRosterID[selectionID]; ok {
 			result[binding.CatalogID] = score
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ArmCandidateScores keeps arm-level scores distinct for configuration-aware telemetry.
+func (r ResolvedCandidates) ArmCandidateScores(scores map[string]float32) map[string]float32 {
+	result := make(map[string]float32, len(scores))
+	for armID, score := range scores {
+		if _, ok := r.ByArmID[armID]; ok {
+			result[armID] = score
 		}
 	}
 	if len(result) == 0 {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"workweave/router/internal/router"
 	"workweave/router/internal/router/policy"
 )
 
@@ -41,4 +42,16 @@ func TestMakeArmIDBindsEveryConfigurationField(t *testing.T) {
 	changed.ToolConfigurationSHA256 = strings.Repeat("d", 64)
 
 	assert.NotEqual(t, policy.MakeArmID(identity), policy.MakeArmID(changed))
+}
+
+func TestDeriveArmContextIncludesIngressAndForceEffort(t *testing.T) {
+	base := router.Request{ReasoningConfigurationSHA256: strings.Repeat("a", 64)}
+	forced := base
+	forced.RoutingKnobs = &router.Overrides{ForceEffort: "high"}
+
+	assert.NotEqual(
+		t,
+		policy.DeriveArmContext(base).ReasoningConfigurationSHA256,
+		policy.DeriveArmContext(forced).ReasoningConfigurationSHA256,
+	)
 }
