@@ -69,13 +69,17 @@ func TestArmResolverEnumeratesEachAllowedProviderBinding(t *testing.T) {
 		resolved.Candidates[0].ArmID: resolved.Candidates[0].Provider,
 		resolved.Candidates[1].ArmID: resolved.Candidates[1].Provider,
 	}, resolved.CandidateArmProviders())
+	armScores := map[string]float32{
+		resolved.Candidates[0].ArmID: 0.1,
+		resolved.Candidates[1].ArmID: 0.2,
+	}
+	assert.Equal(t, armScores, resolved.ArmCandidateScores(armScores))
+	assert.Equal(t, map[string]string{
+		resolved.Candidates[0].CatalogID: resolved.Candidates[0].Provider,
+	}, resolved.CandidateProviders())
 	assert.Equal(t, map[string]float32{
-		resolved.Candidates[0].ArmID: 0.1,
-		resolved.Candidates[1].ArmID: 0.2,
-	}, resolved.ArmCandidateScores(map[string]float32{
-		resolved.Candidates[0].ArmID: 0.1,
-		resolved.Candidates[1].ArmID: 0.2,
-	}))
+		resolved.Candidates[0].CatalogID: 0.1,
+	}, resolved.CatalogCandidateScores(armScores))
 	for _, candidate := range resolved.Candidates {
 		binding, ok := resolved.BindingForSelection(candidate.ArmID, "")
 		require.True(t, ok)

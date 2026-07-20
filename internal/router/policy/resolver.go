@@ -139,6 +139,9 @@ func (r ResolvedCandidates) CandidateArmIDs() []string {
 func (r ResolvedCandidates) CandidateProviders() map[string]string {
 	result := make(map[string]string, len(r.Candidates))
 	for _, candidate := range r.Candidates {
+		if _, exists := result[candidate.CatalogID]; exists {
+			continue
+		}
 		result[candidate.CatalogID] = candidate.Provider
 	}
 	return result
@@ -156,13 +159,16 @@ func (r ResolvedCandidates) CandidateArmProviders() map[string]string {
 // CatalogCandidateScores translates sidecar roster IDs to telemetry catalog IDs.
 func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) map[string]float32 {
 	result := make(map[string]float32, len(scores))
-	for selectionID, score := range scores {
-		if binding, ok := r.ByArmID[selectionID]; ok {
-			result[binding.CatalogID] = score
+	for _, candidate := range r.Candidates {
+		if _, exists := result[candidate.CatalogID]; exists {
 			continue
 		}
-		if binding, ok := r.ByRosterID[selectionID]; ok {
-			result[binding.CatalogID] = score
+		score, ok := scores[candidate.ArmID]
+		if !ok {
+			score, ok = scores[candidate.RosterID]
+		}
+		if ok {
+			result[candidate.CatalogID] = score
 		}
 	}
 	if len(result) == 0 {

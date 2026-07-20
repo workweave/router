@@ -381,11 +381,11 @@ func marshalRouteRequest(query policy.Query) ([]byte, error) {
 	models := make([]string, 0, len(query.Candidates))
 	providerMap := make(map[string]string, len(query.Candidates))
 	for _, candidate := range query.Candidates {
-		models = append(models, candidate.RosterID)
 		providerKey := candidate.RosterID
 		if schemaVersion == policy.SchemaVersionV2 {
 			providerKey = candidate.ArmID
 		}
+		models = append(models, providerKey)
 		providerMap[providerKey] = candidate.Provider
 	}
 	messages := routeMessages(query.ConversationMessages)

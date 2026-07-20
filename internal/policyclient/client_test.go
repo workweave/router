@@ -197,6 +197,7 @@ func TestClientPostsArmProviderMapForV2(t *testing.T) {
 		"arm-fireworks": providers.ProviderFireworks,
 		"arm-makora":    providers.ProviderMakora,
 	}, got.CandidateProviders)
+	assert.Equal(t, []string{"arm-fireworks", "arm-makora"}, got.CandidateModels)
 }
 
 func TestClientAcceptsLegacyRouteResponse(t *testing.T) {
