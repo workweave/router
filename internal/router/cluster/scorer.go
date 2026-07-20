@@ -37,7 +37,10 @@ func DefaultConfig() Config {
 	return Config{
 		TopP:           4,
 		MaxPromptChars: 1024,
-		EmbedTimeout:   1500 * time.Millisecond,
+		// A cold or CPU-contended ONNX inference can exceed 1.5s even after
+		// boot warm-up (NewEmbedder primes the pipeline; this is the cushion
+		// for contention spikes). Overridable via ROUTER_CLUSTER_EMBED_TIMEOUT_MS.
+		EmbedTimeout: 2500 * time.Millisecond,
 	}
 }
 
