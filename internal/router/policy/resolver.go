@@ -3,6 +3,8 @@
 package policy
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"sort"
 
 	"workweave/router/internal/providers"
@@ -64,6 +66,7 @@ type Diagnostic struct {
 
 // Candidate is one catalog-backed model offered to a policy sidecar.
 type Candidate struct {
+	ArmID                     string                `json:"arm_id"`
 	RosterID                  string                `json:"roster_id"`
 	CatalogID                 string                `json:"catalog_id"`
 	Provider                  string                `json:"provider"`
@@ -91,13 +94,15 @@ type CandidateCapabilities struct {
 
 // Binding is the authoritative dispatch binding for an offered roster ID.
 type Binding struct {
-	CatalogID string
-	Provider  string
+	CatalogID  string
+	Provider   string
+	UpstreamID string
 }
 
 // ResolvedCandidates is the complete result of candidate resolution.
 type ResolvedCandidates struct {
 	Candidates  []Candidate
+	ByArmID     map[string]Binding
 	ByRosterID  map[string]Binding
 	Diagnostics []Diagnostic
 }
@@ -123,8 +128,12 @@ func (r ResolvedCandidates) CandidateProviders() map[string]string {
 // CatalogCandidateScores translates sidecar roster IDs to telemetry catalog IDs.
 func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) map[string]float32 {
 	result := make(map[string]float32, len(scores))
-	for rosterID, score := range scores {
-		if binding, ok := r.ByRosterID[rosterID]; ok {
+	for selectionID, score := range scores {
+		if binding, ok := r.ByArmID[selectionID]; ok {
+			result[binding.CatalogID] = score
+			continue
+		}
+		if binding, ok := r.ByRosterID[selectionID]; ok {
 			result[binding.CatalogID] = score
 		}
 	}
@@ -136,12 +145,13 @@ func (r ResolvedCandidates) CatalogCandidateScores(scores map[string]float32) ma
 
 // Resolver builds the eligible catalog-backed candidate set for a policy.
 type Resolver struct {
-	deployed       map[string]struct{}
-	available      map[string]struct{}
-	mapper         RosterMapper
-	providerPolicy ProviderPolicy
-	toolLow        map[string]struct{}
-	imageLow       map[string]struct{}
+	deployed          map[string]struct{}
+	available         map[string]struct{}
+	mapper            RosterMapper
+	providerPolicy    ProviderPolicy
+	enumerateBindings bool
+	toolLow           map[string]struct{}
+	imageLow          map[string]struct{}
 }
 
 // NewResolver constructs a reusable policy candidate resolver.
@@ -154,6 +164,15 @@ func NewResolver(deployed, available map[string]struct{}, mapper RosterMapper, p
 		toolLow:        catalog.ToolUseLowSet(),
 		imageLow:       catalog.ImageUnsupportedSet(),
 	}
+}
+
+// NewArmResolver returns every enabled catalog provider binding as a distinct
+// policy candidate. It is for policies that score dispatch arms rather than
+// logical catalog models; existing policy artifacts should keep NewResolver.
+func NewArmResolver(deployed, available map[string]struct{}, mapper RosterMapper, providerPolicy ProviderPolicy) *Resolver {
+	resolver := NewResolver(deployed, available, mapper, providerPolicy)
+	resolver.enumerateBindings = true
+	return resolver
 }
 
 type eligibleCandidate struct {
@@ -198,58 +217,73 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 		if providerSet == nil {
 			providerSet = r.available
 		}
-		binding, ok := catalog.ResolveBinding(id, r.allowedProviders(providerSet))
-		if !ok {
+		allowedBindings := catalog.AvailableBindings(
+			id,
+			r.allowedProviders(providerSet),
+		)
+		if len(allowedBindings) == 0 {
 			reason := ExclusionNoProvider
-			if unrestrictedBinding, found := catalog.ResolveBinding(id, providerSet); found && !r.providerPolicy.Allows(unrestrictedBinding.Provider) {
+			if unrestrictedBindings := catalog.AvailableBindings(id, providerSet); len(unrestrictedBindings) > 0 {
 				reason = ExclusionProviderPolicy
 			}
 			diagnostics = append(diagnostics, Diagnostic{CatalogID: id, RosterID: rosterID, Reason: reason})
 			continue
 		}
 
-		marginalCostFactor := 1.0
-		if factor, found := req.SubsidizedModelCostFactor[id]; found && factor > 0 {
-			marginalCostFactor = factor
+		if !r.enumerateBindings {
+			allowedBindings = allowedBindings[:1]
 		}
-		base = append(base, eligibleCandidate{Candidate: Candidate{
-			RosterID:                  rosterID,
-			CatalogID:                 id,
-			Provider:                  binding.Provider,
-			UpstreamID:                upstreamID(id, binding.UpstreamID),
-			PreferenceRank:            preferenceRanks[id],
-			InputUSDPer1M:             binding.Price.InputUSDPer1M,
-			OutputUSDPer1M:            binding.Price.OutputUSDPer1M,
-			EstimatedCostUSD:          estimatedCostUSD(req, binding.Price),
-			CacheReadMultiplier:       binding.Price.EffectiveCacheReadMultiplier(),
-			MarginalCostFactor:        marginalCostFactor,
-			EffectiveInputUSDPer1M:    binding.Price.InputUSDPer1M * marginalCostFactor,
-			EffectiveOutputUSDPer1M:   binding.Price.OutputUSDPer1M * marginalCostFactor,
-			EffectiveEstimatedCostUSD: estimatedCostUSD(req, binding.Price) * marginalCostFactor,
-			Capabilities: CandidateCapabilities{
-				ContextWindow:  contextWindow,
-				Tier:           model.Tier.String(),
-				SupportsTools:  model.ToolUseQuality != catalog.ToolUseLow && model.AgenticUse != catalog.AgenticLow,
-				SupportsImages: model.ImageInput != catalog.ImageInputUnsupported,
-			},
-		}})
+		for _, binding := range allowedBindings {
+			upstreamID := upstreamID(id, binding.UpstreamID)
+			armID := rosterID
+			if r.enumerateBindings {
+				armID = makeArmID(rosterID, id, binding.Provider, upstreamID)
+			}
+			marginalCostFactor := 1.0
+			if factor, found := req.SubsidizedModelCostFactor[id]; found && factor > 0 {
+				marginalCostFactor = factor
+			}
+			base = append(base, eligibleCandidate{Candidate: Candidate{
+				ArmID:                     armID,
+				RosterID:                  rosterID,
+				CatalogID:                 id,
+				Provider:                  binding.Provider,
+				UpstreamID:                upstreamID,
+				PreferenceRank:            preferenceRanks[id],
+				InputUSDPer1M:             binding.Price.InputUSDPer1M,
+				OutputUSDPer1M:            binding.Price.OutputUSDPer1M,
+				EstimatedCostUSD:          estimatedCostUSD(req, binding.Price),
+				CacheReadMultiplier:       binding.Price.EffectiveCacheReadMultiplier(),
+				MarginalCostFactor:        marginalCostFactor,
+				EffectiveInputUSDPer1M:    binding.Price.InputUSDPer1M * marginalCostFactor,
+				EffectiveOutputUSDPer1M:   binding.Price.OutputUSDPer1M * marginalCostFactor,
+				EffectiveEstimatedCostUSD: estimatedCostUSD(req, binding.Price) * marginalCostFactor,
+				Capabilities: CandidateCapabilities{
+					ContextWindow:  contextWindow,
+					Tier:           model.Tier.String(),
+					SupportsTools:  model.ToolUseQuality != catalog.ToolUseLow && model.AgenticUse != catalog.AgenticLow,
+					SupportsImages: model.ImageInput != catalog.ImageInputUnsupported,
+				},
+			}})
+		}
 	}
 
 	base, diagnostics = softFilter(base, req.HasImages, r.imageLow, ExclusionImageCapability, diagnostics)
 	base, diagnostics = softFilter(base, req.HasTools, r.toolLow, ExclusionToolCapability, diagnostics)
 
-	rosterCounts := make(map[string]int, len(base))
+	selectionCounts := make(map[string]int, len(base))
 	for _, candidate := range base {
-		rosterCounts[candidate.RosterID]++
+		selectionCounts[candidate.ArmID]++
 	}
 
 	resolved := ResolvedCandidates{
 		Candidates:  make([]Candidate, 0, len(base)),
+		ByArmID:     make(map[string]Binding, len(base)),
 		ByRosterID:  make(map[string]Binding, len(base)),
 		Diagnostics: diagnostics,
 	}
 	for _, candidate := range base {
-		if rosterCounts[candidate.RosterID] > 1 {
+		if selectionCounts[candidate.ArmID] > 1 {
 			resolved.Diagnostics = append(resolved.Diagnostics, Diagnostic{
 				CatalogID: candidate.CatalogID,
 				RosterID:  candidate.RosterID,
@@ -258,9 +292,30 @@ func (r *Resolver) Resolve(req router.Request) ResolvedCandidates {
 			continue
 		}
 		resolved.Candidates = append(resolved.Candidates, candidate.Candidate)
-		resolved.ByRosterID[candidate.RosterID] = Binding{CatalogID: candidate.CatalogID, Provider: candidate.Provider}
+		binding := Binding{
+			CatalogID:  candidate.CatalogID,
+			Provider:   candidate.Provider,
+			UpstreamID: candidate.UpstreamID,
+		}
+		resolved.ByArmID[candidate.ArmID] = binding
+		if _, exists := resolved.ByRosterID[candidate.RosterID]; !exists {
+			resolved.ByRosterID[candidate.RosterID] = binding
+		} else {
+			delete(resolved.ByRosterID, candidate.RosterID)
+		}
 	}
 	return resolved
+}
+
+// BindingForSelection resolves a sidecar selection by arm ID first, then
+// preserves legacy roster-ID selection for existing policy artifacts.
+func (r ResolvedCandidates) BindingForSelection(armID, rosterID string) (Binding, bool) {
+	if armID != "" {
+		binding, ok := r.ByArmID[armID]
+		return binding, ok
+	}
+	binding, ok := r.ByRosterID[rosterID]
+	return binding, ok
 }
 
 func upstreamID(catalogID, bindingID string) string {
@@ -268,6 +323,13 @@ func upstreamID(catalogID, bindingID string) string {
 		return bindingID
 	}
 	return catalogID
+}
+
+func makeArmID(rosterID, catalogID, provider, upstreamID string) string {
+	sum := sha256.Sum256([]byte(
+		rosterID + "\x00" + catalogID + "\x00" + provider + "\x00" + upstreamID,
+	))
+	return fmt.Sprintf("arm_%x", sum)
 }
 
 func estimatedCostUSD(req router.Request, pricing catalog.Pricing) float64 {

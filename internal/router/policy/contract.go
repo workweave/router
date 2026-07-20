@@ -78,6 +78,7 @@ type Query struct {
 type Result struct {
 	SchemaVersion        string
 	RouteID              string
+	ArmID                string
 	Model                string
 	Provider             string
 	Score                float64

@@ -25,6 +25,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(routeResponse{
 			SchemaVersion:        policy.SchemaVersionV1,
 			RouteID:              "route-1",
+			SelectedArmID:        "arm-kimi-fireworks",
 			SelectedRosterID:     "moonshotai/kimi-k2.7-code",
 			SelectedProvider:     providers.ProviderFireworks,
 			ChosenScore:          floatPtr(0.91),
@@ -91,6 +92,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 		ClientSessionID: "client-session-abc",
 		TrainingAllowed: true,
 		Candidates: []policy.Candidate{{
+			ArmID:          "arm-kimi-fireworks",
 			RosterID:       "moonshotai/kimi-k2.7-code",
 			CatalogID:      "moonshotai/kimi-k2.7",
 			Provider:       providers.ProviderFireworks,
@@ -146,6 +148,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "success", got.ConversationMessages[2].ToolResults[0].ExitCategory)
 	assert.Empty(t, got.ConversationMessages[3].ToolCalls[0].InputJSON)
 	require.Len(t, got.Candidates, 1)
+	assert.Equal(t, "arm-kimi-fireworks", got.Candidates[0].ArmID)
 	assert.Equal(t, "moonshotai/kimi-k2.7", got.Candidates[0].CatalogID)
 	assert.Equal(t, "accounts/fireworks/models/kimi-k2p5", got.Candidates[0].UpstreamID)
 	assert.Equal(t, "balanced|open", result.PolicyRouteKey)
@@ -153,6 +156,7 @@ func TestClientPostsVersionedRouteAndParsesPolicyMetadata(t *testing.T) {
 	assert.Equal(t, "hmm-prod", result.PolicyArtifactID)
 	assert.Equal(t, "sha256:abc", result.PolicyArtifactSHA256)
 	assert.Equal(t, "roster-v2", result.RosterVersion)
+	assert.Equal(t, "arm-kimi-fireworks", result.ArmID)
 	assert.Equal(t, "debug-1", result.DebugRef)
 	assert.Equal(t, 0.91, result.Score)
 	assert.Equal(t, map[string]float32{"moonshotai/kimi-k2.7-code": 0.91}, result.CandidateScores)

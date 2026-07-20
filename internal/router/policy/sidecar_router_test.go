@@ -125,6 +125,33 @@ func TestSidecarRouterOnboardsFutureStrategyWithoutProxyChanges(t *testing.T) {
 	assert.Equal(t, "positive", decider.feedback["feedback"])
 }
 
+func TestSidecarRouterDispatchesSidecarSelectedArm(t *testing.T) {
+	resolver := policy.NewArmResolver(
+		set("deepseek/deepseek-v4-pro"),
+		set(providers.ProviderMakora, providers.ProviderFireworks),
+		func(model catalog.Model) string { return model.ID },
+		policy.ManagedProviderPolicy(),
+	)
+	resolved := resolver.Resolve(router.Request{})
+	require.Len(t, resolved.Candidates, 2)
+	selected := resolved.Candidates[1]
+	decider := &recordingPolicy{result: policy.Result{
+		ArmID:    selected.ArmID,
+		Provider: selected.Provider,
+		Score:    0.9,
+	}}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.Strategy("future-policy"),
+	}, decider, resolver)
+
+	decision, err := adapter.Route(context.Background(), router.Request{})
+
+	require.NoError(t, err)
+	assert.Equal(t, selected.CatalogID, decision.Model)
+	assert.Equal(t, selected.Provider, decision.Provider)
+	assert.Equal(t, selected.ArmID, decision.Metadata.SelectedArmID)
+}
+
 func TestSidecarRouterMarksShadowDecisionsNonLearning(t *testing.T) {
 	decider := &recordingPolicy{result: policy.Result{Model: "gpt-5.5"}}
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{

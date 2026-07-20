@@ -304,9 +304,9 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		observability.FromContext(ctx).Error("Policy router sidecar decision failed", "strategy", strategy, "err", err)
 		return router.Decision{}, fmt.Errorf("%s: sidecar decide: %w: %w", strategy, err, r.config.Unavailable)
 	}
-	binding, ok := resolved.ByRosterID[res.Model]
+	binding, ok := resolved.BindingForSelection(res.ArmID, res.Model)
 	if !ok {
-		return router.Decision{}, fmt.Errorf("%s: sidecar returned unknown model %q: %w", strategy, res.Model, r.config.Unavailable)
+		return router.Decision{}, fmt.Errorf("%s: sidecar returned unknown arm %q or model %q: %w", strategy, res.ArmID, res.Model, r.config.Unavailable)
 	}
 	if res.Provider != "" && res.Provider != binding.Provider {
 		return router.Decision{}, fmt.Errorf("%s: sidecar returned provider %q for %q, expected %q: %w", strategy, res.Provider, res.Model, binding.Provider, r.config.Unavailable)
@@ -337,6 +337,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		"route_id", routeID,
 		"model", binding.CatalogID,
 		"provider", binding.Provider,
+		"arm_id", res.ArmID,
 		"roster_model", res.Model,
 		"score", res.Score,
 	)
@@ -357,6 +358,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 			PolicyArtifactID:              res.PolicyArtifactID,
 			PolicyArtifactSHA256:          res.PolicyArtifactSHA256,
 			RosterVersion:                 res.RosterVersion,
+			SelectedArmID:                 res.ArmID,
 			SidecarSchemaVersion:          res.SchemaVersion,
 			DebugRef:                      debugRef,
 			AuthoritativePerTurnSelection: capabilities.AuthoritativePerTurnSelection,

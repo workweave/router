@@ -216,6 +216,7 @@ type routeToolResult struct {
 type routeResponse struct {
 	SchemaVersion        string                 `json:"schema_version"`
 	RouteID              string                 `json:"route_id"`
+	SelectedArmID        string                 `json:"selected_arm_id"`
 	SelectedRosterID     string                 `json:"selected_roster_id"`
 	SelectedProvider     string                 `json:"selected_provider"`
 	Model                string                 `json:"model"`
@@ -294,8 +295,8 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		return policy.Result{}, fmt.Errorf("unsupported policy route schema %q", parsed.SchemaVersion)
 	}
 	selectedModel := firstNonEmpty(parsed.SelectedRosterID, parsed.Model)
-	if selectedModel == "" {
-		return policy.Result{}, fmt.Errorf("policy sidecar returned empty model")
+	if parsed.SelectedArmID == "" && selectedModel == "" {
+		return policy.Result{}, fmt.Errorf("policy sidecar returned empty arm and model")
 	}
 	score := parsed.Score
 	if parsed.ChosenScore != nil {
@@ -304,6 +305,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 	return policy.Result{
 		SchemaVersion:        parsed.SchemaVersion,
 		RouteID:              parsed.RouteID,
+		ArmID:                parsed.SelectedArmID,
 		Model:                selectedModel,
 		Provider:             parsed.SelectedProvider,
 		Score:                score,

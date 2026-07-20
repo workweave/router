@@ -47,6 +47,30 @@ func TestResolverDefaultsUpstreamIDToCatalogID(t *testing.T) {
 
 	require.Len(t, resolved.Candidates, 1)
 	assert.Equal(t, "claude-opus-4-8", resolved.Candidates[0].UpstreamID)
+	assert.Equal(t, resolved.Candidates[0].RosterID, resolved.Candidates[0].ArmID)
+}
+
+func TestArmResolverEnumeratesEachAllowedProviderBinding(t *testing.T) {
+	resolver := policy.NewArmResolver(
+		set("deepseek/deepseek-v4-pro"),
+		set(providers.ProviderMakora, providers.ProviderFireworks),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{})
+
+	require.Len(t, resolved.Candidates, 2)
+	assert.Equal(t, "deepseek/deepseek-v4-pro", resolved.Candidates[0].RosterID)
+	assert.Equal(t, "deepseek/deepseek-v4-pro", resolved.Candidates[1].RosterID)
+	assert.NotEqual(t, resolved.Candidates[0].ArmID, resolved.Candidates[1].ArmID)
+	assert.Empty(t, resolved.ByRosterID)
+	for _, candidate := range resolved.Candidates {
+		binding, ok := resolved.BindingForSelection(candidate.ArmID, "")
+		require.True(t, ok)
+		assert.Equal(t, candidate.Provider, binding.Provider)
+		assert.Equal(t, candidate.UpstreamID, binding.UpstreamID)
+	}
 }
 
 func TestResolverAppliesHardFiltersAndPreferenceRanks(t *testing.T) {

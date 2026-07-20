@@ -238,6 +238,7 @@ type RoutingMetadata struct {
 	PolicyArtifactID     string
 	PolicyArtifactSHA256 string
 	RosterVersion        string
+	SelectedArmID        string
 	SidecarSchemaVersion string
 	DebugRef             string
 	// AuthoritativePerTurnSelection means downstream orchestration may retry
