@@ -39,10 +39,10 @@ func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (pr
 	if err != nil {
 		return providers.PreparedRequest{}, err
 	}
-	return providers.PreparedRequest{Body: body, Headers: deriveAnthropicHeaders(in, opts)}, nil
+	return providers.PreparedRequest{Body: body, Headers: deriveAnthropicHeaders(in, opts, body)}, nil
 }
 
-func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
+func deriveAnthropicHeaders(in http.Header, opts EmitOptions, body []byte) http.Header {
 	h := make(http.Header)
 	if v := in.Get("anthropic-version"); v != "" {
 		h.Set("anthropic-version", v)
@@ -53,6 +53,9 @@ func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
 	if opts.EnableExtendedContext && router.Lookup(opts.TargetModel).Supports(router.CapExtendedContext) {
 		beta = ensureBetaToken(beta, context1MBeta)
 	}
+	if gjson.GetBytes(body, "context_management").Exists() {
+		beta = ensureBetaToken(beta, contextManagementBeta)
+	}
 	if beta != "" {
 		h.Set("anthropic-beta", beta)
 	}
@@ -62,6 +65,8 @@ func deriveAnthropicHeaders(in http.Header, opts EmitOptions) http.Header {
 // context1MBeta unlocks the 1M-token context window for CapExtendedContext
 // models; native-1M models (Fable 5) accept it as a no-op.
 const context1MBeta = "context-1m-2025-08-07"
+
+const contextManagementBeta = "context-management-2025-06-27"
 
 // ensureBetaToken appends token to a comma-separated anthropic-beta list when
 // absent, preserving any tokens the client already sent.
