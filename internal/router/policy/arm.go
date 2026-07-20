@@ -10,8 +10,6 @@ import (
 	"workweave/router/internal/router"
 )
 
-const catalogModelRevision = "catalog-v1"
-
 // ArmIdentity is the complete immutable identity of one dispatchable temporal-Q
 // action. It intentionally mirrors temporal_q.ids.make_arm_id.
 type ArmIdentity struct {
@@ -28,7 +26,6 @@ type ArmIdentity struct {
 // dispatched model action.
 type ArmContext struct {
 	Endpoint                     string
-	ModelRevision                string
 	ReasoningConfigurationSHA256 string
 	ToolConfigurationSHA256      string
 }
@@ -47,7 +44,6 @@ func MakeArmID(identity ArmIdentity) string {
 func DeriveArmContext(req router.Request) ArmContext {
 	context := ArmContext{
 		Endpoint:                     string(req.TranslationRequirements.Endpoint),
-		ModelRevision:                catalogModelRevision,
 		ReasoningConfigurationSHA256: combineReasoningConfigurationHash(req),
 		ToolConfigurationSHA256:      req.ToolConfigurationSHA256,
 	}
