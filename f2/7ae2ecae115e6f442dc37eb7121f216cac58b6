@@ -1,0 +1,19 @@
+README.md
+  s_abee20ee5d1517::t_63e24bdba7afb3 26,32-33,168-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "f27ae2ecae115e6f442dc37eb7121f216cac58b6",
+  "prompts": {},
+  "sessions": {
+    "s_abee20ee5d1517": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0882b0e-846d-4894-8cce-9a6be49e499c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

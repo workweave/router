@@ -1,0 +1,21 @@
+internal/providers/google/native_client.go
+  s_14149f8f972376::t_fe1284957633cc 121
+internal/proxy/gemini.go
+  s_14149f8f972376::t_fe1284957633cc 193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "ace9265e1c50d21a8cebed1d161a3c03911805a8",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

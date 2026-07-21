@@ -1,0 +1,66 @@
+internal/translate/emit_openai.go
+  s_13f8c85dce1040::t_8016ae9c1ab989 75-77
+  s_13f8c85dce1040::t_cc568157d829b8 117-123
+internal/providers/families_test.go
+  s_13f8c85dce1040::t_63721036909cda 55
+internal/router/rl/mapping.go
+  s_13f8c85dce1040::t_2421fadce88bf9 39-40
+internal/translate/session_affinity_coverage_test.go
+  s_13f8c85dce1040::t_d12b8f221e617d 21,38
+  s_13f8c85dce1040::t_74faad0fbcf897 107,114,119,121-125,129,134
+install/install.sh
+  s_13f8c85dce1040::t_f9a0db61644237 609-610
+  s_13f8c85dce1040::t_9ae65b7fd56047 2116,2178
+  s_13f8c85dce1040::t_44f1f81f6078a9 778-779
+cmd/router/main.go
+  s_13f8c85dce1040::t_f3a360a5ff8531 261-268
+  s_13f8c85dce1040::t_b8d63c53a15a2e 260
+.env.example
+  s_13f8c85dce1040::t_4b6dd85c9e9051 41-43
+internal/providers/openaicompat/client.go
+  s_13f8c85dce1040::t_5f117afd09e0c6 35-36
+install/cc-statusline.sh
+  s_13f8c85dce1040::t_9ae65b7fd56047 173,235
+internal/router/catalog/catalog_test.go
+  s_13f8c85dce1040::t_d11f73d026d96f 37
+internal/router/catalog/catalog.go
+  s_13f8c85dce1040::t_a9664ff8fead01 274-280
+internal/router/model.go
+  s_13f8c85dce1040::t_8c880e02d688f3 110-113
+internal/observability/otel/pricing_test.go
+  s_13f8c85dce1040::t_7a866a4f711bea 33-35
+internal/providers/CLAUDE.md
+  s_13f8c85dce1040::t_e92f82eadbf257 22
+internal/proxy/force_model.go
+  s_13f8c85dce1040::t_5823207a5de80a 57-60
+internal/providers/AGENTS.md
+  s_13f8c85dce1040::t_927c7f263c999f 22
+internal/translate/session_affinity_test.go
+  s_13f8c85dce1040::t_11e3441a496809 103-120
+internal/providers/provider.go
+  s_13f8c85dce1040::t_1a0a5a8ffeab7c 91
+  s_13f8c85dce1040::t_d329a02a013e85 166
+  s_13f8c85dce1040::t_427392de76944b 57
+  s_13f8c85dce1040::t_57268886375b6e 74
+  s_13f8c85dce1040::t_fabef9cf301dae 145
+internal/router/rl/mapping_internal_test.go
+  s_13f8c85dce1040::t_2aa235c8222ae5 23
+internal/router/hmm/hmm_test.go
+  s_13f8c85dce1040::t_137165610b0429 184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "67f36b520f53088d8779ea5548f4114cc7600959",
+  "prompts": {},
+  "sessions": {
+    "s_13f8c85dce1040": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "982ea22a-b50a-41ed-9a66-70ac8f95451d",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

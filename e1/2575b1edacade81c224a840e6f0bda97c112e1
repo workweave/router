@@ -1,0 +1,19 @@
+internal/translate/text_repetition.go
+  s_6d259d23791b23::t_ae14b04649acfc 48-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e12575b1edacade81c224a840e6f0bda97c112e1",
+  "prompts": {},
+  "sessions": {
+    "s_6d259d23791b23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52423c3-9d52-4a6a-bb28-ac4c96a85b4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

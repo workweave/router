@@ -1,0 +1,21 @@
+internal/policyclient/client.go
+  s_0cb555d8dc2e1e::t_911c3af0b02360 104
+internal/policyclient/client_test.go
+  s_0cb555d8dc2e1e::t_7edb8d8a262ba6 417-434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6439a9cf1928d32f1eb12a5e742887724fe62e57",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

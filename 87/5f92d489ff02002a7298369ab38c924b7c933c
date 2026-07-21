@@ -1,0 +1,33 @@
+internal/router/catalog/catalog_test.go
+  s_0d150871c5d814::t_70be5f201893fc 36
+install/cc-statusline.sh
+  s_0d150871c5d814::t_7469ed1396075f 139-140,195-196
+internal/router/catalog/catalog.go
+  s_0d150871c5d814::t_02eda943fd3e95 360-361,367-368
+internal/providers/openaicompat/client.go
+  s_0d150871c5d814::t_d00704d44793be 31-36
+internal/providers/provider.go
+  s_0d150871c5d814::t_e6336547454764 53
+  s_0d150871c5d814::t_6d41e508ebbbd1 66
+cmd/router/main.go
+  s_0d150871c5d814::t_dbe5a524711ac0 287-308
+  s_0d150871c5d814::t_b1bb0f5edbc68e 286
+install/install.sh
+  s_0d150871c5d814::t_7469ed1396075f 2079-2080,2135-2136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "875f92d489ff02002a7298369ab38c924b7c933c",
+  "prompts": {},
+  "sessions": {
+    "s_0d150871c5d814": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61f3f057-5b24-4e76-b870-376afe9fb928",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

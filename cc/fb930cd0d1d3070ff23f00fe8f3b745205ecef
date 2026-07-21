@@ -1,0 +1,21 @@
+internal/translate/tool_choice.go
+  s_c4ecee41717be0::t_8a89e8f876d804 10-13,22-26,33,36-38,49,53,72,78,82
+internal/translate/gemini_test.go
+  s_c4ecee41717be0::t_4639072b02c153 167-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ccfb930cd0d1d3070ff23f00fe8f3b745205ecef",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+internal/api/anthropic/messages.go
+  s_015140c7959418::t_673ab4fc4f09c3 75-86
+  s_015140c7959418::t_0f9b27275c3823 26-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5356928232b27c5e6ee8455a6946ef14dfe38494",
+  "prompts": {},
+  "sessions": {
+    "s_015140c7959418": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7538c42e-28a3-4b24-a319-c43db6be541d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

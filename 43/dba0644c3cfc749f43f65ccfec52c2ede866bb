@@ -1,0 +1,26 @@
+internal/proxy/subsidy.go
+  s_b18bc9729f39f4::t_9785015f2b0ed9 87-90
+  s_b18bc9729f39f4::t_2a6ec6f5a29ddc 73-80
+internal/server/middleware/balance_check_test.go
+  s_b18bc9729f39f4::t_44abdd5c7c0670 267-353
+  s_b18bc9729f39f4::t_812e48849c170f 13
+internal/server/middleware/balance_check.go
+  s_b18bc9729f39f4::t_a897216aa25cce 23,26-30
+  s_b18bc9729f39f4::t_c262d829b7d8f3 54-62,66-73,102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "43dba0644c3cfc749f43f65ccfec52c2ede866bb",
+  "prompts": {},
+  "sessions": {
+    "s_b18bc9729f39f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11211f04-6285-4698-b0d4-08eceec415a4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
