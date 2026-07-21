@@ -12,10 +12,7 @@ type RouterFeedbackResult struct {
 	// note-only command. Set from the /rf+ /rf- shortcuts or a leading
 	// 👍/👎/+/-/up/down token in the note.
 	Rating string
-	// SuggestedLabel is the complexity label ("fast", "explore", "balanced",
-	// "high", "maximum") extracted from a trailing --label="<value>" flag.
-	// Set when the submitter believes the turn needed a different complexity
-	// band, typically alongside a negative verdict.
+	// SuggestedLabel is the complexity label extracted from a trailing --label="<value>" flag.
 	SuggestedLabel string
 	// Feedback is the free-form note the user submitted after the command,
 	// minus any leading rating token and trailing --label flag.
@@ -135,10 +132,13 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	// Extract trailing --label="..." from the feedback text; the flag is
-	// stripped so the persisted note is clean.
+	// A --label correction only applies to a negative verdict; for any other
+	// rating the flag is just prose and stays in the note. When it applies, the
+	// trailing flag is stripped so the persisted note is clean.
 	var label string
-	label, feedback = stripTrailingLabel(feedback)
+	if rating == RouterFeedbackRatingDown {
+		label, feedback = stripTrailingLabel(feedback)
+	}
 	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback}, true, strings.TrimSpace(prefix)
 }
 
@@ -260,10 +260,7 @@ func splitLeadingRating(s string) (rating, rest string) {
 	return "", s
 }
 
-// stripTrailingLabel extracts and removes a trailing --label="<value>" flag
-// from the feedback text. Returns the label and the cleaned text. The label
-// is validated against the closed RouterFeedbackLabels vocabulary; unrecognized
-// values are silently dropped.
+// stripTrailingLabel removes a trailing --label="<value>" flag from s, validates it against RouterFeedbackLabels, and returns the label and cleaned text.
 func stripTrailingLabel(s string) (label, cleaned string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -276,8 +273,10 @@ func stripTrailingLabel(s string) (label, cleaned string) {
 	}
 
 	rest := s[idx+len("--label="):]
-	val, _, ok := extractQuotedOrBareValue(rest)
-	if !ok {
+	val, tail, ok := extractQuotedOrBareValue(rest)
+	// The flag must be genuinely trailing: any text after the value means the
+	// "--label=" was prose, not a flag, so leave the note untouched.
+	if !ok || strings.TrimSpace(tail) != "" {
 		return "", s
 	}
 	val = strings.ToLower(strings.TrimSpace(val))

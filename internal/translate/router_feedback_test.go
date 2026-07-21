@@ -176,11 +176,30 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			wantFound:          true,
 		},
 		{
-			name:               "rf+ with label is preserved",
+			// A --label correction only applies to a negative verdict; on a
+			// positive rating the flag stays as prose and no label is extracted.
+			name:               "rf+ with label leaves flag in note and extracts no label",
 			input:              "/rf+ great model choice --label=fast",
 			wantRating:         "up",
-			wantSuggestedLabel: "fast",
-			wantFeedback:       "great model choice",
+			wantSuggestedLabel: "",
+			wantFeedback:       "great model choice --label=fast",
+			wantFound:          true,
+		},
+		{
+			// A note-only command (no verdict) also does not extract a label.
+			name:         "note-only command with label leaves flag in note",
+			input:        "/rf the --label=fast option produced bad results",
+			wantFeedback: "the --label=fast option produced bad results",
+			wantFound:    true,
+		},
+		{
+			// --label= appearing mid-note (text follows the value) is prose, not
+			// a trailing flag, so the whole note is preserved and no label set.
+			name:               "mid-note label is not matched and note is preserved",
+			input:              "/rf- the --label=fast option produced bad results",
+			wantRating:         "down",
+			wantSuggestedLabel: "",
+			wantFeedback:       "the --label=fast option produced bad results",
 			wantFound:          true,
 		},
 		{

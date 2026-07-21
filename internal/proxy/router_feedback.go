@@ -44,9 +44,7 @@ type RouterFeedbackEvent struct {
 	// Rating is the thumbs verdict ("up", "down", or "" for note-only),
 	// parsed from /rf+ /rf- or a leading verdict token in the note.
 	Rating string
-	// SuggestedLabel is the complexity label the submitter thinks this turn
-	// needed ("fast", "explore", "balanced", "high", "maximum"). Set when
-	// Rating is "down", empty otherwise.
+	// SuggestedLabel is the complexity label from a --label flag ("fast" | "explore" | "balanced" | "high" | "maximum").
 	SuggestedLabel string
 	// Feedback is the persisted submission text; verdict-only submissions
 	// get a compact emoji so the column is never empty.
