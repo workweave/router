@@ -54,7 +54,7 @@ WHERE id = @id::uuid
 -- the per-request balance read in WithBalanceCheck. Returns sql.ErrNoRows when
 -- the key is missing/soft-deleted.
 -- name: GetModelRouterAPIKeySpend :one
-SELECT spend_cap_usd_micros, spent_usd_micros
+SELECT spend_cap_usd_micros, spent_usd_micros, reserved_usd_micros
 FROM router.model_router_api_keys
 WHERE id = @id::uuid
   AND deleted_at IS NULL;

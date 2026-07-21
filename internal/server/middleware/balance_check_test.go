@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
@@ -14,6 +15,7 @@ import (
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,14 +48,23 @@ func (r *stubBillingRepo) HasActiveOverride(_ context.Context, _ string) (bool, 
 func (r *stubBillingRepo) DebitInference(_ context.Context, _ billing.DebitParams) (int64, error) {
 	return 0, nil
 }
-func (r *stubBillingRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, *int64, bool, error) {
-	return r.spendMicros, r.capMicros, r.spendFound, r.spendErr
+func (r *stubBillingRepo) GetAPIKeySpend(_ context.Context, _ string) (int64, int64, *int64, bool, error) {
+	return r.spendMicros, 0, r.capMicros, r.spendFound, r.spendErr
 }
-func (r *stubBillingRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, *int64, error) {
-	return 0, nil, nil
+func (r *stubBillingRepo) GetUserMonthlySpendAndLimit(_ context.Context, _, _ string) (int64, int64, *int64, error) {
+	return 0, 0, nil, nil
 }
-func (r *stubBillingRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, *int64, error) {
-	return r.orgMonthSpent, r.orgMonthLimit, r.orgMonthErr
+func (r *stubBillingRepo) GetOrgMonthlySpendAndLimit(_ context.Context, _ string) (int64, int64, *int64, error) {
+	return r.orgMonthSpent, 0, r.orgMonthLimit, r.orgMonthErr
+}
+func (r *stubBillingRepo) ReserveSpendCaps(_ context.Context, _ billing.ReserveSpendCapsParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (r *stubBillingRepo) ReleaseSpendReservations(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
+func (r *stubBillingRepo) SweepExpiredSpendReservations(_ context.Context, _ time.Time) (int, error) {
+	return 0, nil
 }
 func (r *stubBillingRepo) BillingTablesExist(_ context.Context) (bool, error) {
 	return true, nil

@@ -9,9 +9,8 @@ import (
 	"workweave/router/internal/observability"
 )
 
-// checkUserMonthlySpendLimit gates a turn on the resolved engineer's monthly
-// spend limit. Runs inside the proxy (not middleware) because user identity is
-// resolved by the handler after the middleware chain; no identity passes through.
+// checkUserMonthlySpendLimit is retained for unit tests only; request-path
+// enforcement moved to ArmSpendReservations in API handlers.
 func (s *Service) checkUserMonthlySpendLimit(ctx context.Context) error {
 	if s.billing == nil {
 		return nil

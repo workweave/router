@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,14 +29,21 @@ func (r *spendLimitRepo) HasActiveOverride(context.Context, string) (bool, error
 func (r *spendLimitRepo) DebitInference(context.Context, billing.DebitParams) (int64, error) {
 	return 0, nil
 }
-func (r *spendLimitRepo) GetAPIKeySpend(context.Context, string) (int64, *int64, bool, error) {
-	return 0, nil, false, nil
+func (r *spendLimitRepo) GetAPIKeySpend(context.Context, string) (int64, int64, *int64, bool, error) {
+	return 0, 0, nil, false, nil
 }
-func (r *spendLimitRepo) GetUserMonthlySpendAndLimit(context.Context, string, string) (int64, *int64, error) {
-	return r.spent, r.limit, r.err
+func (r *spendLimitRepo) GetUserMonthlySpendAndLimit(context.Context, string, string) (int64, int64, *int64, error) {
+	return r.spent, 0, r.limit, r.err
 }
-func (r *spendLimitRepo) GetOrgMonthlySpendAndLimit(context.Context, string) (int64, *int64, error) {
-	return 0, nil, nil
+func (r *spendLimitRepo) GetOrgMonthlySpendAndLimit(context.Context, string) (int64, int64, *int64, error) {
+	return 0, 0, nil, nil
+}
+func (r *spendLimitRepo) ReserveSpendCaps(context.Context, billing.ReserveSpendCapsParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (r *spendLimitRepo) ReleaseSpendReservations(context.Context, []uuid.UUID) error { return nil }
+func (r *spendLimitRepo) SweepExpiredSpendReservations(context.Context, time.Time) (int, error) {
+	return 0, nil
 }
 func (r *spendLimitRepo) GetAutopayConfig(context.Context, string) (bool, int64, error) {
 	return false, 0, nil

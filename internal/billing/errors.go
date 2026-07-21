@@ -21,6 +21,14 @@ var ErrBalanceRowMissing = errors.New("billing: balance row missing")
 // UTC-month spend meets their effective monthly limit. Mapped to HTTP 402.
 var ErrUserMonthlySpendLimitReached = errors.New("billing: engineer monthly spend limit reached")
 
+// ErrOrgMonthlySpendLimitReached is returned when the org's current UTC-month
+// spend (including in-flight reservations) cannot fit another reserve slot. Mapped to HTTP 402.
+var ErrOrgMonthlySpendLimitReached = errors.New("billing: organization monthly spend limit reached")
+
+// ErrAPIKeySpendCapReached is returned when a key's lifetime spend (including
+// in-flight reservations) cannot fit another reserve slot. Mapped to HTTP 402.
+var ErrAPIKeySpendCapReached = errors.New("billing: api key spend cap reached")
+
 // ErrSpendLimitCheckUnavailable is returned on a repo failure reading spend
 // limits; gates fail closed (HTTP 503) to prevent unbounded-spend windows.
 var ErrSpendLimitCheckUnavailable = errors.New("billing: spend limit check unavailable")

@@ -21,12 +21,19 @@ SELECT
         FROM router.organization_monthly_spend sp
         WHERE sp.organization_id = $1::varchar
           AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-    ), 0)::bigint AS spent_usd_micros
+    ), 0)::bigint AS spent_usd_micros,
+    COALESCE((
+        SELECT sp.reserved_usd_micros
+        FROM router.organization_monthly_spend sp
+        WHERE sp.organization_id = $1::varchar
+          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+    ), 0)::bigint AS reserved_usd_micros
 `
 
 type GetOrgMonthlySpendAndLimitRow struct {
 	OrgLimitUsdMicros *int64
 	SpentUsdMicros    int64
+	ReservedUsdMicros int64
 }
 
 // Reads the org's month-to-date spend alongside its monthly cap for the
@@ -42,11 +49,17 @@ type GetOrgMonthlySpendAndLimitRow struct {
 //	        FROM router.organization_monthly_spend sp
 //	        WHERE sp.organization_id = $1::varchar
 //	          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-//	    ), 0)::bigint AS spent_usd_micros
+//	    ), 0)::bigint AS spent_usd_micros,
+//	    COALESCE((
+//	        SELECT sp.reserved_usd_micros
+//	        FROM router.organization_monthly_spend sp
+//	        WHERE sp.organization_id = $1::varchar
+//	          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+//	    ), 0)::bigint AS reserved_usd_micros
 func (q *Queries) GetOrgMonthlySpendAndLimit(ctx context.Context, organizationID string) (GetOrgMonthlySpendAndLimitRow, error) {
 	row := q.db.QueryRow(ctx, getOrgMonthlySpendAndLimit, organizationID)
 	var i GetOrgMonthlySpendAndLimitRow
-	err := row.Scan(&i.OrgLimitUsdMicros, &i.SpentUsdMicros)
+	err := row.Scan(&i.OrgLimitUsdMicros, &i.SpentUsdMicros, &i.ReservedUsdMicros)
 	return i, err
 }
 
@@ -91,7 +104,13 @@ SELECT
         FROM router.model_router_user_monthly_spend sp
         WHERE sp.router_user_id = $1::uuid
           AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-    ), 0)::bigint AS spent_usd_micros
+    ), 0)::bigint AS spent_usd_micros,
+    COALESCE((
+        SELECT sp.reserved_usd_micros
+        FROM router.model_router_user_monthly_spend sp
+        WHERE sp.router_user_id = $1::uuid
+          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+    ), 0)::bigint AS reserved_usd_micros
 `
 
 type GetUserMonthlySpendAndLimitParams struct {
@@ -104,6 +123,7 @@ type GetUserMonthlySpendAndLimitRow struct {
 	OverrideLimitUsdMicros   *int64
 	OrgDefaultLimitUsdMicros *int64
 	SpentUsdMicros           int64
+	ReservedUsdMicros        int64
 }
 
 // Resolves a user's effective monthly limit and current-month spend in one
@@ -128,7 +148,13 @@ type GetUserMonthlySpendAndLimitRow struct {
 //	        FROM router.model_router_user_monthly_spend sp
 //	        WHERE sp.router_user_id = $1::uuid
 //	          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-//	    ), 0)::bigint AS spent_usd_micros
+//	    ), 0)::bigint AS spent_usd_micros,
+//	    COALESCE((
+//	        SELECT sp.reserved_usd_micros
+//	        FROM router.model_router_user_monthly_spend sp
+//	        WHERE sp.router_user_id = $1::uuid
+//	          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+//	    ), 0)::bigint AS reserved_usd_micros
 func (q *Queries) GetUserMonthlySpendAndLimit(ctx context.Context, arg GetUserMonthlySpendAndLimitParams) (GetUserMonthlySpendAndLimitRow, error) {
 	row := q.db.QueryRow(ctx, getUserMonthlySpendAndLimit, arg.RouterUserID, arg.OrganizationID)
 	var i GetUserMonthlySpendAndLimitRow
@@ -137,6 +163,7 @@ func (q *Queries) GetUserMonthlySpendAndLimit(ctx context.Context, arg GetUserMo
 		&i.OverrideLimitUsdMicros,
 		&i.OrgDefaultLimitUsdMicros,
 		&i.SpentUsdMicros,
+		&i.ReservedUsdMicros,
 	)
 	return i, err
 }

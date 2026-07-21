@@ -44,6 +44,7 @@ type RouterModelRouterAPIKey struct {
 	CreatedBy         *string
 	SpendCapUsdMicros *int64
 	SpentUsdMicros    int64
+	ReservedUsdMicros int64
 }
 
 // Customer-owned provider API keys for BYOK routing
@@ -189,10 +190,11 @@ type RouterModelRouterUser struct {
 }
 
 type RouterModelRouterUserMonthlySpend struct {
-	RouterUserID   uuid.UUID
-	Month          pgtype.Date
-	SpentUsdMicros int64
-	UpdatedAt      pgtype.Timestamptz
+	RouterUserID      uuid.UUID
+	Month             pgtype.Date
+	SpentUsdMicros    int64
+	UpdatedAt         pgtype.Timestamptz
+	ReservedUsdMicros int64
 }
 
 type RouterModelRouterUserSpendLimit struct {
@@ -253,10 +255,11 @@ type RouterOrganizationCreditLedger struct {
 }
 
 type RouterOrganizationMonthlySpend struct {
-	OrganizationID string
-	Month          pgtype.Date
-	SpentUsdMicros int64
-	UpdatedAt      pgtype.Timestamptz
+	OrganizationID    string
+	Month             pgtype.Date
+	SpentUsdMicros    int64
+	UpdatedAt         pgtype.Timestamptz
+	ReservedUsdMicros int64
 }
 
 type RouterOrganizationSpendLimit struct {
@@ -409,6 +412,17 @@ type RouterSessionPin struct {
 	HasEverSwitched           bool
 	PairedProvider            string
 	PairedModel               string
+}
+
+type RouterSpendReservation struct {
+	ID              uuid.UUID
+	ScopeKind       string
+	ScopeID         string
+	Month           pgtype.Date
+	AmountUsdMicros int64
+	ExpiresAt       pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	RouterRequestID *string
 }
 
 // Shadow-mode spiral (death-march) detections: log-only fire-rate corpus measured on live traffic before escalation is armed
