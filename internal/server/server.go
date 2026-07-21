@@ -150,7 +150,9 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAgentShadowEvaluation(),
 	}
 	if billingSvc != nil {
-		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc), middleware.WithOrgMonthlySpendCap(billingSvc))
+		// Spend caps (org / key / user) are reserved in one TX after identity
+		// resolves in the handler (#793). Balance check stays here.
+		messagesMiddleware = append(messagesMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros))
 	}
 	messagesMiddleware = append(messagesMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),
@@ -169,7 +171,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		middleware.WithAuth(authSvc, byokDisabled),
 	}
 	if billingSvc != nil {
-		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros), middleware.WithAPIKeySpendCap(billingSvc), middleware.WithOrgMonthlySpendCap(billingSvc))
+		chatCompletionMiddleware = append(chatCompletionMiddleware, middleware.WithBalanceCheck(billingSvc, billing.MinBalanceMicros))
 	}
 	chatCompletionMiddleware = append(chatCompletionMiddleware,
 		middleware.WithEmbedOnlyUserMessageOverride(),

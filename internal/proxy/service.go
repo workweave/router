@@ -1948,9 +1948,6 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 }
 
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	if err := s.checkUserMonthlySpendLimit(ctx); err != nil {
-		return err
-	}
 	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
@@ -3998,10 +3995,19 @@ func (s *Service) fireBilling(ctx context.Context, p billing.DebitInferenceParam
 		observability.Get().Debug("Billing debit skipped: no organization_id on request")
 		return
 	}
+	hold := billing.SpendHoldFrom(ctx)
+	// Settle the main-request hold only once (first debit). Compaction /
+	// handover summary debits stay unreserved soft overshoot (#793 residual).
+	if hold != nil && !hold.Settled() && len(p.ReservationIDs) == 0 {
+		p.ReservationIDs = hold.IDs
+	}
 	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	balance, err := s.billing.DebitForInference(dbCtx, p)
 	if err == nil {
+		if hold != nil && len(p.ReservationIDs) > 0 {
+			hold.MarkSettled()
+		}
 		observability.Get().Debug("Billing debit complete",
 			"organization_id", p.OrganizationID,
 			"router_request_id", p.RouterRequestID,
@@ -4070,9 +4076,6 @@ func finalizeAfterProxy(proxyErr error, fn func() error) error {
 // ProxyOpenAIChatCompletion routes an OpenAI Chat Completion request,
 // translating cross-format when the decision picks a non-OpenAI provider.
 func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
-	if err := s.checkUserMonthlySpendLimit(ctx); err != nil {
-		return err
-	}
 	ctx = s.withUsageObserver(ctx, r.Header)
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()

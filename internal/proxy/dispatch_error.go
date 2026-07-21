@@ -131,6 +131,22 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			LogLevel:   "warn",
 			LogMessage: "Request refused: engineer monthly spend limit reached",
 		}, true
+	case errors.Is(err, billing.ErrOrgMonthlySpendLimitReached):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorUserSpendLimitReached, // same 402 kind bucket
+			Status:     http.StatusPaymentRequired,
+			Message:    "Your organization has reached its monthly Weave Router spend limit. An org admin can raise the limit, or it resets next month.",
+			LogLevel:   "warn",
+			LogMessage: "Request refused: org monthly spend limit reached",
+		}, true
+	case errors.Is(err, billing.ErrAPIKeySpendCapReached):
+		return DispatchErrorClass{
+			Kind:       DispatchErrorUserSpendLimitReached,
+			Status:     http.StatusPaymentRequired,
+			Message:    "This router key has reached its spend cap. Mint a new key or raise the cap to continue.",
+			LogLevel:   "warn",
+			LogMessage: "Request refused: api key spend cap reached",
+		}, true
 	case errors.Is(err, billing.ErrSpendLimitCheckUnavailable):
 		return DispatchErrorClass{
 			Kind:       DispatchErrorSpendLimitUnavailable,

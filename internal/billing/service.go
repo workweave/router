@@ -2,9 +2,12 @@ package billing
 
 import (
 	"context"
+	"time"
 
 	"workweave/router/internal/observability"
 	"workweave/router/internal/router/catalog"
+
+	"github.com/google/uuid"
 )
 
 // hasOverrideContextKeyT lives in billing (not middleware/proxy) so both
@@ -81,14 +84,32 @@ const SubscriptionOverdraftFloorMicros int64 = -5_000_000
 // Service orchestrates balance reads and debits. No I/O of its own — all
 // persistence flows through the Repo interface.
 type Service struct {
-	repo    Repo
-	autopay AutopayNotifier
+	repo                Repo
+	autopay             AutopayNotifier
+	reserveAmountMicros int64
+	reserveTTL          time.Duration
 }
 
 // NewService constructs a billing service. The Repo is required; nil panics
 // at request time, so the composition root must guard against it.
 func NewService(repo Repo) *Service {
-	return &Service{repo: repo}
+	return &Service{
+		repo:                repo,
+		reserveAmountMicros: DefaultReserveAmountMicros,
+		reserveTTL:          DefaultReserveTTL,
+	}
+}
+
+// WithReservationConfig sets the fixed reserve slot R and TTL. Zero values
+// keep the defaults. Wired from env in the composition root.
+func (s *Service) WithReservationConfig(amountMicros int64, ttl time.Duration) *Service {
+	if amountMicros > 0 {
+		s.reserveAmountMicros = amountMicros
+	}
+	if ttl > 0 {
+		s.reserveTTL = ttl
+	}
+	return s
 }
 
 // AutopayNotifier signals the control plane that an org's balance just
@@ -117,21 +138,22 @@ type CheckResult struct {
 // APIKeySpendCapResult is the outcome of a preflight per-key spend-cap
 // check. Found is false if the key was deleted mid-request; CapMicros is
 // nil for an uncapped key. Middleware blocks when Found && CapMicros !=
-// nil && SpentMicros >= *CapMicros.
+// nil && SpentMicros+ReservedMicros >= *CapMicros.
 type APIKeySpendCapResult struct {
-	Found       bool
-	SpentMicros int64
-	CapMicros   *int64
+	Found          bool
+	SpentMicros    int64
+	ReservedMicros int64
+	CapMicros      *int64
 }
 
 // CheckAPIKeySpendCap reads fresh from the repo (not the auth cache) so a
 // hot cached key can't overrun its cap within the cache TTL.
 func (s *Service) CheckAPIKeySpendCap(ctx context.Context, apiKeyID string) (APIKeySpendCapResult, error) {
-	spent, cap, found, err := s.repo.GetAPIKeySpend(ctx, apiKeyID)
+	spent, reserved, cap, found, err := s.repo.GetAPIKeySpend(ctx, apiKeyID)
 	if err != nil {
 		return APIKeySpendCapResult{}, err
 	}
-	return APIKeySpendCapResult{Found: found, SpentMicros: spent, CapMicros: cap}, nil
+	return APIKeySpendCapResult{Found: found, SpentMicros: spent, ReservedMicros: reserved, CapMicros: cap}, nil
 }
 
 // CheckBalance short-circuits the balance read when an override is active
@@ -157,34 +179,37 @@ func (s *Service) CheckBalance(ctx context.Context, orgID string) (CheckResult, 
 
 // MonthlySpendResult carries a current-UTC-month spend counter alongside the
 // limit that applies to it. LimitMicros nil means no limit is configured.
+// ReservedMicros is in-flight reserve-then-settle hold.
 type MonthlySpendResult struct {
-	SpentMicros int64
-	LimitMicros *int64
+	SpentMicros    int64
+	ReservedMicros int64
+	LimitMicros    *int64
 }
 
-// LimitReached reports whether a configured limit has been met or exceeded.
+// LimitReached reports whether spent + reserved has met or exceeded a
+// configured limit (in-flight reservations count against headroom).
 func (r MonthlySpendResult) LimitReached() bool {
-	return r.LimitMicros != nil && r.SpentMicros >= *r.LimitMicros
+	return r.LimitMicros != nil && r.SpentMicros+r.ReservedMicros >= *r.LimitMicros
 }
 
 // CheckUserMonthlySpend reads the engineer's current-month spend and
 // effective monthly limit fresh from Postgres.
 func (s *Service) CheckUserMonthlySpend(ctx context.Context, organizationID, routerUserID string) (MonthlySpendResult, error) {
-	spent, limit, err := s.repo.GetUserMonthlySpendAndLimit(ctx, organizationID, routerUserID)
+	spent, reserved, limit, err := s.repo.GetUserMonthlySpendAndLimit(ctx, organizationID, routerUserID)
 	if err != nil {
 		return MonthlySpendResult{}, err
 	}
-	return MonthlySpendResult{SpentMicros: spent, LimitMicros: limit}, nil
+	return MonthlySpendResult{SpentMicros: spent, ReservedMicros: reserved, LimitMicros: limit}, nil
 }
 
 // CheckOrgMonthlySpend reads the org's current-month spend and configured
 // monthly cap fresh from Postgres.
 func (s *Service) CheckOrgMonthlySpend(ctx context.Context, organizationID string) (MonthlySpendResult, error) {
-	spent, limit, err := s.repo.GetOrgMonthlySpendAndLimit(ctx, organizationID)
+	spent, reserved, limit, err := s.repo.GetOrgMonthlySpendAndLimit(ctx, organizationID)
 	if err != nil {
 		return MonthlySpendResult{}, err
 	}
-	return MonthlySpendResult{SpentMicros: spent, LimitMicros: limit}, nil
+	return MonthlySpendResult{SpentMicros: spent, ReservedMicros: reserved, LimitMicros: limit}, nil
 }
 
 // DebitInferenceParams is the input to DebitForInference. Token counts
@@ -211,6 +236,9 @@ type DebitInferenceParams struct {
 	// RouterUserID attributes the debit to the resolved engineer identity for
 	// monthly spend-limit tracking; empty leaves per-user spend untouched.
 	RouterUserID string
+	// ReservationIDs are settled in the same TX as the debit when non-empty.
+	// Prefer setting via fireBilling from the request SpendHold.
+	ReservationIDs []uuid.UUID
 }
 
 // DebitForInference writes one ledger row at cost — no markup math here;
@@ -238,12 +266,82 @@ func (s *Service) DebitForInference(ctx context.Context, p DebitInferenceParams)
 		RouterModel:        p.Model,
 		APIKeyID:           p.APIKeyID,
 		RouterUserID:       p.RouterUserID,
+		ReservationIDs:     p.ReservationIDs,
 	})
 	if err != nil {
 		return balanceAfter, err
 	}
 	s.maybeSignalRecharge(ctx, p.OrganizationID, delta, balanceAfter)
 	return balanceAfter, nil
+}
+
+// ReserveApplicableCaps reserves every applicable spend cap (org monthly,
+// api-key lifetime, user monthly) in one transaction. Returns a SpendHold
+// (possibly with empty IDs when no caps apply). Billing override skips all.
+func (s *Service) ReserveApplicableCaps(ctx context.Context, organizationID, apiKeyID, routerUserID, requestID string) (*SpendHold, error) {
+	if s == nil || s.repo == nil {
+		return &SpendHold{}, nil
+	}
+	if HasOverrideFromContext(ctx) {
+		return &SpendHold{}, nil
+	}
+	ids, err := s.repo.ReserveSpendCaps(ctx, ReserveSpendCapsParams{
+		OrganizationID:  organizationID,
+		APIKeyID:        apiKeyID,
+		RouterUserID:    routerUserID,
+		RouterRequestID: requestID,
+		AmountUsdMicros: s.reserveAmountMicros,
+		TTL:             s.reserveTTL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &SpendHold{IDs: ids}, nil
+}
+
+// ReleaseHold releases unsettled reservations. Idempotent against settle/sweep.
+func (s *Service) ReleaseHold(ctx context.Context, hold *SpendHold) error {
+	if s == nil || s.repo == nil || hold == nil || hold.Settled() || len(hold.IDs) == 0 {
+		return nil
+	}
+	return s.repo.ReleaseSpendReservations(ctx, hold.IDs)
+}
+
+// SweepExpiredReservations runs one TTL sweep cycle.
+func (s *Service) SweepExpiredReservations(ctx context.Context, now time.Time) (int, error) {
+	if s == nil || s.repo == nil {
+		return 0, nil
+	}
+	return s.repo.SweepExpiredSpendReservations(ctx, now)
+}
+
+// ArmSpendReservations reserves applicable caps and returns a release func
+// for defer. Call after identity is resolved and before Proxy*. The release
+// func no-ops after a successful DebitForInference (MarkSettled).
+func (s *Service) ArmSpendReservations(ctx context.Context, organizationID, apiKeyID, routerUserID, requestID string) (context.Context, func(), error) {
+	if s == nil {
+		return ctx, func() {}, nil
+	}
+	hold, err := s.ReserveApplicableCaps(ctx, organizationID, apiKeyID, routerUserID, requestID)
+	if err != nil {
+		return ctx, nil, err
+	}
+	ctx = WithSpendHold(ctx, hold)
+	release := func() {
+		if hold.Settled() {
+			return
+		}
+		relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if relErr := s.ReleaseHold(relCtx, hold); relErr != nil {
+			observability.Get().Error("spend reservation release failed",
+				"err", relErr,
+				"organization_id", organizationID,
+				"reservation_count", len(hold.IDs),
+			)
+		}
+	}
+	return ctx, release, nil
 }
 
 // maybeSignalRecharge fires once, on the debit that crosses the org's

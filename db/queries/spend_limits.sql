@@ -27,7 +27,13 @@ SELECT
         FROM router.model_router_user_monthly_spend sp
         WHERE sp.router_user_id = @router_user_id::uuid
           AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-    ), 0)::bigint AS spent_usd_micros;
+    ), 0)::bigint AS spent_usd_micros,
+    COALESCE((
+        SELECT sp.reserved_usd_micros
+        FROM router.model_router_user_monthly_spend sp
+        WHERE sp.router_user_id = @router_user_id::uuid
+          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+    ), 0)::bigint AS reserved_usd_micros;
 
 -- Reads the org's month-to-date spend alongside its monthly cap for the
 -- org-wide gate. Zero-spend months have no row; COALESCE keeps the read
@@ -42,4 +48,10 @@ SELECT
         FROM router.organization_monthly_spend sp
         WHERE sp.organization_id = @organization_id::varchar
           AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
-    ), 0)::bigint AS spent_usd_micros;
+    ), 0)::bigint AS spent_usd_micros,
+    COALESCE((
+        SELECT sp.reserved_usd_micros
+        FROM router.organization_monthly_spend sp
+        WHERE sp.organization_id = @organization_id::varchar
+          AND sp.month = DATE_TRUNC('month', NOW() AT TIME ZONE 'utc')::date
+    ), 0)::bigint AS reserved_usd_micros;
