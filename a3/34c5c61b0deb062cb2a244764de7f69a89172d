@@ -1,0 +1,21 @@
+internal/proxy/service.go
+  s_0cb555d8dc2e1e::t_9d92d9051ffd75 306-309,4204-4207,4268,4863-4869
+internal/proxy/service_test.go
+  s_0cb555d8dc2e1e::t_dbe1d8bd777348 20,260,266-268,271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a334c5c61b0deb062cb2a244764de7f69a89172d",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

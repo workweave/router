@@ -1,0 +1,25 @@
+install/install.sh
+  s_9129fe6128df7b::t_38c89a34158eb4 1773-1778
+install/pi-router/src/dispatch.ts
+  s_9129fe6128df7b::t_411a1325ec144b 257-260
+  s_9129fe6128df7b::t_8896edfac5d83d 104,109,111,113
+  s_9129fe6128df7b::t_34232d7e4bc395 145-147
+install/pi-router/src/config.ts
+  s_9129fe6128df7b::t_2115f1af9e5757 92-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "81be9b61f95f1280080ee646b7353aa9a09323ef",
+  "prompts": {},
+  "sessions": {
+    "s_9129fe6128df7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0357cf6f-142f-4aff-aa3a-40d22ec0f9b7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

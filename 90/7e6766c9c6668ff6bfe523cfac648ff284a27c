@@ -1,0 +1,21 @@
+internal/proxy/turnloop.go
+  s_35fec47598245b::t_59db86fb71ebaf 213
+internal/proxy/session_key.go
+  s_35fec47598245b::t_267389905bc730 67-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "907e6766c9c6668ff6bfe523cfac648ff284a27c",
+  "prompts": {},
+  "sessions": {
+    "s_35fec47598245b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c702952b-1a1d-484f-8864-95d73121dd7b",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

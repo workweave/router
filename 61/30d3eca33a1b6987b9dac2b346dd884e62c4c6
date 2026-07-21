@@ -1,0 +1,39 @@
+db/queries/model_router_users.sql
+  s_b2431dea8a2bea::t_6edb06cd2a15c2 1-6,22-42
+internal/sqlc/models.go
+  s_b2431dea8a2bea::t_d46fec558d310c 102-103
+db/migrations/0011_users_account_uuid_attribution.down.sql
+  s_b2431dea8a2bea::t_facefa8baf847f 1-19
+db/migrations/0011_users_account_uuid_attribution.up.sql
+  s_b2431dea8a2bea::t_c904574372bece 1-37
+internal/auth/user_test.go
+  s_b2431dea8a2bea::t_2971aa1da9ae82 79,86,90-118
+  s_b2431dea8a2bea::t_1121f5ee23a1ac 17-21,24,34-37
+internal/auth/user.go
+  s_b2431dea8a2bea::t_ac23967f7a4d15 25-27,31,38-40,47-54,57,59-66
+internal/postgres/user_repo.go
+  s_b2431dea8a2bea::t_523f2c9110b9a7 22,28,39-51
+  s_b2431dea8a2bea::t_1745fe59b4425b 97-98
+internal/sqlc/model_router_users.sql.go
+  s_b2431dea8a2bea::t_d46fec558d310c 86-145,162,168-172,188-189
+internal/auth/service.go
+  s_b2431dea8a2bea::t_edb31d13bf8df0 230-240,249-252,255-257,260-277,287,291-299
+internal/auth/user_cache.go
+  s_b2431dea8a2bea::t_b4a5aa2e4797b9 11-19,21-22,31-34,45-46,49-50,53,57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6130d3eca33a1b6987b9dac2b346dd884e62c4c6",
+  "prompts": {},
+  "sessions": {
+    "s_b2431dea8a2bea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d9c1a88-0b75-4a06-9ba0-d6b1e87adc5e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

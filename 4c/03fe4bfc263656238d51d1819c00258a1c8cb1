@@ -1,0 +1,123 @@
+frontend/out/_next/static/chunks/app/(app)/settings/page-11e8b51d0bfd9b3e.js
+  ai_agent 1
+frontend/out/_next/static/chunks/4bd1b696-409494caf8c83275.js
+  ai_agent 1
+frontend/out/login.txt
+  ai_agent 1-22
+frontend/out/weave.svg
+  ai_agent 1-8
+frontend/out/_next/static/chunks/app/_not-found/page-039fc4e8b197e194.js
+  ai_agent 1
+internal/router/cluster/artifacts/v0.54/model_axes.json
+  ai_agent 1-204
+frontend/out/_next/static/chunks/app/page-deb72ab974013435.js
+  ai_agent 1
+frontend/out/_next/static/chunks/app/(app)/layout-c426a93668c4a131.js
+  ai_agent 1
+frontend/out/_next/static/chunks/app/(auth)/layout-deb72ab974013435.js
+  ai_agent 1
+internal/router/cluster/artifacts/v0.54/model_registry.json
+  s_7ce6a4c83a15b2::t_795175feae47cf 1-5,7-8,30
+  s_c280035be5a4e1::t_0f7f71006d9414 6,9-29,31
+frontend/out/_next/static/chunks/723-c3a1ee771a729949.js
+  ai_agent 1
+frontend/out/_next/static/chunks/app/(auth)/login/page-800f9cc2d4266fac.js
+  ai_agent 1
+frontend/out/_next/static/chunks/617-55ccd018e808345a.js
+  ai_agent 1
+frontend/out/login.html
+  ai_agent 1
+frontend/out/_next/static/chunks/webpack-5f023d235a35c5d3.js
+  ai_agent 1
+internal/router/cluster/artifacts/v0.54/quality_means.json
+  ai_agent 1-407
+frontend/out/_next/static/css/c421e7099cb4c4e8.css
+  ai_agent 1-3
+frontend/out/dashboard.txt
+  ai_agent 1-25
+frontend/out/_next/static/chunks/main-e5ca7c422dfcb113.js
+  ai_agent 1
+frontend/out/_next/static/chunks/app/layout-c1c30daa5342959a.js
+  ai_agent 1
+frontend/out/index.html
+  ai_agent 1
+frontend/out/_next/static/QRWANwwdkWrMiFWAFBcnN/_ssgManifest.js
+  ai_agent 1
+frontend/out/_next/static/chunks/pages/_app-5addca2b3b969fde.js
+  ai_agent 1
+frontend/out/_next/static/chunks/744-8aba69e0aba63d01.js
+  ai_agent 1
+internal/router/cluster/artifacts/v0.54/rankings.json
+  ai_agent 1-407
+frontend/out/_next/static/QRWANwwdkWrMiFWAFBcnN/_buildManifest.js
+  ai_agent 1
+frontend/out/_next/static/chunks/polyfills-42372ed130431b0a.js
+  ai_agent 1
+frontend/out/dashboard.html
+  ai_agent 1
+frontend/out/_next/static/chunks/443-7419f7fda2dcb621.js
+  ai_agent 1
+frontend/out/settings.html
+  ai_agent 1
+install/install.sh
+  s_836acf51854e15::t_838e8c16558fcb 1069,1073-1074,1077,1119,1123-1124,1127
+frontend/out/_next/static/chunks/255-0de278043b462315.js
+  ai_agent 1
+frontend/out/_next/static/chunks/framework-3457b9c2619cdd96.js
+  ai_agent 1
+frontend/out/_next/static/chunks/388-6cedd6eda3d45b5b.js
+  ai_agent 1
+internal/router/catalog/catalog.go
+  s_836acf51854e15::t_ec00df12a9cf68 326-345
+  s_836acf51854e15::t_92cfb3097c5b2c 240-242,244-245,247-248
+frontend/out/index.txt
+  ai_agent 1-19
+frontend/out/settings.txt
+  ai_agent 1-25
+frontend/out/_next/static/chunks/405-2b9ffafa5df1e0ff.js
+  ai_agent 1
+internal/router/cluster/artifacts/v0.54/metadata.yaml
+  ai_agent 1-133
+frontend/out/_next/static/chunks/main-app-c58cb2e2fc457548.js
+  ai_agent 1
+frontend/out/_next/static/chunks/pages/_error-022e4ac7bbb9914f.js
+  ai_agent 1
+install/cc-statusline.sh
+  s_836acf51854e15::t_838e8c16558fcb 167,171-172,175,217,221-222,225
+frontend/out/404.html
+  ai_agent 1
+frontend/out/_next/static/chunks/app/(app)/dashboard/page-5dfc92cd0f657ec6.js
+  ai_agent 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "4c03fe4bfc263656238d51d1819c00258a1c8cb1",
+  "prompts": {},
+  "sessions": {
+    "s_7ce6a4c83a15b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6bd10789-5187-48eb-888c-b8f1c5d2f46b",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_836acf51854e15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03f1fbfe-8854-4dc9-8cb2-8a126f7d6750",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_c280035be5a4e1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b8c2c42-371e-4176-885a-d4fb986796b1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

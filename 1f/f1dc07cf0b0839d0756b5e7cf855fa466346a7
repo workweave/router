@@ -1,0 +1,67 @@
+internal/proxy/turnloop.go
+  s_8689955b9c8d8c::t_412aa8963f85cc 325-347
+internal/router/catalog/catalog_test.go
+  s_8689955b9c8d8c::t_8d805c21ddce09 138-175
+internal/translate/features.go
+  s_8689955b9c8d8c::t_9fbb9309714706 16
+  s_8689955b9c8d8c::t_93d8aff343433c 126
+  s_8689955b9c8d8c::t_1b1b333b8caf2d 454-497
+  s_8689955b9c8d8c::t_e1baa818e67eba 82
+internal/translate/features_gemini.go
+  s_8689955b9c8d8c::t_14ccf1b51e5919 131-151
+  s_8689955b9c8d8c::t_4a632ec5436456 43
+internal/proxy/service.go
+  s_8689955b9c8d8c::t_d5afe7fcb78bf3 1885
+  s_8689955b9c8d8c::t_860c85d20dc84c 876
+internal/translate/features_images_test.go
+  s_8689955b9c8d8c::t_80f4443a4098a5 1-116
+internal/proxy/gemini.go
+  s_8689955b9c8d8c::t_5298224122a42b 80
+internal/router/cluster/scorer.go
+  s_8689955b9c8d8c::t_14982b277ece3b 369-404
+  s_8689955b9c8d8c::t_fbe5293aad4a57 735
+internal/proxy/service_session_pin_test.go
+  s_8689955b9c8d8c::t_303cf48711a916 186-225
+internal/router/catalog/catalog.go
+  s_8689955b9c8d8c::t_4af5e11a982764 312
+  s_8689955b9c8d8c::t_21209bc1f28b7c 129-132
+  s_8689955b9c8d8c::t_09eefe4266fbee 398
+  s_8689955b9c8d8c::t_1c843b17fdb643 322
+  s_8689955b9c8d8c::t_62673cd0d8e81c 317
+  s_8689955b9c8d8c::t_f0849477ab5ca0 99-113
+  s_8689955b9c8d8c::t_622f9383c651d1 356
+  s_8689955b9c8d8c::t_44149e36f01d39 327
+  s_8689955b9c8d8c::t_19a46fe8dda8da 373
+  s_8689955b9c8d8c::t_1e52941c7cbea7 378
+  s_8689955b9c8d8c::t_bc8b1dc103f562 386
+  s_8689955b9c8d8c::t_70929cf067d8e8 365
+  s_8689955b9c8d8c::t_0e990316c6e982 408
+  s_8689955b9c8d8c::t_68d1fc25235695 307
+  s_8689955b9c8d8c::t_a53dc2eef3a115 332
+  s_8689955b9c8d8c::t_81518f7f5d7c37 403
+  s_8689955b9c8d8c::t_310eea55042909 337
+internal/translate/envelope.go
+  s_8689955b9c8d8c::t_4306cafadf12b5 281-298
+internal/router/router.go
+  s_8689955b9c8d8c::t_5b63d0ad78eb3f 18-22
+internal/router/cluster/scorer_test.go
+  s_8689955b9c8d8c::t_3ed9d8e366acea 180-242
+internal/router/catalog/lookup.go
+  s_8689955b9c8d8c::t_18bfb66367178e 157-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1ff1dc07cf0b0839d0756b5e7cf855fa466346a7",
+  "prompts": {},
+  "sessions": {
+    "s_8689955b9c8d8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93f28c44-b57e-4be0-b1bb-ba992dc6c21c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

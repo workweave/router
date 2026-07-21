@@ -1,0 +1,19 @@
+internal/router/capability/tier.go
+  s_d4f903c1af6e94::t_7bb7a3207afe79 71-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "b85498df22040b53e756b663c59fa089d29a0f1e",
+  "prompts": {},
+  "sessions": {
+    "s_d4f903c1af6e94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "738c3c14-fc6d-4e7f-8238-fae5f3144fd6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

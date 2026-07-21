@@ -1,0 +1,23 @@
+internal/proxy/feedback.go
+  s_97644c7dcc2f43::t_159250ec95a1db 197
+internal/translate/anthropic_footer_test.go
+  s_97644c7dcc2f43::t_ffa266b764ce5c 16
+internal/translate/strip_footer_test.go
+  s_97644c7dcc2f43::t_6f4a1d060b1af2 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "5d2e8d4c4fa3e7a7dbae4d400914972d95f106b3",
+  "prompts": {},
+  "sessions": {
+    "s_97644c7dcc2f43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d365b224-f1b6-4569-906c-ed98c73ef1a9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

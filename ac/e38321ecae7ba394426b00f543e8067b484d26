@@ -1,0 +1,48 @@
+internal/router/catalog/catalog.go
+  s_db670ef793b753::t_3e830ad2c437e8 328-336
+  s_db670ef793b753::t_736cfbb36273f6 327,337-339
+internal/observability/otel/pricing_test.go
+  s_db670ef793b753::t_30f53faef4e677 39-41
+internal/providers/openaicompat/client.go
+  s_db670ef793b753::t_e19c4d1c31db73 37-41
+internal/router/rl/mapping.go
+  s_db670ef793b753::t_089b005b5aae04 41-42
+install/install.sh
+  s_db670ef793b753::t_916ee330249126 2128,2194
+internal/router/rl/mapping_internal_test.go
+  s_db670ef793b753::t_47b2d0fbdc410e 24
+internal/providers/provider.go
+  s_db670ef793b753::t_97ebd19b3b4ecb 58
+  s_db670ef793b753::t_5f7171d0bbc526 93
+  s_db670ef793b753::t_54757759fdb88f 148
+install/cc-statusline.sh
+  s_db670ef793b753::t_916ee330249126 183,249
+internal/router/catalog/catalog_test.go
+  s_db670ef793b753::t_eecec867f2eba3 38
+internal/translate/session_affinity_coverage_test.go
+  s_db670ef793b753::t_1013fbd66d02fb 49-52
+internal/proxy/force_model.go
+  s_db670ef793b753::t_5e7c5c520ae377 99-102
+internal/router/model.go
+  s_db670ef793b753::t_30a2d197e47606 170-177
+cmd/router/main.go
+  s_db670ef793b753::t_3874ea29f32a1d 1441-1442
+  s_db670ef793b753::t_f11ee45bb397f7 281-290
+  s_db670ef793b753::t_ccc1ccbbdf5ebf 280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "ace38321ecae7ba394426b00f543e8067b484d26",
+  "prompts": {},
+  "sessions": {
+    "s_db670ef793b753": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d5b509c-66cd-42ec-a49e-13709f7a112e",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+install/install.sh
+  s_09ca5e2e44a0ed::t_4f3c8d52099b9b 634-646,649-657,663-664,670,672,680,684,686
+install/uninstall.sh
+  s_09ca5e2e44a0ed::t_169571f93a812f 158-165,168-170,179
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_c2df0d8223cfa1 58-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "eecdf26ab160c9098da3f22a2e62a40266a1073c",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

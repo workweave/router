@@ -1,0 +1,26 @@
+install/README.md
+  s_a38571dca2710c::t_ab089339a5e08a 195-198
+install/commands/router-session.md
+  s_a38571dca2710c::t_463d995f01d9a7 1-8,10-11
+  s_a38571dca2710c::t_105158e2b92dea 9
+install/uninstall.sh
+  s_a38571dca2710c::t_a3f1a0f0e9bf9e 534
+install/install.sh
+  s_a38571dca2710c::t_ba3db73135bcdb 1726-1727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "5d9d256909f4341b5e96350cb62689939f4dea1e",
+  "prompts": {},
+  "sessions": {
+    "s_a38571dca2710c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bef934ff-c07b-4847-9d82-8b23450dbb33",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

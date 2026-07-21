@@ -1,0 +1,19 @@
+internal/sqlc/models.go
+  s_b008e1ec45bd84::t_df7f93c756fc94 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "10c18150297e87029246710d95ef1c9c5d655d50",
+  "prompts": {},
+  "sessions": {
+    "s_b008e1ec45bd84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "65fd2a14-399a-44a2-9740-a3e2599006e4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

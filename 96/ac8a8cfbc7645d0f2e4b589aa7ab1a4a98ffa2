@@ -1,0 +1,101 @@
+internal/router/policy/contract.go
+  s_b0a43e8faa15b4::t_7dbdf68ae4a002 28-30,64
+internal/router/policy/sidecar_router_test.go
+  s_b0a43e8faa15b4::t_a81a6664c72f2d 71-73,76-77,87-95,106,114-116
+  s_b0a43e8faa15b4::t_3518f40373a875 74-75
+internal/proxy/compaction_test.go
+  s_b0a43e8faa15b4::t_25e91143f66907 12,14,157-177
+  s_b0a43e8faa15b4::t_f48e482fb40a32 178-179
+internal/postgres/session_pin_repo.go
+  s_b0a43e8faa15b4::t_158f0f2f45bf82 76
+internal/proxy/service.go
+  s_b0a43e8faa15b4::t_c2736f180fb4f9 1542-1553
+  s_b0a43e8faa15b4::t_67edaa08378134 3377-3379,3422
+  s_b0a43e8faa15b4::t_7fcf72c5bea0a9 2257,2267
+  s_b0a43e8faa15b4::t_ec9da2674e91d1 2303,2322,2678-2679,4290
+  s_b0a43e8faa15b4::t_bef3fffc713b39 2165,4260
+  s_b0a43e8faa15b4::t_6c4cfeff97e445 3376,3380-3387,3409,3421,3423
+  s_b0a43e8faa15b4::t_912f5eefc928c4 3263,3322
+  s_b0a43e8faa15b4::t_46c1458e54d25a 3389-3408,3410-3420
+internal/proxy/turnloop.go
+  s_b0a43e8faa15b4::t_fb56501008bf66 70-72,192-195,274-275,380-386,402
+  s_b0a43e8faa15b4::t_8f40a109491f72 1154-1157,1163
+  s_b0a43e8faa15b4::t_cdaee34c10e115 608-613,621-624,634,660-661,682-687
+  s_b0a43e8faa15b4::t_15c3cefe1b8aad 1140
+  s_b0a43e8faa15b4::t_c507d246470db2 1124-1139,1141-1153,1158-1162,1164-1170
+internal/sqlc/session_pins.sql.go
+  s_b0a43e8faa15b4::t_dbc87db1666a37 149,151-156,165,183-184,197,199-204,212
+internal/proxy/hmm_outcome_internal_test.go
+  s_b0a43e8faa15b4::t_35c6d8f1d5bc9c 82
+  s_b0a43e8faa15b4::t_8773b530cf959a 133-134
+  s_b0a43e8faa15b4::t_7c5df36eb64014 77-78,81
+  s_b0a43e8faa15b4::t_f94737fa5b1825 121-132,135-171
+internal/router/router.go
+  s_b0a43e8faa15b4::t_81604fa14127e2 206-211
+  s_b0a43e8faa15b4::t_42b1d72d8950f1 114-119,183-189,192-205,243-245
+internal/policyclient/client.go
+  s_b0a43e8faa15b4::t_a7262c55984969 14,666-675,679-681
+  s_b0a43e8faa15b4::t_46c1458e54d25a 163,432
+  s_b0a43e8faa15b4::t_51ea06d8d49327 156-162,164,207-213
+  s_b0a43e8faa15b4::t_d3a7c2a2121ac5 382-398,400-406,424-431,433,460-461
+  s_b0a43e8faa15b4::t_05c99609469786 399,557-583
+  s_b0a43e8faa15b4::t_cbd054be08f298 677-678,682
+  s_b0a43e8faa15b4::t_f11a394fe65d57 462-463
+  s_b0a43e8faa15b4::t_05349f787145b2 584-585
+internal/proxy/baseline_failover_integration_test.go
+  s_b0a43e8faa15b4::t_c2a78b7ecde5b9 17,128-162,165-209
+  s_b0a43e8faa15b4::t_8773b530cf959a 163-164
+  s_b0a43e8faa15b4::t_19f7cba3d94029 210-211
+docs/POLICY_ROUTER_HARNESS.md
+  s_b0a43e8faa15b4::t_cf1e719b898507 60-61,65-69,73,91-99,109-110,112-116
+  s_b0a43e8faa15b4::t_d788e54d698ab5 153-157
+  s_b0a43e8faa15b4::t_7cdf389bb09a2e 70-72
+sidecars/hmm/hmm_sidecar/api.py
+  s_b0a43e8faa15b4::t_0775a633366b15 93
+internal/proxy/conversation_messages.go
+  s_b0a43e8faa15b4::t_7f768efcc5a2b5 4-5,27-30,32-38
+internal/proxy/turnloop_internal_test.go
+  s_b0a43e8faa15b4::t_dcf86bc19b0cd2 108
+internal/router/policy/resolver_test.go
+  s_b0a43e8faa15b4::t_d01e294d401781 160-185
+internal/router/policy/sidecar_router.go
+  s_b0a43e8faa15b4::t_964dd08ef42e55 126,258-259,291,362
+  s_b0a43e8faa15b4::t_46c1458e54d25a 348-361
+internal/router/policy/resolver.go
+  s_b0a43e8faa15b4::t_f4cd52b0af7310 211-214,224-228
+  s_b0a43e8faa15b4::t_46c1458e54d25a 67-80,216-223
+internal/policyclient/client_test.go
+  s_b0a43e8faa15b4::t_38f6f3afba89e5 374,379-380,384
+  s_b0a43e8faa15b4::t_21afe5c20ce697 67-74,77-87,118-132,144-146,391-392
+internal/router/sessionpin/store.go
+  s_b0a43e8faa15b4::t_f03205db1c6587 78-80
+sidecars/hmm/hmm_sidecar/schemas.py
+  s_b0a43e8faa15b4::t_48ec6e98924240 75-79
+internal/proxy/authoritative_turnloop_internal_test.go
+  s_b0a43e8faa15b4::t_8773b530cf959a 102,104-107,109-110
+  s_b0a43e8faa15b4::t_61744b8cd6815c 217-274
+  s_b0a43e8faa15b4::t_6fc7e4a3878cf4 182-186
+  s_b0a43e8faa15b4::t_3d5ab64e8483d5 1-14,18-31,48-50,56-57,63-64,66-78,80-84,86-87,95-99,101,111-116,118-129,135-151,153-171,174-176,198-216
+  s_b0a43e8faa15b4::t_238501ce71c231 15-16,32-47,51-55,58-62,65,79,85,88-94,100,103,108,117,130-134,152,172-173,177-181,187-197
+  s_b0a43e8faa15b4::t_9f10da04985243 17
+db/queries/session_pins.sql
+  s_b0a43e8faa15b4::t_6de5dbe026f1f8 95-96,109
+internal/proxy/compaction.go
+  s_b0a43e8faa15b4::t_4639737c667651 145-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "96ac8a8cfbc7645d0f2e4b589aa7ab1a4a98ffa2",
+  "prompts": {},
+  "sessions": {
+    "s_b0a43e8faa15b4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "035bfebd-f02b-4da6-9a9b-580600beb09e",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

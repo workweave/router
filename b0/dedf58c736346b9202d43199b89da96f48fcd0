@@ -1,0 +1,21 @@
+internal/translate/text_repetition.go
+  s_6d259d23791b23::t_590e57c283916a 75
+internal/translate/text_repetition_test.go
+  s_6d259d23791b23::t_e1cdb98a7f514e 90-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b0dedf58c736346b9202d43199b89da96f48fcd0",
+  "prompts": {},
+  "sessions": {
+    "s_6d259d23791b23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52423c3-9d52-4a6a-bb28-ac4c96a85b4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

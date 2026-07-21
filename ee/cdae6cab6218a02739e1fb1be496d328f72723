@@ -1,0 +1,12 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "eecdae6cab6218a02739e1fb1be496d328f72723",
+  "prompts": {},
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  }
+}

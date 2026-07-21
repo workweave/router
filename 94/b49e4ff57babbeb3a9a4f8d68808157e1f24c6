@@ -1,0 +1,19 @@
+internal/policyclient/live_sidecar_test.go
+  s_b0a43e8faa15b4::t_35addb9d676109 43,53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "94b49e4ff57babbeb3a9a4f8d68808157e1f24c6",
+  "prompts": {},
+  "sessions": {
+    "s_b0a43e8faa15b4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "035bfebd-f02b-4da6-9a9b-580600beb09e",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

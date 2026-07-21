@@ -1,0 +1,25 @@
+internal/sqlc/models.go
+  s_035d3d44682683::t_3c5e99af2a51a5 166
+db/migrations/0032_telemetry-planner-ev-shadow.up.sql
+  s_035d3d44682683::t_0873a0dbe09ad4 34
+internal/proxy/planner_telemetry_internal_test.go
+  s_035d3d44682683::t_bf28a12d75b2a5 29-51
+internal/proxy/service.go
+  s_035d3d44682683::t_37dcb9fe75da65 2670-2677
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "84bd994b96622f0dfd32917feee3487f3f44a13e",
+  "prompts": {},
+  "sessions": {
+    "s_035d3d44682683": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5c55d20d-8d65-432d-a371-d871e40baee0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

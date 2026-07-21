@@ -1,0 +1,22 @@
+.github/workflows/cluster_routing_ack.yml
+  s_133faf06bc0f27::t_1bb6af1ffdf0c5 30-31
+.github/workflows/publish_cluster_routing.yml
+  s_133faf06bc0f27::t_88f0b2421dfe28 44
+  s_133faf06bc0f27::t_6ea034ed870769 75-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "83439cee521c5e8bac52e2dd5d72144911493c8e",
+  "prompts": {},
+  "sessions": {
+    "s_133faf06bc0f27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6d46e2f-bc9f-40f5-bb0a-bd7c42c639c7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
