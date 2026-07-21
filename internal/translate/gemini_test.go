@@ -850,8 +850,27 @@ func TestPrepareGemini_DropsUnsupportedFormatValues(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	props := decls[0].(map[string]any)["parameters"].(map[string]any)["properties"].(map[string]any)
+
+	homepage := props["homepage"].(map[string]any)
+	assert.Equal(t, "string", homepage["type"])
+	assert.Equal(t, "site", homepage["description"])
+	assert.NotContains(t, homepage, "format", "unsupported format value 'uri' must be dropped silently")
+
+	contact := props["contact"].(map[string]any)
+	assert.Equal(t, "string", contact["type"])
+	assert.NotContains(t, contact, "format", "unsupported format value 'email' must be dropped silently")
+
+	// Supported formats survive untouched.
+	when := props["when"].(map[string]any)
+	assert.Equal(t, "date-time", when["format"])
+	score := props["score"].(map[string]any)
+	assert.Equal(t, "double", score["format"])
 }
 
 func TestPrepareGemini_CollapsesItemsBool(t *testing.T) {

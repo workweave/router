@@ -1383,7 +1383,10 @@ func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
 				return nil, fmt.Errorf("%w at %s.format: expected string", ErrGeminiSchemaIncompatible, path)
 			}
 			if _, supported := geminiSupportedFormats[format]; !supported {
-				return nil, fmt.Errorf("%w at %s.format: %q is unsupported", ErrGeminiSchemaIncompatible, path, format)
+				// Drop unsupported format values (#387; #764 regressed to a hard
+				// reject). toolcheck validates against the ORIGINAL schema, so
+				// the format hint is still enforced where it matters.
+				continue
 			}
 			out[key] = format
 		default:
