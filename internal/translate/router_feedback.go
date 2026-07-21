@@ -132,9 +132,7 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	// A --label correction only applies to a negative verdict; for any other
-	// rating the flag is just prose and stays in the note. When it applies, the
-	// trailing flag is stripped so the persisted note is clean.
+	// A --label correction only applies to a negative verdict; positive and note-only ratings leave the flag in the note.
 	var label string
 	if rating == RouterFeedbackRatingDown {
 		label, feedback = stripTrailingLabel(feedback)
