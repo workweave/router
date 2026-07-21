@@ -440,7 +440,7 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 		}
 		if sig != "" {
 			pw.Key("thoughtSignature")
-			pw.Str(sig)
+			pw.Str(encodeSignatureForJSON(sig))
 		}
 		pw.EndObj()
 		parts = append(parts, string(pw.Bytes()))
@@ -457,6 +457,28 @@ func geminiTextPart(text string) string {
 	jw.Str(text)
 	jw.EndObj()
 	return string(jw.Bytes())
+}
+
+// encodeSignatureForJSON keeps a Gemini thoughtSignature value safe for JSON
+// emission. Google's JSON-rest layer auto-base64-decodes the bytes-shaped
+// thought_signature field, so the value we write into JSON must be valid
+// base64url of those bytes — but a freshly decoded carrier value is raw
+// bytes whose UTF-8 representation contains � replacement chars (Go's
+// range over a non-UTF-8 string replaces every invalid byte sequence).
+// Re-encoding through base64 preserves the bytes end-to-end and never hits
+// the JSON-encoder corruption. Already-base64 strings (delivered by
+// Google directly, no carrier round-trip) round-trip safely too —
+// base64.RawURLEncoding is idempotent on valid input.
+func encodeSignatureForJSON(sig string) string {
+	if sig == "" {
+		return sig
+	}
+	for _, c := range sig {
+		if c >= 0x80 {
+			return base64.RawURLEncoding.EncodeToString([]byte(sig))
+		}
+	}
+	return sig
 }
 
 // writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
@@ -918,7 +940,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				pw.Str(text)
 				if sig := block.Get("thought_signature").String(); sig != "" {
 					pw.Key("thoughtSignature")
-					pw.Str(sig)
+					pw.Str(encodeSignatureForJSON(sig))
 				}
 				pw.EndObj()
 				parts = append(parts, string(pw.Bytes()))
@@ -944,7 +966,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				}
 				if sig != "" {
 					pw.Key("thoughtSignature")
-					pw.Str(sig)
+					pw.Str(encodeSignatureForJSON(sig))
 				}
 				pw.EndObj()
 				parts = append(parts, string(pw.Bytes()))
