@@ -636,6 +636,57 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	assert.Equal(t, "string", props["url"].(map[string]any)["type"])
 }
 
+func TestPrepareGemini_WidensExclusiveBoundsToInclusive(t *testing.T) {
+	// Regression: exclusiveMinimum/exclusiveMaximum are unsupported by
+	// Gemini's function-calling schema; widen to inclusive bounds.
+	body := []byte(`{
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [{
+			"name":"Read",
+			"input_schema":{
+				"type":"object",
+				"properties":{
+					"limit":{"type":"integer","exclusiveMinimum":0},
+					"offset":{"type":"integer","exclusiveMaximum":100,"minimum":0},
+					"page":{"type":"integer","exclusiveMinimum":0,"minimum":5},
+					"strict":{"type":"integer","exclusiveMinimum":5,"minimum":0}
+				}
+			}
+		}]
+	}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	props := decls[0].(map[string]any)["parameters"].(map[string]any)["properties"].(map[string]any)
+
+	limit := props["limit"].(map[string]any)
+	assert.NotContains(t, limit, "exclusiveMinimum")
+	assert.Equal(t, float64(0), limit["minimum"], "exclusiveMinimum widens to the same-valued inclusive minimum")
+
+	// exclusiveMaximum widens to maximum with the same value when there's no
+	// sibling maximum to preserve; the untouched sibling minimum survives.
+	offset := props["offset"].(map[string]any)
+	assert.NotContains(t, offset, "exclusiveMaximum")
+	assert.Equal(t, float64(0), offset["minimum"])
+	assert.Equal(t, float64(100), offset["maximum"])
+
+	// When the explicit sibling is the tighter bound, it wins over the
+	// widened (weaker) exclusive value.
+	page := props["page"].(map[string]any)
+	assert.NotContains(t, page, "exclusiveMinimum")
+	assert.Equal(t, float64(5), page["minimum"], "explicit minimum (5) is tighter than widened exclusiveMinimum (0)")
+
+	// When the exclusive bound is the tighter one, the widened value wins
+	// over the weaker explicit sibling instead of being discarded.
+	strict := props["strict"].(map[string]any)
+	assert.NotContains(t, strict, "exclusiveMinimum")
+	assert.Equal(t, float64(5), strict["minimum"], "widened exclusiveMinimum (5) is tighter than explicit minimum (0)")
+}
+
 func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
 	// Regression: Gemini 400s when "required" names a property not in
 	// "properties" — valid JSON Schema, so MCP tool schemas can carry it; prune it.

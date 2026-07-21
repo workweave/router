@@ -1327,19 +1327,16 @@ func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
 		if key == "const" {
 			continue
 		}
-		// $schema (a meta-annotation), additionalProperties, and
-		// propertyNames have no Gemini function-calling equivalent — Gemini
-		// always behaves as if additionalProperties were disallowed and has
-		// no way to constrain key names — so they carry no representable
-		// semantic content either way. Drop them rather than reject the
-		// whole tool: real client schemas emit all three routinely (e.g.
-		// Claude Code's Agent/Task tool), and toolcheck validates emitted
-		// tool calls against the ORIGINAL inbound schema, not this
-		// sanitized one, so dropping them here is lossless. Regressed by
-		// #764, which switched this sanitizer from a strip-list to an
-		// allowlist without carrying these three over (originally fixed in
-		// #62 against a prod 400 on every Gemini 3.x tool-bearing request).
+		// $schema/additionalProperties/propertyNames have no Gemini
+		// equivalent; drop them rather than drop the whole tool (#764
+		// regressed this from #62's original strip-list to an allowlist).
 		if key == "$schema" || key == "additionalProperties" || key == "propertyNames" {
+			continue
+		}
+		// exclusiveMinimum/exclusiveMaximum are skipped here because both keys
+		// of each pair must be seen before resolving; map iteration order is
+		// undefined (see resolveGeminiExclusiveBound).
+		if key == "exclusiveMinimum" || key == "exclusiveMaximum" || key == "minimum" || key == "maximum" {
 			continue
 		}
 		if _, supported := geminiSchemaAllowedKeys[key]; !supported {
@@ -1400,6 +1397,12 @@ func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
 		}
 		out["enum"] = []any{deepCopyJSON(constant)}
 	}
+	if err := resolveGeminiExclusiveBound(node, out, "minimum", "exclusiveMinimum", path); err != nil {
+		return nil, err
+	}
+	if err := resolveGeminiExclusiveBound(node, out, "maximum", "exclusiveMaximum", path); err != nil {
+		return nil, err
+	}
 	if err := normalizeGeminiNullableType(out, path); err != nil {
 		return nil, err
 	}
@@ -1410,6 +1413,37 @@ func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// resolveGeminiExclusiveBound writes the inclusive bound key ("minimum" or
+// "maximum") into out. Gemini has no exclusive-bound keyword, so
+// exclusiveMinimum/exclusiveMaximum widen to inclusive; an explicit sibling
+// wins if it is the stricter of the two. No-op if neither key is present.
+func resolveGeminiExclusiveBound(node, out map[string]any, key, exclusiveKey, path string) error {
+	explicit, hasExplicit := node[key]
+	exclusiveVal, hasExclusive := node[exclusiveKey]
+	if !hasExplicit && !hasExclusive {
+		return nil
+	}
+	if !hasExclusive {
+		out[key] = deepCopyJSON(explicit)
+		return nil
+	}
+	if !hasExplicit {
+		out[key] = deepCopyJSON(exclusiveVal)
+		return nil
+	}
+	e, eOK := explicit.(float64)
+	x, xOK := exclusiveVal.(float64)
+	if !eOK || !xOK {
+		return fmt.Errorf("%w at %s.%s: non-numeric bound", ErrGeminiSchemaIncompatible, path, exclusiveKey)
+	}
+	if key == "minimum" && x > e || key == "maximum" && x < e {
+		out[key] = exclusiveVal
+	} else {
+		out[key] = explicit
+	}
+	return nil
 }
 
 func mergeGeminiAllOf(v any, path string) (map[string]any, error) {
