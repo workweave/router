@@ -320,6 +320,12 @@ var Models = []Model{
 	{ID: "gemini-3.5-flash", Tier: TierMid, ContextWindow: 1_048_576, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 9.00, CacheReadMultiplier: 0.10}},
 	}},
+	{ID: "gemini-3.5-flash-lite", Tier: TierLow, ContextWindow: 1_048_576, AgenticUse: AgenticLow, Providers: []ProviderBinding{
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 0.30, OutputUSDPer1M: 2.50, CacheReadMultiplier: 0.10}},
+	}},
+	{ID: "gemini-3.6-flash", Tier: TierMid, ContextWindow: 1_048_576, Providers: []ProviderBinding{
+		{Provider: providers.ProviderGoogle, Price: Pricing{InputUSDPer1M: 1.50, OutputUSDPer1M: 7.50, CacheReadMultiplier: 0.10}},
+	}},
 	{ID: "google/gemma-4-26b-a4b-it", Tier: TierLow, ContextWindow: 262_144, Providers: []ProviderBinding{
 		{Provider: providers.ProviderGoogle, UpstreamID: "gemma-4-26b-a4b-it", Price: Pricing{InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60, CacheReadMultiplier: 0.10}},
 	}},

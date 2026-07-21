@@ -205,6 +205,8 @@ var registry = map[string]ModelSpec{
 	"gemini-3-flash-preview":        google3Base,
 	"gemini-3.1-flash-lite-preview": google3Base,
 	"gemini-3.1-flash-live-preview": google3Base,
+	"gemini-3.5-flash-lite":         google3Base,
+	"gemini-3.6-flash":              google3Base,
 
 	"gemini-2.5-pro":        googleBase,
 	"gemini-2.5-flash":      googleBase,

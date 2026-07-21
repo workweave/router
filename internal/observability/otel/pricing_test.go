@@ -60,6 +60,8 @@ func TestLookup(t *testing.T) {
 		{name: "gemini-3.1-pro-preview", model: "gemini-3.1-pro-preview", wantInput: 2.00, wantOutput: 8.00},
 		{name: "gemini-3-flash-preview", model: "gemini-3-flash-preview", wantInput: 0.50, wantOutput: 2.00},
 		{name: "gemini-3.1-flash-lite-preview", model: "gemini-3.1-flash-lite-preview", wantInput: 0.10, wantOutput: 0.40},
+		{name: "gemini-3.6-flash", model: "gemini-3.6-flash", wantInput: 1.50, wantOutput: 7.50},
+		{name: "gemini-3.5-flash-lite", model: "gemini-3.5-flash-lite", wantInput: 0.30, wantOutput: 2.50},
 
 		// ── Google Gemini 2.x (legacy) ─────────────────────────
 		{name: "gemini-2.5-pro", model: "gemini-2.5-pro", wantInput: 1.25, wantOutput: 5.00},
