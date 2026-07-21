@@ -12,7 +12,10 @@ INSERT INTO router.router_feedback (
     session_id,
     requested_model,
     served_model,
-    feedback
+    feedback,
+    rating,
+    suggested_label,
+    source
 ) VALUES (
     @installation_id::uuid,
     @session_key::bytea,
@@ -22,5 +25,8 @@ INSERT INTO router.router_feedback (
     sqlc.narg('session_id')::varchar,
     @requested_model::varchar,
     @served_model::varchar,
-    @feedback::text
+    @feedback::text,
+    sqlc.narg('rating')::varchar,
+    sqlc.narg('suggested_label')::varchar,
+    @source::varchar
 );

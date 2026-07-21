@@ -44,10 +44,23 @@ type RouterFeedbackEvent struct {
 	// Rating is the thumbs verdict ("up", "down", or "" for note-only),
 	// parsed from /rf+ /rf- or a leading verdict token in the note.
 	Rating string
+	// SuggestedLabel is the complexity label the submitter thinks this turn
+	// needed ("fast", "explore", "balanced", "high", "maximum"). Set when
+	// Rating is "down", empty otherwise.
+	SuggestedLabel string
 	// Feedback is the persisted submission text; verdict-only submissions
 	// get a compact emoji so the column is never empty.
 	Feedback string
+	// Source is how the feedback was submitted: "user" (explicit /rf command)
+	// or "auto" (automated judge at session stop).
+	Source string
 }
+
+// RouterFeedbackSource values for validated event persistence.
+const (
+	RouterFeedbackSourceUser = "user"
+	RouterFeedbackSourceAuto = "auto"
+)
 
 // handleRouterFeedbackCommand persists a /router-feedback submission, emits a
 // router.feedback.command span on the standard OTel pipeline, and returns a
@@ -105,7 +118,9 @@ func (s *Service) handleRouterFeedbackCommand(
 			RequestedModel: env.Model(),
 			ServedModel:    servedModel,
 			Rating:         rating,
+			SuggestedLabel: cmd.SuggestedLabel,
 			Feedback:       persistedFeedbackText(rating, feedback),
+			Source:         RouterFeedbackSourceUser,
 		}
 		// context.Background(): ctx may already be canceled (client disconnected
 		// mid-command); don't drop feedback the user explicitly typed.
@@ -121,7 +136,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		if router.IsHMMStrategy(strategy) && trainingAllowed {
 			trainingDelta = routerFeedbackTrainingDelta(env)
 		}
-		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, trainingDelta)
+		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, cmd.SuggestedLabel, RouterFeedbackSourceUser, trainingDelta)
 	}
 
 	now := time.Now()
@@ -129,7 +144,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		Name:  routerFeedbackCommandSpanName,
 		Start: now,
 		End:   now,
-		Attrs: otel.NewAttrBuilder(11).
+		Attrs: otel.NewAttrBuilder(12).
 			String("external_id", externalID).
 			String("router_user_id", routerUserID).
 			String("client.device_id", clientID.DeviceID).
@@ -141,6 +156,7 @@ func (s *Service) handleRouterFeedbackCommand(
 			String("feedback.role", role).
 			String("feedback.rating", rating).
 			String("feedback.text", feedback).
+			String("feedback.source", RouterFeedbackSourceUser).
 			Build(),
 	})
 	otel.Flush(ctx)
@@ -170,6 +186,8 @@ func (s *Service) reportRouterFeedback(
 	servedModel string,
 	rating string,
 	feedback string,
+	suggestedLabel string,
+	source string,
 	trainingDelta []router.ConversationMessage,
 ) {
 	payload := map[string]interface{}{
@@ -183,6 +201,10 @@ func (s *Service) reportRouterFeedback(
 		"router_user_id":    routerUserID,
 		"client_app":        clientID.ClientApp,
 		"client_session_id": clientID.SessionID,
+		"source":            source,
+	}
+	if suggestedLabel != "" {
+		payload["suggested_label"] = suggestedLabel
 	}
 	if organizationID != "" {
 		payload["organization_id"] = organizationID

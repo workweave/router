@@ -22,7 +22,10 @@ INSERT INTO router.router_feedback (
     session_id,
     requested_model,
     served_model,
-    feedback
+    feedback,
+    rating,
+    suggested_label,
+    source
 ) VALUES (
     $1::uuid,
     $2::bytea,
@@ -32,7 +35,10 @@ INSERT INTO router.router_feedback (
     $6::varchar,
     $7::varchar,
     $8::varchar,
-    $9::text
+    $9::text,
+    $10::varchar,
+    $11::varchar,
+    $12::varchar
 )
 `
 
@@ -46,6 +52,9 @@ type InsertRouterFeedbackParams struct {
 	RequestedModel string
 	ServedModel    string
 	Feedback       string
+	Rating         *string
+	SuggestedLabel *string
+	Source         string
 }
 
 // Records one /router-feedback submission. Written with
@@ -62,7 +71,10 @@ type InsertRouterFeedbackParams struct {
 //	    session_id,
 //	    requested_model,
 //	    served_model,
-//	    feedback
+//	    feedback,
+//	    rating,
+//	    suggested_label,
+//	    source
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::bytea,
@@ -72,7 +84,10 @@ type InsertRouterFeedbackParams struct {
 //	    $6::varchar,
 //	    $7::varchar,
 //	    $8::varchar,
-//	    $9::text
+//	    $9::text,
+//	    $10::varchar,
+//	    $11::varchar,
+//	    $12::varchar
 //	)
 func (q *Queries) InsertRouterFeedback(ctx context.Context, arg InsertRouterFeedbackParams) error {
 	_, err := q.db.Exec(ctx, insertRouterFeedback,
@@ -85,6 +100,9 @@ func (q *Queries) InsertRouterFeedback(ctx context.Context, arg InsertRouterFeed
 		arg.RequestedModel,
 		arg.ServedModel,
 		arg.Feedback,
+		arg.Rating,
+		arg.SuggestedLabel,
+		arg.Source,
 	)
 	return err
 }

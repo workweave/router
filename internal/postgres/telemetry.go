@@ -192,7 +192,10 @@ func (r *TelemetryRepo) InsertRouterFeedback(ctx context.Context, p proxy.Router
 		SessionID:      stringPtrOrNil(p.SessionID),
 		RequestedModel: p.RequestedModel,
 		ServedModel:    p.ServedModel,
+		Rating:         stringPtrOrNil(p.Rating),
+		SuggestedLabel: stringPtrOrNil(p.SuggestedLabel),
 		Feedback:       p.Feedback,
+		Source:         p.Source,
 	})
 }
 

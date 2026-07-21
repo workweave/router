@@ -12,12 +12,13 @@ import (
 
 func TestParseRouterFeedbackCommand(t *testing.T) {
 	tests := []struct {
-		name         string
-		input        string
-		wantRating   string
-		wantFeedback string
-		wantFound    bool
-		wantStripped string
+		name             string
+		input            string
+		wantRating       string
+		wantSuggestedLabel string
+		wantFeedback     string
+		wantFound        bool
+		wantStripped     string
 	}{
 		{
 			name:         "command with feedback text",
@@ -150,6 +151,54 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			input:     "<system-reminder>unclosed\n/router-feedback bad",
 			wantFound: false,
 		},
+		{
+			name:             "trailing --label=maximum is parsed and stripped from feedback",
+			input:            "/rf- got stuck in a loop on a complex refactor --label=maximum",
+			wantRating:       "down",
+			wantSuggestedLabel: "maximum",
+			wantFeedback:     "got stuck in a loop on a complex refactor",
+			wantFound:        true,
+		},
+		{
+			name:             "trailing --label= with quoted value is parsed and stripped",
+			input:            "/rf- kept failing tool calls --label=\"balanced\"",
+			wantRating:       "down",
+			wantSuggestedLabel: "balanced",
+			wantFeedback:     "kept failing tool calls",
+			wantFound:        true,
+		},
+		{
+			name:             "unrecognized label value is silently dropped, label stays empty",
+			input:            "/rf- wrong model --label=wrong",
+			wantRating:       "down",
+			wantSuggestedLabel: "",
+			wantFeedback:     "wrong model --label=wrong",
+			wantFound:        true,
+		},
+		{
+			name:         "rf+ with label is preserved",
+			input:        "/rf+ great model choice --label=fast",
+			wantRating:   "up",
+			wantSuggestedLabel:   "fast",
+			wantFeedback: "great model choice",
+			wantFound:    true,
+		},
+		{
+			name:             "multiline feedback with label on last line is parsed",
+			input:            "/rf- the model looped\nretried same file 10x --label=maximum",
+			wantRating:       "down",
+			wantSuggestedLabel: "maximum",
+			wantFeedback:     "the model looped\nretried same file 10x",
+			wantFound:        true,
+		},
+		{
+			name:             "label with --label=\"high\" in quoted form",
+			input:            "/rf- too simple for this --label=\"high\"",
+			wantRating:       "down",
+			wantSuggestedLabel: "high",
+			wantFeedback:     "too simple for this",
+			wantFound:        true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -163,6 +212,7 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tt.wantRating, res.Rating)
+			assert.Equal(t, tt.wantSuggestedLabel, res.SuggestedLabel)
 			assert.Equal(t, tt.wantFeedback, res.Feedback)
 
 			stripped := lastUserMessageText(t, env)

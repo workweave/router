@@ -12,8 +12,13 @@ type RouterFeedbackResult struct {
 	// note-only command. Set from the /rf+ /rf- shortcuts or a leading
 	// 👍/👎/+/-/up/down token in the note.
 	Rating string
+	// SuggestedLabel is the complexity label ("fast", "explore", "balanced",
+	// "high", "maximum") extracted from a trailing --label="<value>" flag.
+	// Set when the submitter believes the turn needed a different complexity
+	// band, typically alongside a negative verdict.
+	SuggestedLabel string
 	// Feedback is the free-form note the user submitted after the command,
-	// minus any leading rating token.
+	// minus any leading rating token and trailing --label flag.
 	Feedback string
 }
 
@@ -24,6 +29,15 @@ const (
 	RouterFeedbackRatingUp   = "up"
 	RouterFeedbackRatingDown = "down"
 )
+
+// RouterFeedbackLabels is the closed vocabulary of complexity labels.
+var RouterFeedbackLabels = map[string]struct{}{
+	"fast":     {},
+	"explore":  {},
+	"balanced": {},
+	"high":     {},
+	"maximum":  {},
+}
 
 // ExtractRouterFeedbackCommand scans the last user-role message in env for a
 // /router-feedback <text> directive. When found, it strips the command line
@@ -121,7 +135,11 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	return RouterFeedbackResult{Rating: rating, Feedback: feedback}, true, strings.TrimSpace(prefix)
+	// Extract trailing --label="..." from the feedback text; the flag is
+	// stripped so the persisted note is clean.
+	var label string
+	label, feedback = stripTrailingLabel(feedback)
+	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback}, true, strings.TrimSpace(prefix)
 }
 
 func isRouterFeedbackCommandOnlyContent(content gjson.Result) bool {
@@ -240,4 +258,50 @@ func splitLeadingRating(s string) (rating, rest string) {
 		return RouterFeedbackRatingDown, strings.TrimSpace(after)
 	}
 	return "", s
+}
+
+// stripTrailingLabel extracts and removes a trailing --label="<value>" flag
+// from the feedback text. Returns the label and the cleaned text. The label
+// is validated against the closed RouterFeedbackLabels vocabulary; unrecognized
+// values are silently dropped.
+func stripTrailingLabel(s string) (label, cleaned string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+
+	idx := strings.LastIndex(s, "--label=")
+	if idx < 0 {
+		return "", s
+	}
+
+	rest := s[idx+len("--label="):]
+	val, _, ok := extractQuotedOrBareValue(rest)
+	if !ok {
+		return "", s
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if _, valid := RouterFeedbackLabels[val]; !valid {
+		return "", s
+	}
+
+	cleaned = strings.TrimSpace(s[:idx])
+	return val, cleaned
+}
+
+// extractQuotedOrBareValue extracts a "--label=foo" or "--label=\"foo\"" value.
+func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", false
+	}
+	if s[0] == '"' {
+		end := strings.IndexByte(s[1:], '"')
+		if end < 0 {
+			return "", "", false
+		}
+		return s[1 : end+1], s[end+2:], true
+	}
+	val, tail, _ := strings.Cut(s, " ")
+	return val, tail, true
 }

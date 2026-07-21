@@ -383,6 +383,12 @@ type RouterRouterFeedback struct {
 	RequestedModel string
 	ServedModel    string
 	Feedback       string
+	// "up", "down", or NULL. Null means abstain or note-only (no verdict).
+	Rating *string
+	// "fast", "explore", "balanced", "high", or "maximum" — the complexity label the submitter thinks the turn needed. Set when rating is "down", NULL otherwise.
+	SuggestedLabel *string
+	// How the feedback was submitted: "user" (explicit /rf command), "auto" (automated judge at session stop).
+	Source string
 }
 
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache
