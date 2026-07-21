@@ -579,8 +579,16 @@ func must(t *testing.T, m map[string]any, k string) any {
 }
 
 func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
-	// Regression: Claude Code tool defs include JSON Schema fields (`$schema`,
-	// `additionalProperties`, `propertyNames`) Google rejects with 400.
+	// Regression (#62, re-regressed by #764's switch to an allowlist and
+	// fixed again here): Claude Code tool defs — including the Agent/Task
+	// subagent tool itself — include JSON Schema fields (`$schema`,
+	// `additionalProperties`, `propertyNames`) Google's function-calling API
+	// rejects outright. These must be silently dropped, not turned into a
+	// hard tool-declaration failure: #764 briefly did the latter, which
+	// 502'd every real Claude Code turn against any Gemini 3.x model that
+	// included the Agent tool (caught 2026-07-21 onboarding gemini-3.6-flash
+	// / gemini-3.5-flash-lite, but affected already-deployed Gemini models
+	// too).
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -604,8 +612,28 @@ func TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	tools := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	decls := tools[0].(map[string]any)["functionDeclarations"].([]any)
+	require.Len(t, decls, 1)
+	params := decls[0].(map[string]any)["parameters"].(map[string]any)
+
+	// The rejected keys are gone at every level...
+	assert.NotContains(t, params, "$schema")
+	assert.NotContains(t, params, "additionalProperties")
+	nested := params["properties"].(map[string]any)["params"].(map[string]any)
+	assert.NotContains(t, nested, "additionalProperties")
+	assert.NotContains(t, nested, "propertyNames")
+
+	// ...but the schema's actual meaning survives.
+	assert.Equal(t, "object", params["type"])
+	assert.Equal(t, []any{"url"}, params["required"])
+	props := params["properties"].(map[string]any)
+	assert.Equal(t, "string", props["url"].(map[string]any)["type"])
 }
 
 func TestPrepareGemini_PrunesDanglingRequired(t *testing.T) {
@@ -926,7 +954,9 @@ func TestPrepareGemini_PreservesEnumValueTypes(t *testing.T) {
 
 func TestPrepareGemini_UserDefinedPropertyNamedProperties(t *testing.T) {
 	// A user-defined property named "properties" must not be mistaken for the
-	// JSON Schema "properties" keyword. Its value schema must still be filtered.
+	// JSON Schema "properties" keyword. Its value schema must still be
+	// filtered — and additionalProperties within it silently dropped, not
+	// treated as a rejection (see TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects).
 	body := []byte(`{
 		"messages": [{"role":"user","content":"hi"}],
 		"tools": [{
@@ -946,12 +976,25 @@ func TestPrepareGemini_UserDefinedPropertyNamedProperties(t *testing.T) {
 	}`)
 	env, err := translate.ParseAnthropic(body)
 	require.NoError(t, err)
-	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	params := decls[0].(map[string]any)["parameters"].(map[string]any)
+	properties := params["properties"].(map[string]any)
+
+	nested, ok := properties["properties"].(map[string]any)
+	require.True(t, ok, `the user-defined "properties" key must survive as an object schema`)
+	assert.Equal(t, "object", nested["type"])
+	assert.Equal(t, "Additional properties", nested["description"])
+	assert.NotContains(t, nested, "additionalProperties")
 }
 
 func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
-	// The same-format (FormatGemini) path must also sanitize tool schemas.
+	// The same-format (FormatGemini) path must also sanitize tool schemas —
+	// additionalProperties dropped silently, not rejected (see
+	// TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects).
 	body := []byte(`{
 		"model": "gemini-3.1-pro-preview",
 		"stream": false,
@@ -969,8 +1012,14 @@ func TestPrepareGemini_GeminiFormatSanitizesTools(t *testing.T) {
 	}`)
 	env, err := translate.ParseGemini(body)
 	require.NoError(t, err)
-	_, err = env.PrepareGemini(http.Header{}, translate.EmitOptions{})
-	require.ErrorIs(t, err, translate.ErrGeminiSchemaIncompatible)
+	prep, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{})
+	require.NoError(t, err)
+
+	out := mustUnmarshal(t, prep.Body)
+	decls := out["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	params := decls[0].(map[string]any)["parameters"].(map[string]any)
+	assert.NotContains(t, params, "additionalProperties")
+	assert.Equal(t, "object", params["type"])
 }
 
 func TestPrepareGemini_GeminiFormatInlinesSchemaRefs(t *testing.T) {

@@ -59,9 +59,18 @@ func TestPrepareGemini_SchemaFidelity(t *testing.T) {
 			wantErr: translate.ErrGeminiSchemaIncompatible,
 		},
 		{
-			name:    "unsupported constraint rejects instead of dropping",
-			schema:  `{"type":"object","additionalProperties":false}`,
-			wantErr: translate.ErrGeminiSchemaIncompatible,
+			// additionalProperties has no Gemini equivalent (Gemini always
+			// behaves as if it were disallowed) and toolcheck validates
+			// emitted tool calls against the original inbound schema, not
+			// this sanitized one — so it's dropped, not rejected. See
+			// TestPrepareGemini_StripsJSONSchemaFieldsGoogleRejects for the
+			// prod-observed case (Claude Code's Agent/Task tool schema).
+			name:   "additionalProperties is dropped, not rejected",
+			schema: `{"type":"object","additionalProperties":false}`,
+			check: func(t *testing.T, schema map[string]any) {
+				assert.NotContains(t, schema, "additionalProperties")
+				assert.Equal(t, "object", schema["type"])
+			},
 		},
 	}
 

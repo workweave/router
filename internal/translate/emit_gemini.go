@@ -1327,6 +1327,21 @@ func sanitizeGeminiSchemaNode(v any, path string) (any, error) {
 		if key == "const" {
 			continue
 		}
+		// $schema (a meta-annotation), additionalProperties, and
+		// propertyNames have no Gemini function-calling equivalent — Gemini
+		// always behaves as if additionalProperties were disallowed and has
+		// no way to constrain key names — so they carry no representable
+		// semantic content either way. Drop them rather than reject the
+		// whole tool: real client schemas emit all three routinely (e.g.
+		// Claude Code's Agent/Task tool), and toolcheck validates emitted
+		// tool calls against the ORIGINAL inbound schema, not this
+		// sanitized one, so dropping them here is lossless. Regressed by
+		// #764, which switched this sanitizer from a strip-list to an
+		// allowlist without carrying these three over (originally fixed in
+		// #62 against a prod 400 on every Gemini 3.x tool-bearing request).
+		if key == "$schema" || key == "additionalProperties" || key == "propertyNames" {
+			continue
+		}
 		if _, supported := geminiSchemaAllowedKeys[key]; !supported {
 			return nil, fmt.Errorf("%w at %s.%s: unsupported constraint", ErrGeminiSchemaIncompatible, path, key)
 		}
