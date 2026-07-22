@@ -227,6 +227,20 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			wantFound:    true,
 		},
 		{
+			name:         "rf with negative two-digit sequence consumes as sequence",
+			input:        "/rf -12 stuck in a loop back then",
+			wantSequence: -12,
+			wantFeedback: "stuck in a loop back then",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with negative three-digit prefix stays in note (status code)",
+			input:        "/rf -404 not found",
+			wantSequence: 0,
+			wantFeedback: "-404 not found",
+			wantFound:    true,
+		},
+		{
 			name:         "rf with negative sequence plus rating up",
 			input:        "/rf -3 + too slow on haiku",
 			wantRating:   "up",

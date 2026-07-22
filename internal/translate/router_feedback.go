@@ -325,6 +325,10 @@ func splitSequence(s string) (seq int, rest string) {
 		return 0, s
 	}
 	if strings.HasPrefix(tok, "-") && len(tok) > 1 && tok[1] >= '1' && tok[1] <= '9' {
+		// Same 1-2 digit cap as positives: "-404 not found" is a status code in a note, not turn -404.
+		if len(tok) > 3 {
+			return 0, s
+		}
 		restDigits := tok[2:]
 		allDigits := true
 		for i := 0; i < len(restDigits); i++ {
