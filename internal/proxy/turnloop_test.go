@@ -1077,3 +1077,7 @@ func (recordingTelemetry) GetTelemetryModelBreakdown(ctx context.Context, instal
 func (recordingTelemetry) GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]proxy.TelemetryModelBucket, error) {
 	return nil, nil
 }
+
+func (recordingTelemetry) GetTelemetryBySessionSequence(ctx context.Context, installationID uuid.UUID, sessionKey []byte, role string, seq int) (proxy.TelemetryTurnResult, error) {
+	return proxy.TelemetryTurnResult{}, nil
+}

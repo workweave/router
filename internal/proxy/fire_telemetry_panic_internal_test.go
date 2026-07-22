@@ -10,6 +10,7 @@ import (
 
 	"workweave/router/internal/observability"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,6 +52,10 @@ func (panicTelemetryRepo) GetTelemetryModelBreakdown(ctx context.Context, instal
 
 func (panicTelemetryRepo) GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error) {
 	return nil, nil
+}
+
+func (panicTelemetryRepo) GetTelemetryBySessionSequence(ctx context.Context, installationID uuid.UUID, sessionKey []byte, role string, seq int) (TelemetryTurnResult, error) {
+	return TelemetryTurnResult{}, nil
 }
 
 // TestFireTelemetryRecoversFromPanic proves a panic inside the async

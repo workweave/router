@@ -17,6 +17,11 @@ type RouterFeedbackResult struct {
 	// Feedback is the free-form note the user submitted after the command,
 	// minus any leading rating token and trailing --label flag.
 	Feedback string
+	// Sequence is an optional leading turn-sequence indicator parsed from the
+	// feedback body. 0 = last turn (default, no sequence specified),
+	// positive = absolute turn sequence number, negative = relative offset
+	// from the last turn (e.g. -3 means three turns back).
+	Sequence int
 }
 
 // RouterFeedbackRatingUp and RouterFeedbackRatingDown are the canonical
@@ -127,17 +132,24 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 		}
 		feedback += rest
 	}
+	// splitSequence must run before splitLeadingRating so a bare "-" in
+	// feedback is left for the verdict parser rather than being eaten as
+	// part of a negative sequence token.
+	var seq int
+	seq, feedback = splitSequence(feedback)
 	// A note that opens with a bare verdict ("/rf 👍 too slow") promotes to a
 	// rating, so a single command can carry both verdict and explanation.
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	// A --label correction only applies to a negative verdict; positive and note-only ratings leave the flag in the note.
+	// splitSequence must also run before stripTrailingLabel so a slash at the start
+	// of the note is disambiguated as a sequence index rather than read as
+	// prose by the --label scanner.
 	var label string
 	if rating == RouterFeedbackRatingDown {
 		label, feedback = stripTrailingLabel(feedback)
 	}
-	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback}, true, strings.TrimSpace(prefix)
+	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback, Sequence: seq}, true, strings.TrimSpace(prefix)
 }
 
 func isRouterFeedbackCommandOnlyContent(content gjson.Result) bool {
@@ -209,8 +221,10 @@ func isRouterFeedbackAckText(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	return strings.HasPrefix(trimmed, "Weave Router: Feedback recorded") ||
 		strings.HasPrefix(trimmed, "Weave Router: router-feedback needs a verdict") ||
+		strings.HasPrefix(trimmed, "Weave Router: No turn found at that sequence number") ||
 		strings.HasPrefix(trimmed, "✦ **Weave Router** → Feedback recorded") ||
-		strings.HasPrefix(trimmed, "✦ **Weave Router** → Router-feedback needs a verdict")
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → Router-feedback needs a verdict") ||
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → No turn found at that sequence number")
 }
 
 // matchRouterFeedbackCommand recognizes the command token at the start of the
@@ -301,4 +315,82 @@ func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
 	}
 	val, tail, _ := strings.Cut(s, " ")
 	return val, tail, true
+}
+
+// splitSequence extracts an optional leading sequence token from s. Returns
+// the sequence value and the remaining text.
+//
+// Rules:
+//   - /\d+/ = absolute positive sequence number
+//   - /-[1-9]\d*/ = relative negative sequence (must have digits after minus)
+//   - A bare "-" followed by space or end is NOT a sequence (it's a verdict down)
+//   - "-0" does NOT parse as a sequence
+//   - Only the first sequence-parseable token is consumed
+//   - Positive integers only consume when they are the lone remaining token
+//     or the immediately following token is a verdict; otherwise the digit
+//     stays in the note so things like "404 not found" don't trigger a
+//     sequence lookup that would drop the feedback.
+func splitSequence(s string) (seq int, rest string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, ""
+	}
+	tok, after, _ := strings.Cut(s, " ")
+	if tok == "-" || tok == "-0" {
+		return 0, s
+	}
+	if strings.HasPrefix(tok, "-") && len(tok) > 1 && tok[1] >= '1' && tok[1] <= '9' {
+		restDigits := tok[2:]
+		allDigits := true
+		for i := 0; i < len(restDigits); i++ {
+			if restDigits[i] < '0' || restDigits[i] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			seq := 0
+			for _, ch := range tok[1:] {
+				seq = seq*10 + int(ch-'0')
+			}
+			return -seq, strings.TrimSpace(after)
+		}
+		return 0, s
+	}
+	allDigits := len(tok) > 0
+	for i := 0; i < len(tok); i++ {
+		if tok[i] < '0' || tok[i] > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		next := strings.TrimSpace(after)
+		lone := next == ""
+		verdictFollows := lone || isVerdictToken(next)
+		if !verdictFollows {
+			return 0, s
+		}
+		seq := 0
+		for _, ch := range tok {
+			seq = seq*10 + int(ch-'0')
+		}
+		if seq == 0 {
+			return 0, s
+		}
+		return seq, strings.TrimSpace(after)
+	}
+	return 0, s
+}
+
+// isVerdictToken reports whether s opens with a verdict recognized by
+// splitLeadingRating. Used to disambiguate `/rf N <verdict>` from
+// `/rf N <prose>`.
+func isVerdictToken(s string) bool {
+	tok, _, _ := strings.Cut(s, " ")
+	switch strings.ToLower(tok) {
+	case "+", "-", "👍", "👎", "up", "down", "thumbsup", "thumbsdown":
+		return true
+	}
+	return false
 }

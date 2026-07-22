@@ -25,7 +25,9 @@ INSERT INTO router.router_feedback (
     feedback,
     rating,
     suggested_label,
-    source
+    source,
+    request_id,
+    route_id
 ) VALUES (
     $1::uuid,
     $2::bytea,
@@ -38,7 +40,9 @@ INSERT INTO router.router_feedback (
     $9::text,
     $10::varchar,
     $11::varchar,
-    $12::varchar
+    $12::varchar,
+    $13::varchar,
+    $14::varchar
 )
 `
 
@@ -55,12 +59,16 @@ type InsertRouterFeedbackParams struct {
 	Rating         *string
 	SuggestedLabel *string
 	Source         string
+	RequestID      *string
+	RouteID        *string
 }
 
 // Records one /router-feedback submission. Written with
 // context.Background() (the synthetic ack response may already have been
 // flushed and the request ctx canceled). served_model is the session pin's
 // LastServedModel at submission time; empty when the session had no pin.
+// request_id and route_id are populated when a turn sequence was specified
+// so the policy sidecar can join the rating to the specific routing decision.
 //
 //	INSERT INTO router.router_feedback (
 //	    installation_id,
@@ -74,7 +82,9 @@ type InsertRouterFeedbackParams struct {
 //	    feedback,
 //	    rating,
 //	    suggested_label,
-//	    source
+//	    source,
+//	    request_id,
+//	    route_id
 //	) VALUES (
 //	    $1::uuid,
 //	    $2::bytea,
@@ -87,7 +97,9 @@ type InsertRouterFeedbackParams struct {
 //	    $9::text,
 //	    $10::varchar,
 //	    $11::varchar,
-//	    $12::varchar
+//	    $12::varchar,
+//	    $13::varchar,
+//	    $14::varchar
 //	)
 func (q *Queries) InsertRouterFeedback(ctx context.Context, arg InsertRouterFeedbackParams) error {
 	_, err := q.db.Exec(ctx, insertRouterFeedback,
@@ -103,6 +115,8 @@ func (q *Queries) InsertRouterFeedback(ctx context.Context, arg InsertRouterFeed
 		arg.Rating,
 		arg.SuggestedLabel,
 		arg.Source,
+		arg.RequestID,
+		arg.RouteID,
 	)
 	return err
 }

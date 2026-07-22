@@ -2,8 +2,10 @@ package proxy_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -459,4 +461,325 @@ func TestService_RouterFeedbackCommand_ThumbsDownShortcutWithNote(t *testing.T) 
 	require.Len(t, feedback.events, 1)
 	assert.Equal(t, "down", feedback.events[0].Rating)
 	assert.Equal(t, "wrong model for this refactor", feedback.events[0].Feedback, "the note is stored verbatim alongside the verdict")
+}
+
+type recordingFeedbackRepo struct {
+	mu      sync.Mutex
+	upserts []proxy.UpsertFeedbackParams
+}
+
+func (f *recordingFeedbackRepo) Upsert(_ context.Context, p proxy.UpsertFeedbackParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upserts = append(f.upserts, p)
+	return nil
+}
+
+func (f *recordingFeedbackRepo) GetContext(_ context.Context, _, _ string) (proxy.FeedbackContext, error) {
+	return proxy.FeedbackContext{}, nil
+}
+
+func TestService_RouterFeedbackCommand_SequenceResolvesTelemetryTurn(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 - wrong tier for this"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", LastServedModel: "claude-haiku-4-5"}
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{RequestID: "req-abc", DecisionModel: "claude-opus-4-7", RouteID: "hmm:xyz"}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	require.Equal(t, []int{-2}, telem.seqCalls, "the parsed relative sequence must be resolved against telemetry")
+	require.Len(t, feedback.events, 1)
+	ev := feedback.events[0]
+	assert.Equal(t, "claude-opus-4-7", ev.ServedModel, "served_model comes from the resolved telemetry row, not the pin")
+	assert.Equal(t, "req-abc", ev.RequestID)
+	assert.Equal(t, "hmm:xyz", ev.RouteID)
+	assert.Equal(t, "down", ev.Rating)
+	assert.Equal(t, "wrong tier for this", ev.Feedback)
+}
+
+func TestService_RouterFeedbackCommand_SequenceNotFoundAcksGuidance(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -9 too slow"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqErr = sql.ErrNoRows
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Equal(t, 0, fr.routeCalls, "an unresolvable sequence must short-circuit routing")
+	assert.Empty(t, feedback.events, "no feedback row is written when the sequence cannot be resolved")
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	blocks, _ := resp["content"].([]any)
+	require.NotEmpty(t, blocks)
+	first, _ := blocks[0].(map[string]any)
+	text, _ := first["text"].(string)
+	assert.Contains(t, text, "No turn found at that sequence number")
+}
+
+func TestService_RouterFeedbackCommand_DBErrorFallsBackToPin(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 + wrong tier"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", LastServedModel: "claude-haiku-4-5"}
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqErr = errors.New("connection refused")
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	require.Len(t, feedback.events, 1, "feedback must persist on transient DB errors, falling back to pin servedModel")
+	ev := feedback.events[0]
+	assert.Equal(t, "claude-haiku-4-5", ev.ServedModel, "falls back to the pin on transient DB failure")
+	assert.Empty(t, ev.RequestID, "no telemetry row, so requestID is empty")
+	assert.Equal(t, "up", ev.Rating)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	blocks, _ := resp["content"].([]any)
+	require.NotEmpty(t, blocks)
+	first, _ := blocks[0].(map[string]any)
+	text, _ := first["text"].(string)
+	assert.Contains(t, text, "Feedback recorded", "ack shows normally even on transient telemetry error")
+}
+
+func TestService_RouterFeedbackCommand_NoSequenceKeepsPinServedModel(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf- too slow"}
+		]
+	}`
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", LastServedModel: "claude-haiku-4-5"}
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback)
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	assert.Empty(t, telem.seqCalls, "no sequence means no telemetry lookup")
+	require.Len(t, feedback.events, 1)
+	ev := feedback.events[0]
+	assert.Equal(t, "claude-haiku-4-5", ev.ServedModel, "falls back to the pin's last served model")
+	assert.Empty(t, ev.RequestID)
+	assert.Empty(t, ev.RouteID)
+}
+
+func TestService_RouterFeedbackCommand_SequenceNoteOnlySkipsRequestFeedbackUpsert(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 the diff was incomplete"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{RequestID: "req-note-only", DecisionModel: "claude-opus-4-7"}
+	repo := &recordingFeedbackRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback).WithFeedback(repo, nil, "")
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	require.Len(t, feedback.events, 1)
+	assert.Empty(t, feedback.events[0].Rating, "note-only submission carries no verdict")
+	assert.Empty(t, repo.upserts, "a note-only rating must not upsert into the up/down-only request_feedback table")
+}
+
+func TestService_RouterFeedbackCommand_SequenceWithRatingUpsertsRequestFeedback(t *testing.T) {
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 - too slow"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{RequestID: "req-rated", DecisionModel: "claude-opus-4-7"}
+	repo := &recordingFeedbackRepo{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).WithRouterFeedbackStore(feedback).WithFeedback(repo, nil, "")
+
+	ctx := authedCtx(uuid.New().String())
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
+
+	require.Len(t, repo.upserts, 1, "a rated, sequence-resolved submission converges onto request_feedback")
+	up := repo.upserts[0]
+	assert.Equal(t, "req-rated", up.RequestID)
+	assert.Equal(t, "down", up.Rating)
+	assert.Equal(t, "router-feedback-command", up.Source)
+}
+
+func TestService_RouterFeedbackCommand_SequenceResolvesStrategyRoutesToItsReporter(t *testing.T) {
+	// Current request context is on the cluster strategy (no policy reporter).
+	// The user's `/rf -2` resolves to telemetry whose strategy is RL, which
+	// has a registered feedback reporter. Policy feedback must land on RL.
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 + wrong tier"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{
+		RequestID:     "req-resolved-on-RL",
+		DecisionModel: "claude-opus-4-7",
+		Strategy:      "rl",
+	}
+	hmmReporter := &fakePolicyFeedbackRouter{}
+	rlReporter := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	ctx := authedCtx(uuid.New().String())
+	svc := newPinSvcWithTelemetry(fr, store, telem).
+		WithRouterFeedbackStore(feedback).
+		WithPolicyStrategy(policy.StrategySpec{Strategy: router.StrategyRL, Router: rlReporter}).
+		WithHMMRouter(hmmReporter)
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+
+	require.Eventually(t, func() bool { return len(rlReporter.Payloads()) == 1 }, time.Second, 10*time.Millisecond)
+	require.Empty(t, hmmReporter.Payloads(), "current request is on cluster; HMM reporter must not be selected just because the current context might happen to be HMM somewhere else")
+	payload := rlReporter.Payloads()[0]
+	assert.Equal(t, "rl", payload["strategy"], "the resolved turn's strategy must drive both the payload and the reporter")
+	assert.Equal(t, "req-resolved-on-RL", payload["request_id"])
+	assert.Equal(t, "claude-opus-4-7", payload["served_model"])
+	assert.NotContains(t, payload, "training_conversation_delta", "training delta is suppressed for sequence-rated feedback (latest-turn slice is wrong for older turns)")
+}
+
+func TestService_RouterFeedbackCommand_SequenceRejectsHMMDeltaWithResolvedStrategy(t *testing.T) {
+	// When an HMM-rated historical turn is being rated, the sidecar should
+	// receive the rating + resolved-turn identifiers but no mis-paired delta.
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 - too slow"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{
+		RequestID:     "req-resolved-hmm",
+		DecisionModel: "claude-opus-4-7",
+		Strategy:      "hmm_embedding",
+	}
+	hmmReporter := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	ctx := router.WithStrategy(authedCtx(uuid.New().String()), router.StrategyHMMEmbedding)
+	svc := newPinSvcWithTelemetry(fr, store, telem).
+		WithRouterFeedbackStore(feedback).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy:    router.StrategyHMMEmbedding,
+			Router:      hmmReporter,
+			Unavailable: router.ErrStrategyUnavailable,
+		}).
+		WithAvailableModels(map[string]struct{}{"claude-opus-4-7": {}}).
+		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+
+	require.Eventually(t, func() bool { return len(hmmReporter.Payloads()) == 1 }, time.Second, 10*time.Millisecond)
+	payload := hmmReporter.Payloads()[0]
+	assert.Equal(t, "hmm_embedding", payload["strategy"])
+	assert.Equal(t, "req-resolved-hmm", payload["request_id"])
+	assert.NotContains(t, payload, "training_conversation_delta", "training delta would pair the resolved turn with the wrong conversation")
+}
+
+func TestService_RouterFeedbackCommand_NegativeOnePreservesTrainingDelta(t *testing.T) {
+	// `/rf -1` is "rate the previous turn" — the latest assistant message
+	// in env IS the rated turn, so the training-delta slice matches.
+	body := []byte(`{
+		"model":"claude-haiku-4-5",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"first request"},
+			{"role":"assistant","content":"first response"},
+			{"role":"user","content":"/rf -1 +"}
+		]
+	}`)
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{RequestID: "req-prev", DecisionModel: "claude-haiku-4-5", Strategy: "hmm_embedding"}
+	hmmReporter := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster"}}
+	svc := newPinSvcWithTelemetry(fr, store, telem).
+		WithRouterFeedbackStore(feedback).
+		WithPolicyStrategy(policy.StrategySpec{
+			Strategy:    router.StrategyHMMEmbedding,
+			Router:      hmmReporter,
+			Unavailable: router.ErrStrategyUnavailable,
+		}).
+		WithAvailableModels(map[string]struct{}{"claude-haiku-4-5": {}}).
+		WithCompaction(nil, proxy.DefaultCompactionTriggerPct)
+	ctx := router.WithStrategy(authedCtx(uuid.NewString()), router.StrategyHMMEmbedding)
+	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
+	require.NoError(t, svc.ProxyMessages(ctx, body, httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+	require.Eventually(t, func() bool { return len(hmmReporter.Payloads()) == 1 }, time.Second, 10*time.Millisecond)
+	payload := hmmReporter.Payloads()[0]
+	assert.Equal(t, "hmm_embedding", payload["strategy"])
+	assert.Equal(t, "req-prev", payload["request_id"])
+	delta, ok := payload["training_conversation_delta"].([]router.ConversationMessage)
+	require.True(t, ok, "the rated turn is the latest assistant segment in env, so the delta must be present")
+	require.Len(t, delta, 2)
+	assert.Equal(t, "user", delta[0].Role)
+	assert.Equal(t, "first request", delta[0].Text)
+	assert.Equal(t, "assistant", delta[1].Role)
+	assert.Equal(t, "first response", delta[1].Text)
 }

@@ -196,6 +196,8 @@ func (r *TelemetryRepo) InsertRouterFeedback(ctx context.Context, p proxy.Router
 		SuggestedLabel: stringPtrOrNil(p.SuggestedLabel),
 		Feedback:       p.Feedback,
 		Source:         p.Source,
+		RequestID:      stringPtrOrNil(p.RequestID),
+		RouteID:        stringPtrOrNil(p.RouteID),
 	})
 }
 
@@ -749,4 +751,48 @@ func modelBucketFromHourlyAllRow(row sqlc.GetTelemetryModelBreakdownHourlyAllRow
 		TotalTokens:   row.TotalTokens,
 		ActualCostUSD: microsToUSD(row.ActualCostUsd),
 	}
+}
+
+// GetTelemetryBySessionSequence returns the N-th main_loop telemetry row for
+// (installation_id, session_key, role). seq > 0 = absolute 1-based ASC,
+// seq < 0 = relative 1-based DESC. Returns pgx.ErrNoRows when fewer than
+// |seq| rows exist.
+func (r *TelemetryRepo) GetTelemetryBySessionSequence(ctx context.Context, installationID uuid.UUID, sessionKey []byte, role string, seq int) (proxy.TelemetryTurnResult, error) {
+	q := sqlc.New(r.tx)
+	if seq > 0 {
+		row, err := q.GetTelemetryBySessionAsc(ctx, sqlc.GetTelemetryBySessionAscParams{
+			InstallationID: installationID,
+			SessionKey:     sessionKey,
+			Role:           role,
+			TurnOffset:     int32(seq - 1),
+		})
+		if err != nil {
+			return proxy.TelemetryTurnResult{}, err
+		}
+		return proxy.TelemetryTurnResult{
+			RequestID:        row.RequestID,
+			DecisionModel:    derefString(row.DecisionModel),
+			DecisionProvider: derefString(row.DecisionProvider),
+			RouteID:          derefString(row.RouteID),
+			Strategy:         derefString(row.Strategy),
+			Timestamp:        row.Timestamp.Time,
+		}, nil
+	}
+	row, err := q.GetTelemetryBySessionDesc(ctx, sqlc.GetTelemetryBySessionDescParams{
+		InstallationID: installationID,
+		SessionKey:     sessionKey,
+		Role:           role,
+		TurnOffset:     int32(-seq - 1),
+	})
+	if err != nil {
+		return proxy.TelemetryTurnResult{}, err
+	}
+	return proxy.TelemetryTurnResult{
+		RequestID:        row.RequestID,
+		DecisionModel:    derefString(row.DecisionModel),
+		DecisionProvider: derefString(row.DecisionProvider),
+		RouteID:          derefString(row.RouteID),
+		Strategy:         derefString(row.Strategy),
+		Timestamp:        row.Timestamp.Time,
+	}, nil
 }

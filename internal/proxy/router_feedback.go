@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +54,14 @@ type RouterFeedbackEvent struct {
 	// Source is how the feedback was submitted: "user" (explicit /rf command)
 	// or "auto" (automated judge at session stop).
 	Source string
+	// RequestID is the telemetry request_id of the specific turn this feedback
+	// targets. Populated only when the user specified a sequence number;
+	// empty for default (pin-based last-turn) feedback.
+	RequestID string
+	// RouteID is the opaque sidecar correlation id (HMM/RL) joining a decision
+	// to its outcome report, so the sidecar can credit the rating to the
+	// specific routing decision. Empty when no sequence was specified.
+	RouteID string
 }
 
 // RouterFeedbackSource values for validated event persistence.
@@ -88,9 +98,39 @@ func (s *Service) handleRouterFeedbackCommand(
 	}
 
 	// The model the user is most likely commenting on: what the session pin
-	// last served, falling back to the pin's target model.
+	// last served, falling back to the pin's target model. When a sequence was
+	// explicitly named, telemetry resolves to a specific turn — its
+	// decision_model wins over the pin's last served.
 	var servedModel string
-	if s.pinStore != nil {
+	var telemetryRequestID string
+	var telemetryRouteID string
+	var telemetryStrategy string
+	if cmd.Sequence != 0 && s.telemetry != nil {
+		turn, err := s.telemetry.GetTelemetryBySessionSequence(ctx, installationID, sessionKey[:], role, cmd.Sequence)
+		if err != nil {
+			log.Error("/router-feedback: sequence lookup failed", "sequence", cmd.Sequence, "err", err)
+			if errors.Is(err, sql.ErrNoRows) {
+				msg := "✦ **Weave Router** → No turn found at that sequence number. Try `/rf` without a number for the last turn.\n\n"
+				if env.SourceFormat() == translate.FormatOpenAI {
+					msg = "Weave Router: No turn found at that sequence number. Try `/rf` without a number for the last turn."
+				}
+				return writeSyntheticCommandResponse(w, env, msg, inputTokens)
+			}
+			// Infrastructure error: log it, fall through to the pin path so the
+			// rating is persisted with the pin's servedModel rather than dropped.
+		} else {
+			servedModel = turn.DecisionModel
+			telemetryRequestID = turn.RequestID
+			telemetryRouteID = turn.RouteID
+			telemetryStrategy = turn.Strategy
+			log.Info("/router-feedback: resolved sequence to telemetry turn",
+				"sequence", cmd.Sequence,
+				"request_id", telemetryRequestID,
+				"served_model", servedModel,
+			)
+		}
+	}
+	if servedModel == "" && s.pinStore != nil {
 		if pin, found, err := s.pinStore.Get(ctx, sessionKey, role); err != nil {
 			log.Error("/router-feedback: pin lookup failed", "err", err)
 		} else if found {
@@ -119,6 +159,8 @@ func (s *Service) handleRouterFeedbackCommand(
 			SuggestedLabel: cmd.SuggestedLabel,
 			Feedback:       persistedFeedbackText(rating, feedback),
 			Source:         RouterFeedbackSourceUser,
+			RequestID:      telemetryRequestID,
+			RouteID:        telemetryRouteID,
 		}
 		// context.Background(): ctx may already be canceled (client disconnected
 		// mid-command); don't drop feedback the user explicitly typed.
@@ -127,35 +169,81 @@ func (s *Service) handleRouterFeedbackCommand(
 			return err
 		}
 	}
+	// When the sequence resolved to a specific request, also converge onto the
+	// per-request feedback table so both channels share one truth. The
+	// up/down-only rating column rejects empty ratings (note-only), so skip
+	// the upsert in that case to avoid overwriting a prior thumb on the same
+	// request_id with an invalid row.
+	if telemetryRequestID != "" && rating != "" && s.feedbackRepo != nil {
+		comment := feedback
+		upsertParams := UpsertFeedbackParams{
+			InstallationID: installationID.String(),
+			ExternalID:     externalID,
+			RequestID:      telemetryRequestID,
+			Rating:         rating,
+			Comment:        &comment,
+			Source:         "router-feedback-command",
+			RouterUserID:   routerUserID,
+		}
+		if err := s.feedbackRepo.Upsert(context.Background(), upsertParams); err != nil {
+			log.Error("/router-feedback: request_feedback upsert failed", "request_id", telemetryRequestID, "err", err)
+		}
+	}
+
+	// Reporter must be selected by the rated turn's strategy, not the current
+	// request. When a sequence points at an earlier HMM/RL decision but the
+	// current request sits on cluster, StrategyFromContext routes the rating
+	// to the wrong reporter (or skips it entirely). The resolved strategy is
+	// empty only when the row fell back to the pin path.
 	strategy := router.StrategyFromContext(ctx)
+	if telemetryStrategy != "" {
+		if rs, ok := s.strategies[router.Strategy(telemetryStrategy)]; ok && rs.feedback != nil {
+			strategy = router.Strategy(telemetryStrategy)
+		}
+	}
 	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
 		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
-		var trainingDelta []router.ConversationMessage
-		if router.IsHMMStrategy(strategy) && trainingAllowed {
+		// The training delta is sliced from the latest assistant segment of env.
+		// For a sequence-targeted rating, that slice matches the rated turn only
+		// when the rated turn IS the latest user→assistant pair in the envelope:
+		// `cmd.Sequence == 0` (rate the latest), `cmd.Sequence == -1` (rate the
+		// previous turn — which is the most recent one the model actually produced
+		// in env). Anything older (`/rf -2`, `/rf 2` against a multi-turn session)
+		// slices the wrong conversation; suppress the delta and emit request_id
+		// + route_id directly so the sidecar still has the per-decision join key.
+		trainingDelta := []router.ConversationMessage(nil)
+		if (cmd.Sequence == 0 || cmd.Sequence == -1) && router.IsHMMStrategy(strategy) && trainingAllowed {
 			trainingDelta = routerFeedbackTrainingDelta(env)
 		}
-		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, cmd.SuggestedLabel, RouterFeedbackSourceUser, trainingDelta)
+		s.reportRouterFeedback(ctx, registered.feedback, strategy, externalID, installationID, sessionKey, role, routerUserID, clientID, env.Model(), servedModel, rating, feedback, cmd.SuggestedLabel, RouterFeedbackSourceUser, trainingDelta, telemetryRequestID, telemetryRouteID)
 	}
 
 	now := time.Now()
+	attrs := otel.NewAttrBuilder(15).
+		String("external_id", externalID).
+		String("router_user_id", routerUserID).
+		String("client.device_id", clientID.DeviceID).
+		String("client.session_id", clientID.SessionID).
+		String("client.user_agent", clientID.UserAgent).
+		String("client.app", clientID.ClientApp).
+		String("requested.model", env.Model()).
+		String("feedback.served_model", servedModel).
+		String("feedback.role", role).
+		String("feedback.rating", rating).
+		Int64("feedback.sequence", int64(cmd.Sequence)).
+		String("feedback.text", feedback).
+		String("feedback.source", RouterFeedbackSourceUser)
+	if telemetryRequestID != "" {
+		attrs = attrs.String("feedback.request_id", telemetryRequestID)
+	}
+	if telemetryRouteID != "" {
+		attrs = attrs.String("feedback.route_id", telemetryRouteID)
+	}
 	otel.Record(ctx, otel.Span{
 		Name:  routerFeedbackCommandSpanName,
 		Start: now,
 		End:   now,
-		Attrs: otel.NewAttrBuilder(12).
-			String("external_id", externalID).
-			String("router_user_id", routerUserID).
-			String("client.device_id", clientID.DeviceID).
-			String("client.session_id", clientID.SessionID).
-			String("client.user_agent", clientID.UserAgent).
-			String("client.app", clientID.ClientApp).
-			String("requested.model", env.Model()).
-			String("feedback.served_model", servedModel).
-			String("feedback.role", role).
-			String("feedback.rating", rating).
-			String("feedback.text", feedback).
-			String("feedback.source", RouterFeedbackSourceUser).
-			Build(),
+		Attrs: attrs.Build(),
 	})
 	otel.Flush(ctx)
 
@@ -165,6 +253,9 @@ func (s *Service) handleRouterFeedbackCommand(
 		"served_model", servedModel,
 		"requested_model", env.Model(),
 		"role", role,
+		"sequence", cmd.Sequence,
+		"request_id", telemetryRequestID,
+		"route_id", telemetryRouteID,
 	)
 
 	return writeSyntheticCommandResponse(w, env, routerFeedbackAck(env.SourceFormat(), rating), inputTokens)
@@ -187,6 +278,8 @@ func (s *Service) reportRouterFeedback(
 	suggestedLabel string,
 	source string,
 	trainingDelta []router.ConversationMessage,
+	requestID string,
+	routeID string,
 ) {
 	payload := map[string]interface{}{
 		"strategy":          string(strategy),
@@ -200,6 +293,8 @@ func (s *Service) reportRouterFeedback(
 		"client_app":        clientID.ClientApp,
 		"client_session_id": clientID.SessionID,
 		"source":            source,
+		"request_id":        requestID,
+		"route_id":          routeID,
 	}
 	if suggestedLabel != "" {
 		payload["suggested_label"] = suggestedLabel
