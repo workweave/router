@@ -12,15 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPrepareGemini_ThoughtSignatureCarrierSurvivesMultiTurn is the
-// end-to-end repro for the carrier-byte corruption bug. A real Gemini
-// thoughtSignature is opaque bytes (not valid UTF-8). When the value flows
-// through embedSignatureInID -> ... -> extractSignatureFromID the carrier
-// returns it as a Go string containing raw bytes, which the SSE JSON
-// writer's rune-by-rune loop then corrupts into replacement chars.
-// Google's bytes-typed thought_signature field rejects the result at the
-// next turn. encodeSignatureForJSON re-encodes non-ASCII signatures
-// through base64 at the emit boundary so the wire shape survives.
+// TestPrepareGemini_ThoughtSignatureCarrierSurvivesMultiTurn is an end-to-end
+// repro: a non-UTF-8 thoughtSignature must survive the carrier round-trip
+// and emit as valid base64url (not replacement chars) on the next turn.
 func TestPrepareGemini_ThoughtSignatureCarrierSurvivesMultiTurn(t *testing.T) {
 	rawSig := "\x12\xf5\x11\x0a\xf2\x11\x01\x11\x4d\x32\x0f\x9e\xb8\x72\x28\x2a\x89\x9b\x50\x7e\x0b"
 	idWithSig := "toolu_abc__thought__" + base64.RawURLEncoding.EncodeToString([]byte(rawSig))

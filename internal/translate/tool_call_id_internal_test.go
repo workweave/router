@@ -92,35 +92,28 @@ func TestClampOpenAIToolCallID(t *testing.T) {
 }
 
 func TestEncodeSignatureForJSON_PreservesNonASCIISignatureBytes(t *testing.T) {
-	// Regression: a real Gemini thoughtSignature is opaque bytes (NOT valid
-	// UTF-8). When the value flows through embedSignatureInID → ... →
-	// extractSignatureFromID the carrier returns it as a Go string containing
-	// raw bytes. If that string is then written to JSON via pw.Str, the SSE
-	// JSON writer's `for _, c := range s` loop hits Go's utf8.DecodeRune
-	// replacement-char path (every invalid byte sequence becomes U+FFFD); the
-	// resulting JSON contains no valid base64, so Google's bytes-typed
-	// thought_signature field rejects it at the next turn. Re-encoding
-	// non-ASCII signatures through base64 before emit preserves the bytes
-	// end-to-end.
+	// Regression: carrier-decoded thoughtSignature bytes are not valid UTF-8;
+	// pw.Str's rune loop would corrupt them to U+FFFD. encodeSignatureForJSON
+	// must re-encode non-base64 bytes as base64url before JSON emit.
 	cases := []struct {
-		name string
-		sig  string
-		isAscii bool
+		name        string
+		sig         string
+		passthrough bool
 	}{
-		{"ascii-passthrough", "ANTHROPIC_SIG", true},
 		{"base64url-delivered", "QU5USFJPUElDX1NJRw", true},
+		{"std-base64-padded-delivered", "QU5USFJPUElDX1NJRw==", true},
 		{"non-ascii-bytes", "\x12\xf5\x11\x0a\xf2\x11\x01\x11\x4d\x32\x0f\x9e\xb8", false},
+		{"ascii-raw-bytes", "\x00\x01ABC", false},
 		{"mixed", "pre-\x00\xff-post", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := encodeSignatureForJSON(tc.sig)
-			if tc.isAscii {
-				assert.Equal(t, tc.sig, got, "ascii signatures must pass through unchanged")
+			if tc.passthrough {
+				assert.Equal(t, tc.sig, got, "wire-form base64 signatures must pass through unchanged")
 			} else {
-				_, err := base64.RawURLEncoding.DecodeString(got)
-				assert.NoError(t, err, "non-ascii signatures must be re-encoded as valid base64url, got %q", got)
-				decoded, _ := base64.RawURLEncoding.DecodeString(got)
+				decoded, err := base64.RawURLEncoding.DecodeString(got)
+				assert.NoError(t, err, "raw-byte signatures must be re-encoded as valid base64url, got %q", got)
 				assert.Equal(t, []byte(tc.sig), decoded, "the round-tripped bytes must match the input")
 			}
 		})
@@ -128,7 +121,4 @@ func TestEncodeSignatureForJSON_PreservesNonASCIISignatureBytes(t *testing.T) {
 }
 
 // TestPrepareGemini_ThoughtSignatureCarrierSurvivesMultiTurn moved to
-// gemini_signature_thought_signature_carrier_external_test.go to satisfy the
-// (internal) package boundary: that test calls ParseAnthropic which is the only
-// translate-package symbol exposed from outside this file and uses
-// mustUnmarshal which lives in gemini_test.go (a translate_test file).
+// thought_signature_carrier_external_test.go (needs translate_test package).

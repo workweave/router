@@ -459,26 +459,27 @@ func geminiTextPart(text string) string {
 	return string(jw.Bytes())
 }
 
-// encodeSignatureForJSON keeps a Gemini thoughtSignature value safe for JSON
-// emission. Google's JSON-rest layer auto-base64-decodes the bytes-shaped
-// thought_signature field, so the value we write into JSON must be valid
-// base64url of those bytes — but a freshly decoded carrier value is raw
-// bytes whose UTF-8 representation contains � replacement chars (Go's
-// range over a non-UTF-8 string replaces every invalid byte sequence).
-// Re-encoding through base64 preserves the bytes end-to-end and never hits
-// the JSON-encoder corruption. Already-base64 strings (delivered by
-// Google directly, no carrier round-trip) round-trip safely too —
-// base64.RawURLEncoding is idempotent on valid input.
+// signatureWireEncodings are the base64 variants a wire-form thoughtSignature
+// may already be encoded in (Google emits std; the carrier uses raw URL).
+var signatureWireEncodings = []*base64.Encoding{
+	base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+}
+
+// encodeSignatureForJSON re-encodes non-base64 signature bytes as base64url
+// before JSON emit. A carrier-decoded value can be raw bytes — not valid
+// UTF-8 (Go's range loop would replace them with U+FFFD) or ASCII that is
+// not the required base64 wire form. Values already valid base64 (upstream-
+// delivered wire form) pass through unchanged.
 func encodeSignatureForJSON(sig string) string {
 	if sig == "" {
 		return sig
 	}
-	for _, c := range sig {
-		if c >= 0x80 {
-			return base64.RawURLEncoding.EncodeToString([]byte(sig))
+	for _, enc := range signatureWireEncodings {
+		if _, err := enc.DecodeString(sig); err == nil {
+			return sig
 		}
 	}
-	return sig
+	return base64.RawURLEncoding.EncodeToString([]byte(sig))
 }
 
 // writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
