@@ -312,9 +312,8 @@ func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
 }
 
 // splitSequence extracts an optional leading sequence token from s.
-// Negative token (-N, N>=1) = relative offset from last turn; positive 1-2 digit token = absolute 1-based index
-// (3+ digits stay in the note — almost always status codes or IDs, so "404 not found" is not a sequence).
-// "-", "-0", and bare zero are left untouched. Returns (0, s) when no sequence is found.
+// Negative (-N, 1–2 digits) = relative offset from last turn; positive (1–2 digits) = absolute 1-based index;
+// 3+ digits stay in the note. "-", "-0", and bare zero are left untouched. Returns (0, s) when no token found.
 func splitSequence(s string) (seq int, rest string) {
 	s = strings.TrimSpace(s)
 	if s == "" {

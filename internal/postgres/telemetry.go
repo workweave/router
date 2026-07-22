@@ -754,9 +754,8 @@ func modelBucketFromHourlyAllRow(row sqlc.GetTelemetryModelBreakdownHourlyAllRow
 }
 
 // GetTelemetryBySessionSequence returns the N-th main_loop telemetry row for
-// (installation_id, session_key, role). seq > 0 = absolute 1-based ASC,
-// seq < 0 = relative 1-based DESC. Returns pgx.ErrNoRows when fewer than
-// |seq| rows exist.
+// (installationID, sessionKey, role): seq > 0 = ASC 1-based, seq < 0 = DESC 1-based.
+// Returns pgx.ErrNoRows when fewer than |seq| rows exist.
 func (r *TelemetryRepo) GetTelemetryBySessionSequence(ctx context.Context, installationID uuid.UUID, sessionKey []byte, role string, seq int) (proxy.TelemetryTurnResult, error) {
 	q := sqlc.New(r.tx)
 	if seq > 0 {
