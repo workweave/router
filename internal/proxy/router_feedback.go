@@ -54,13 +54,9 @@ type RouterFeedbackEvent struct {
 	// Source is how the feedback was submitted: "user" (explicit /rf command)
 	// or "auto" (automated judge at session stop).
 	Source string
-	// RequestID is the telemetry request_id of the specific turn this feedback
-	// targets. Populated only when the user specified a sequence number;
-	// empty for default (pin-based last-turn) feedback.
+	// RequestID is the telemetry request_id of the rated turn; empty when no sequence was specified.
 	RequestID string
-	// RouteID is the opaque sidecar correlation id (HMM/RL) joining a decision
-	// to its outcome report, so the sidecar can credit the rating to the
-	// specific routing decision. Empty when no sequence was specified.
+	// RouteID is the opaque sidecar join key (HMM/RL) for credit assignment; empty when no sequence was specified.
 	RouteID string
 }
 
@@ -203,14 +199,8 @@ func (s *Service) handleRouterFeedbackCommand(
 	}
 	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
 		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)
-		// The training delta is sliced from the latest assistant segment of env.
-		// For a sequence-targeted rating, that slice matches the rated turn only
-		// when the rated turn IS the latest user→assistant pair in the envelope:
-		// `cmd.Sequence == 0` (rate the latest), `cmd.Sequence == -1` (rate the
-		// previous turn — which is the most recent one the model actually produced
-		// in env). Anything older (`/rf -2`, `/rf 2` against a multi-turn session)
-		// slices the wrong conversation; suppress the delta and emit request_id
-		// + route_id directly so the sidecar still has the per-decision join key.
+		// Delta only matches the rated turn for sequence 0 (latest) or -1 (the last assistant segment in env).
+		// For anything older, suppress the delta; request_id + route_id give the sidecar the join key.
 		trainingDelta := []router.ConversationMessage(nil)
 		if (cmd.Sequence == 0 || cmd.Sequence == -1) && router.IsHMMStrategy(strategy) && trainingAllowed {
 			trainingDelta = routerFeedbackTrainingDelta(env)
