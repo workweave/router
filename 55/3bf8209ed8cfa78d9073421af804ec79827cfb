@@ -1,0 +1,21 @@
+db/migrations/0002_session_pin_cache_stats.down.sql
+  s_345838d581d61d::t_178aeb655e92cf 1-10
+db/migrations/0002_session_pin_cache_stats.up.sql
+  s_345838d581d61d::t_145dfe94c85634 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "553bf8209ed8cfa78d9073421af804ec79827cfb",
+  "prompts": {},
+  "sessions": {
+    "s_345838d581d61d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9eb338c3-38c3-4920-ba43-34e939958542",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+internal/router/cluster/artifacts/latest
+  s_aec95a8ffbca65::t_796fc26fa3e30f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6dc05b1c9b303734a895dc243ad88b4e4e4c2ce0",
+  "prompts": {},
+  "sessions": {
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

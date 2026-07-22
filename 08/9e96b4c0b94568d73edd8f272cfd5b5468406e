@@ -1,0 +1,26 @@
+sidecars/hmm/hmm_sidecar/policy.py
+  s_a81d8efc38ee57::t_f6bfb0e724ac3f 45-47
+  s_a81d8efc38ee57::t_fdf6551548f50a 23-44,48-51,93-97,114-115,117-119,126,133-134
+sidecars/hmm/tests/test_features.py
+  s_a81d8efc38ee57::t_fdf6551548f50a 36-57
+sidecars/hmm/hmm_sidecar/features.py
+  s_a81d8efc38ee57::t_fdf6551548f50a 140,144,172,191,204-211
+sidecars/hmm/tests/test_policy.py
+  s_a81d8efc38ee57::t_fdf6551548f50a 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "089e96b4c0b94568d73edd8f272cfd5b5468406e",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

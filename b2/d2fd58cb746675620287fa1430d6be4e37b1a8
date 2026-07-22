@@ -1,0 +1,25 @@
+internal/router/policy/resolver.go
+  s_0cb555d8dc2e1e::t_fb89805d29f7ea 67,188
+internal/translate/configuration_hashes.go
+  s_0cb555d8dc2e1e::t_ab443c0ccd9fb9 11,19
+internal/router/policy/arm.go
+  s_0cb555d8dc2e1e::t_3b1ee7fba7a3aa 46
+internal/router/router.go
+  s_0cb555d8dc2e1e::t_d11e395bfb80f8 108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b2d2fd58cb746675620287fa1430d6be4e37b1a8",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

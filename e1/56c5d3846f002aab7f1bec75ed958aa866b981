@@ -1,0 +1,35 @@
+internal/policyclient/auth_test.go
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 1-68
+cmd/router/main.go
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 577-584
+cmd/router/policy_sidecar_auth.go
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 1-16,30-33,35-43
+  s_a81d8efc38ee57::t_93e6a476311c49 17-29,34
+internal/policyclient/auth.go
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 1-43
+cmd/router/policy_sidecar_auth_test.go
+  s_a81d8efc38ee57::t_93e6a476311c49 4,10-11,27-39
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 1-3,5-9,12-26,40
+docs/CONFIGURATION.md
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 97
+docs/POLICY_ROUTER_HARNESS.md
+  s_a81d8efc38ee57::t_6e627bdfaa56e5 17,156-157,192
+go.mod
+  s_a81d8efc38ee57::t_5a077f3661bec1 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "e156c5d3846f002aab7f1bec75ed958aa866b981",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+internal/router/cluster/artifacts.go
+  s_6a96e4c5d68a4a::t_79cb4cc79bdbe8 151-153
+  s_6a96e4c5d68a4a::t_034b09370e857e 160
+  s_6a96e4c5d68a4a::t_c3ed83a98b4c7c 169-171
+internal/router/cluster/scorer.go
+  s_6a96e4c5d68a4a::t_17e2b0ef06585c 897-922
+  s_6a96e4c5d68a4a::t_3b938be99cfaf9 503-514
+  s_6a96e4c5d68a4a::t_c74fb76d4f78b5 462-464
+  s_6a96e4c5d68a4a::t_16941570052270 707
+  s_6a96e4c5d68a4a::t_f7e91a16678cd5 523-549
+internal/router/cluster/scorer_test.go
+  s_6a96e4c5d68a4a::t_28eb78bd9da03c 1102
+  s_6a96e4c5d68a4a::t_87f50c2da500b6 1041-1050,1057-1083,1085-1101,1103-1123
+  s_6a96e4c5d68a4a::t_aef496c626a635 1051-1056
+  s_6a96e4c5d68a4a::t_d052493c211020 1084
+internal/router/router.go
+  s_6a96e4c5d68a4a::t_44865691d1a02c 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "10a92038adf86e0e8cf53f981150be5235d1b1a3",
+  "prompts": {},
+  "sessions": {
+    "s_6a96e4c5d68a4a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0c324095-456d-49d9-a3c4-423df593fc52",
+        "model": "composer-2.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

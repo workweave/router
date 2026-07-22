@@ -1,0 +1,33 @@
+install/install.sh
+  s_120484cfaaab60::t_db144e7b5383d0 2118-2119,2185-2186
+internal/translate/envelope.go
+  s_120484cfaaab60::t_2d9d48b972fc4f 1159
+  s_120484cfaaab60::t_d2183d143c1a7a 1158
+internal/observability/otel/pricing_test.go
+  s_120484cfaaab60::t_0e928392eaffdd 63-64
+internal/router/model.go
+  s_120484cfaaab60::t_316aef890472bd 208-209
+internal/router/catalog/catalog.go
+  s_120484cfaaab60::t_399eccf214a9f6 323-328
+install/cc-statusline.sh
+  s_120484cfaaab60::t_db144e7b5383d0 155-156,222-223
+internal/proxy/force_model.go
+  s_120484cfaaab60::t_2d9d48b972fc4f 55-79,81-89
+  s_120484cfaaab60::t_b34ddee2ad40ea 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b2252b5d3db9a3001d2cf040d4b5effcf8fcc7cb",
+  "prompts": {},
+  "sessions": {
+    "s_120484cfaaab60": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93c16061-d75a-4133-8606-9b71c81348fc",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
