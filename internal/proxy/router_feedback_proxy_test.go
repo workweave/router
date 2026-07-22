@@ -783,3 +783,37 @@ func TestService_RouterFeedbackCommand_NegativeOnePreservesTrainingDelta(t *test
 	assert.Equal(t, "assistant", delta[1].Role)
 	assert.Equal(t, "first response", delta[1].Text)
 }
+
+func TestService_RouterFeedbackCommand_ClusterResolvedTurnSkipsPolicyFeedback(t *testing.T) {
+	// The rated turn was served by the cluster scorer (no feedback reporter).
+	// The active session strategy is HMM — reporting there would credit HMM
+	// with a cluster decision's request_id, so policy feedback must be skipped.
+	const body = `{
+		"model":"claude-sonnet-4-6",
+		"max_tokens":1024,
+		"messages":[
+			{"role":"user","content":"/rf -2 - wrong tier"}
+		]
+	}`
+	store := newFakePinStore()
+	feedback := &fakeFeedbackStore{}
+	telem := newCaptureTelemetry()
+	telem.seqResult = proxy.TelemetryTurnResult{
+		RequestID:     "req-cluster-turn",
+		DecisionModel: "claude-haiku-4-5",
+		Strategy:      "cluster",
+	}
+	hmmReporter := &fakePolicyFeedbackRouter{}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6", Reason: "cluster"}}
+	ctx := router.WithStrategy(authedCtx(uuid.New().String()), router.StrategyHMM)
+	svc := newPinSvcWithTelemetry(fr, store, telem).
+		WithRouterFeedbackStore(feedback).
+		WithHMMRouter(hmmReporter)
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))))
+
+	require.Len(t, feedback.events, 1, "durable feedback still persists")
+	assert.Equal(t, "req-cluster-turn", feedback.events[0].RequestID)
+	// Policy feedback must not fire: give the async path a moment, then confirm silence.
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, hmmReporter.Payloads(), "a cluster-resolved turn must not be credited to the active HMM reporter")
+}

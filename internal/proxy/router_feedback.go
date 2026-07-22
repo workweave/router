@@ -183,12 +183,12 @@ func (s *Service) handleRouterFeedbackCommand(
 	}
 
 	// Use the resolved turn's strategy, not the current request: StrategyFromContext would route credit to the wrong reporter
-	// when the rated turn was served by a different strategy (e.g. HMM) than the active one.
+	// when the rated turn was served by a different strategy (e.g. HMM) than the active one. A resolved strategy with no
+	// feedback reporter (e.g. cluster) suppresses policy feedback entirely — falling back to the active reporter would
+	// credit that reporter with another strategy's request_id/route_id.
 	strategy := router.StrategyFromContext(ctx)
 	if telemetryStrategy != "" {
-		if rs, ok := s.strategies[router.Strategy(telemetryStrategy)]; ok && rs.feedback != nil {
-			strategy = router.Strategy(telemetryStrategy)
-		}
+		strategy = router.Strategy(telemetryStrategy)
 	}
 	if registered, ok := s.strategies[strategy]; ok && registered.feedback != nil {
 		trainingAllowed, _ := ctx.Value(PolicyTrainingAllowedContextKey{}).(bool)

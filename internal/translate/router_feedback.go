@@ -352,10 +352,7 @@ func splitSequence(s string) (seq int, rest string) {
 		}
 	}
 	if allDigits {
-		// Bound the absolute-sequence consume to short turns (1-2 digits): 3+
-		// digit prefixes are almost always status codes or IDs (`404`, `1001`)
-		// and must stay in the note text. This matches the relative heuristic
-		// where -1, -2, -3 are consumed unconditionally.
+		// Only consume 1-2 digit tokens; 3+ digits are almost always status codes or IDs (404, 1001).
 		if len(tok) > 2 {
 			return 0, s
 		}
