@@ -1,0 +1,29 @@
+internal/proxy/router_feedback_proxy_test.go
+  s_b6ea7217b3c1e9::t_be08dbf52c1f33 725
+  s_b6ea7217b3c1e9::t_0a1c455f211e98 669-724,726-743,745-747
+  s_b6ea7217b3c1e9::t_fc96db33981559 744
+internal/proxy/router_feedback.go
+  s_b6ea7217b3c1e9::t_741a49258c9090 176-180,182-186,189-195
+  s_b6ea7217b3c1e9::t_d9bf7b23252d31 93
+  s_b6ea7217b3c1e9::t_4fab6bd21a90e2 113
+db/queries/model_router_request_telemetry.sql
+  s_b6ea7217b3c1e9::t_4aa31f2e204b7c 469-471,486,491-492,507
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_b6ea7217b3c1e9::t_bfa3320d23abcb 88,110-112,127,162,184-185,200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "864f4e9743ebd07d372f33dc8457b14fb6010432",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
