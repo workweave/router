@@ -88,6 +88,11 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	logInboundRequestDiagnostics(log, env)
 
+	// Honor the x-weave-force-model header (headless equivalent of /force-model).
+	// Writes the user-forced pin and falls through to normal routing, which picks
+	// the pin up and serves the requested model on this same turn.
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	routeRequest := router.Request{
@@ -285,6 +290,11 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
+
+	// Two-strike eviction: a session pinned to a model returning non-retryable
+	// 4xx wedges until manually /force-model'd out. Expires the pin after a
+	// persistent counter hits threshold; successful turns reset it.
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
 	log.Info("ProxyGeminiGenerateContent complete", append([]any{"requested_model", feats.Model, "baseline_model", s.baselineFor(feats.Model), "decision_model", decision.Model, "decision_provider", decision.Provider, "decision_reason", decision.Reason, "embedded_tokens", len(promptText) / 4, "total_input_tokens", feats.Tokens, "has_tools", feats.HasTools, "embed_input", embedInput, "sticky_hit", stickyHit, "pin_tier", pinTier, "turn_type", string(tt), "route_ms", routeMs, "proxy_ms", proxyMs, "proxy_err", proxyErr, "upstream_status", upstreamStatus(proxyErr)}, plannerLogFields(routeRes)...)...)
 	s.reportPolicyOutcome(ctx, routeRes, decision, decision.Provider, feats.Tokens, in, out, cacheCreation, cacheRead, routeMs, proxyMs, proxyErr, nil)
