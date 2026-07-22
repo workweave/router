@@ -44,7 +44,12 @@ type updateExcludedModelsRequest struct {
 // deployedModelsDTO converts the deployed-models list to sorted DTO form,
 // centralized so the GET and PUT responses cannot drift apart.
 func deployedModelsDTO(models DeployedModelsSource) []deployedModelDTO {
-	entries := models.DefaultDeployedModels()
+	return entriesToDTO(models.DefaultDeployedModels())
+}
+
+// entriesToDTO converts deployed entries to sorted DTO form, shared by the
+// cluster source and the HMM roster source so both wire shapes stay identical.
+func entriesToDTO(entries []cluster.DeployedEntry) []deployedModelDTO {
 	out := make([]deployedModelDTO, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, deployedModelDTO{Model: e.Model, Provider: e.Provider})

@@ -434,6 +434,45 @@ func TestClientCapabilities(t *testing.T) {
 	}
 }
 
+func TestClientRoster(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/roster", request.URL.Path)
+		_ = json.NewEncoder(w).Encode(rosterResponse{
+			SchemaVersion: policy.SchemaVersionV2,
+			RosterVersion: "abc123",
+			RosterIDs:     []string{"openai/gpt-5.6-sol", "anthropic/claude-opus-4.8"},
+		})
+	}))
+	defer server.Close()
+
+	rosterIDs, err := New(server.URL, server.Client(), 0).Roster(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"openai/gpt-5.6-sol", "anthropic/claude-opus-4.8"}, rosterIDs)
+}
+
+func TestClientRosterRejectsUnknownSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(rosterResponse{SchemaVersion: "v99", RosterIDs: []string{"x"}})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client(), 0).Roster(context.Background())
+
+	require.Error(t, err)
+}
+
+func TestClientRosterPropagatesStatusError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client(), 0).Roster(context.Background())
+
+	require.Error(t, err)
+}
+
 func TestClientCheckHealth(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		assert.Equal(t, http.MethodGet, request.Method)

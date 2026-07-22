@@ -100,6 +100,20 @@ def capabilities() -> JSONResponse:
     )
 
 
+@app.get("/roster")
+def roster() -> JSONResponse:
+    policy: FrozenPolicy | None = getattr(app.state, "policy", None)
+    if policy is None:
+        return JSONResponse({"error": "policy unavailable"}, status_code=503)
+    return JSONResponse(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "roster_version": policy.roster_version,
+            "roster_ids": policy.roster_ids(),
+        }
+    )
+
+
 @app.post("/outcome", status_code=204)
 def outcome() -> None:
     return None

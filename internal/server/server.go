@@ -55,12 +55,16 @@ const (
 // deployedModels may be nil in tests; required in selfhosted prod so the
 // dashboard can render the universe of routable models.
 //
+// hmmModels is the HMM strategy's roster source; nil when no HMM sidecar is
+// wired, in which case /v1/router/models?strategy=hmm falls back to the
+// cluster registry.
+//
 // billingSvc is set only in managed mode when credit-billing is enabled; it
 // gates every inference route on prepaid balance via WithBalanceCheck. nil
 // leaves inference routes open (BYOK/platform key still controls upstream auth).
 //
 // readinessChecker gates /readyz only; /health remains process liveness.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, hmmModels admin.HMMRosterSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
@@ -91,7 +95,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// hand-copying it per gitlink bump. Unauthed: read-only, and the list is
 	// already public on the RouterArena leaderboard.
 	if deployedModels != nil {
-		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels))
+		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels, hmmModels))
 
 		// Projects the quality-vs-price dial's model mix across dial positions
 		// for the dashboard's distribution preview. Same unauthed rationale as

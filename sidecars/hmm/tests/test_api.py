@@ -44,6 +44,13 @@ class PreviewingPolicy:
         )
 
 
+class RosterPolicy:
+    roster_version = "b" * 64
+
+    def roster_ids(self) -> list[str]:
+        return ["openai/gpt-5.6-sol", "anthropic/claude-opus-4.8"]
+
+
 def test_liveness_does_not_depend_on_model_readiness() -> None:
     with TestClient(app) as client:
         response = client.get("/livez")
@@ -109,3 +116,25 @@ def test_preview_requires_explicit_mode_and_returns_all_selected_arms() -> None:
     assert rejected.status_code == 400
     assert response.status_code == 200
     assert response.json()["eligible_roster_ids"] == ["provider/a"]
+
+
+def test_roster_returns_arm_union() -> None:
+    with TestClient(app) as client:
+        app.state.policy = RosterPolicy()
+        response = client.get("/roster")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "policy_router_v1"
+    assert payload["roster_ids"] == [
+        "openai/gpt-5.6-sol",
+        "anthropic/claude-opus-4.8",
+    ]
+
+
+def test_roster_fails_closed_without_policy() -> None:
+    with TestClient(app) as client:
+        app.state.policy = None
+        response = client.get("/roster")
+
+    assert response.status_code == 503
