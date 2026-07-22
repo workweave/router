@@ -17,10 +17,8 @@ type RouterFeedbackResult struct {
 	// Feedback is the free-form note the user submitted after the command,
 	// minus any leading rating token and trailing --label flag.
 	Feedback string
-	// Sequence is an optional leading turn-sequence indicator parsed from the
-	// feedback body. 0 = last turn (default, no sequence specified),
-	// positive = absolute turn sequence number, negative = relative offset
-	// from the last turn (e.g. -3 means three turns back).
+	// Sequence is an optional leading turn-selector: 0 = last turn (default),
+	// positive = absolute 1-based index, negative = relative offset from last (e.g. -3).
 	Sequence int
 }
 

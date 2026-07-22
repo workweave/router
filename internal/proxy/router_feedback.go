@@ -94,9 +94,7 @@ func (s *Service) handleRouterFeedbackCommand(
 	}
 
 	// The model the user is most likely commenting on: what the session pin
-	// last served, falling back to the pin's target model. When a sequence was
-	// explicitly named, telemetry resolves to a specific turn — its
-	// decision_model wins over the pin's last served.
+	// last served, falling back to the pin's target model; a sequence token overrides both.
 	var servedModel string
 	var telemetryRequestID string
 	var telemetryRouteID string
