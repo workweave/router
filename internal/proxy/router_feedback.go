@@ -93,8 +93,7 @@ func (s *Service) handleRouterFeedbackCommand(
 		return writeSyntheticCommandResponse(w, env, msg, inputTokens)
 	}
 
-	// The model the user is most likely commenting on: what the session pin
-	// last served, falling back to the pin's target model; a sequence token overrides both.
+	// The model to attribute: pin's last served (or target), overridden by the resolved telemetry turn when a sequence was specified.
 	var servedModel string
 	var telemetryRequestID string
 	var telemetryRouteID string
@@ -180,10 +179,8 @@ func (s *Service) handleRouterFeedbackCommand(
 		}
 	}
 
-	// Use the resolved turn's strategy, not the current request: StrategyFromContext would route credit to the wrong reporter
-	// when the rated turn was served by a different strategy (e.g. HMM) than the active one. A resolved strategy with no
-	// feedback reporter (e.g. cluster) suppresses policy feedback entirely — falling back to the active reporter would
-	// credit that reporter with another strategy's request_id/route_id.
+	// Use the resolved turn's strategy, not the current request: StrategyFromContext credits the wrong reporter
+	// when the rated turn ran under a different strategy. A resolved strategy with no reporter (e.g. cluster) suppresses feedback — falling back would credit the active reporter with another strategy's request_id/route_id.
 	strategy := router.StrategyFromContext(ctx)
 	if telemetryStrategy != "" {
 		strategy = router.Strategy(telemetryStrategy)
