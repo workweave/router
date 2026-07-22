@@ -1,0 +1,31 @@
+db/queries/router_feedback.sql
+  s_b6ea7217b3c1e9::t_b55dc02217b21d 15,28
+internal/translate/router_feedback_test.go
+  s_b6ea7217b3c1e9::t_a2a58621d8a739 154,161-162,169-170,177-178,187-188,193-195,204-205,212-213,220
+internal/sqlc/router_feedback.sql.go
+  s_b6ea7217b3c1e9::t_6a1e99fbcdaacf 25,38-39,74,87-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2b7a3d61a51ba687e67d65ffe65e1f788fcd40fc",
+  "prompts": {},
+  "sessions": {
+    "s_5cb80359447816": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83053aa7-7aba-4301-a845-a9fd1ce2005c",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
