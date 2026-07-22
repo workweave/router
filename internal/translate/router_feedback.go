@@ -17,6 +17,9 @@ type RouterFeedbackResult struct {
 	// Feedback is the free-form note the user submitted after the command,
 	// minus any leading rating token and trailing --label flag.
 	Feedback string
+	// Sequence is an optional leading turn-selector: 0 = last turn (default),
+	// positive = absolute 1-based index, negative = relative offset from last (e.g. -3).
+	Sequence int
 }
 
 // RouterFeedbackRatingUp and RouterFeedbackRatingDown are the canonical
@@ -127,17 +130,20 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 		}
 		feedback += rest
 	}
+	// Must precede splitLeadingRating so a bare "-" is left for the verdict parser.
+	var seq int
+	seq, feedback = splitSequence(feedback)
 	// A note that opens with a bare verdict ("/rf 👍 too slow") promotes to a
 	// rating, so a single command can carry both verdict and explanation.
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	// A --label correction only applies to a negative verdict; positive and note-only ratings leave the flag in the note.
+	// Must precede stripTrailingLabel so a leading digit is not misread as prose by the --label scanner.
 	var label string
 	if rating == RouterFeedbackRatingDown {
 		label, feedback = stripTrailingLabel(feedback)
 	}
-	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback}, true, strings.TrimSpace(prefix)
+	return RouterFeedbackResult{Rating: rating, SuggestedLabel: label, Feedback: feedback, Sequence: seq}, true, strings.TrimSpace(prefix)
 }
 
 func isRouterFeedbackCommandOnlyContent(content gjson.Result) bool {
@@ -209,8 +215,10 @@ func isRouterFeedbackAckText(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	return strings.HasPrefix(trimmed, "Weave Router: Feedback recorded") ||
 		strings.HasPrefix(trimmed, "Weave Router: router-feedback needs a verdict") ||
+		strings.HasPrefix(trimmed, "Weave Router: No turn found at that sequence number") ||
 		strings.HasPrefix(trimmed, "✦ **Weave Router** → Feedback recorded") ||
-		strings.HasPrefix(trimmed, "✦ **Weave Router** → Router-feedback needs a verdict")
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → Router-feedback needs a verdict") ||
+		strings.HasPrefix(trimmed, "✦ **Weave Router** → No turn found at that sequence number")
 }
 
 // matchRouterFeedbackCommand recognizes the command token at the start of the
@@ -301,4 +309,63 @@ func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
 	}
 	val, tail, _ := strings.Cut(s, " ")
 	return val, tail, true
+}
+
+// splitSequence extracts an optional leading sequence token from s.
+// Negative token (-N, N>=1) = relative offset from last turn; positive 1-2 digit token = absolute 1-based index
+// (3+ digits stay in the note — almost always status codes or IDs, so "404 not found" is not a sequence).
+// "-", "-0", and bare zero are left untouched. Returns (0, s) when no sequence is found.
+func splitSequence(s string) (seq int, rest string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, ""
+	}
+	tok, after, _ := strings.Cut(s, " ")
+	if tok == "-" || tok == "-0" {
+		return 0, s
+	}
+	if strings.HasPrefix(tok, "-") && len(tok) > 1 && tok[1] >= '1' && tok[1] <= '9' {
+		// Same 1-2 digit cap as positives: "-404 not found" is a status code in a note, not turn -404.
+		if len(tok) > 3 {
+			return 0, s
+		}
+		restDigits := tok[2:]
+		allDigits := true
+		for i := 0; i < len(restDigits); i++ {
+			if restDigits[i] < '0' || restDigits[i] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			seq := 0
+			for _, ch := range tok[1:] {
+				seq = seq*10 + int(ch-'0')
+			}
+			return -seq, strings.TrimSpace(after)
+		}
+		return 0, s
+	}
+	allDigits := len(tok) > 0
+	for i := 0; i < len(tok); i++ {
+		if tok[i] < '0' || tok[i] > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		// Only consume 1-2 digit tokens; 3+ digits are almost always status codes or IDs (404, 1001).
+		if len(tok) > 2 {
+			return 0, s
+		}
+		seq := 0
+		for _, ch := range tok {
+			seq = seq*10 + int(ch-'0')
+		}
+		if seq == 0 {
+			return 0, s
+		}
+		return seq, strings.TrimSpace(after)
+	}
+	return 0, s
 }

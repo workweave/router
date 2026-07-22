@@ -71,6 +71,153 @@ func (q *Queries) GetRequestForFeedback(ctx context.Context, arg GetRequestForFe
 	return i, err
 }
 
+const getTelemetryBySessionAsc = `-- name: GetTelemetryBySessionAsc :one
+SELECT
+    request_id,
+    decision_model,
+    decision_provider,
+    route_id,
+    strategy,
+    timestamp
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND session_key = $2::bytea
+  AND role = $3::varchar
+  AND turn_type = 'main_loop'
+  AND span_type = 'router.upstream'
+ORDER BY timestamp ASC, request_id ASC
+LIMIT 1 OFFSET $4::int
+`
+
+type GetTelemetryBySessionAscParams struct {
+	InstallationID uuid.UUID
+	SessionKey     []byte
+	Role           string
+	TurnOffset     int32
+}
+
+type GetTelemetryBySessionAscRow struct {
+	RequestID        string
+	DecisionModel    *string
+	DecisionProvider *string
+	RouteID          *string
+	Strategy         *string
+	Timestamp        pgtype.Timestamptz
+}
+
+// Returns the Nth main_loop telemetry row for a (session_key, role) within
+// an installation, ordered ascending by timestamp. seq is 1-based.
+// request_id is the secondary sort key so the same query for the same input
+// resolves to the same row across replicas (timestamp ties would otherwise
+// make sequence assignment nondeterministic).
+//
+//	SELECT
+//	    request_id,
+//	    decision_model,
+//	    decision_provider,
+//	    route_id,
+//	    strategy,
+//	    timestamp
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND session_key = $2::bytea
+//	  AND role = $3::varchar
+//	  AND turn_type = 'main_loop'
+//	  AND span_type = 'router.upstream'
+//	ORDER BY timestamp ASC, request_id ASC
+//	LIMIT 1 OFFSET $4::int
+func (q *Queries) GetTelemetryBySessionAsc(ctx context.Context, arg GetTelemetryBySessionAscParams) (GetTelemetryBySessionAscRow, error) {
+	row := q.db.QueryRow(ctx, getTelemetryBySessionAsc,
+		arg.InstallationID,
+		arg.SessionKey,
+		arg.Role,
+		arg.TurnOffset,
+	)
+	var i GetTelemetryBySessionAscRow
+	err := row.Scan(
+		&i.RequestID,
+		&i.DecisionModel,
+		&i.DecisionProvider,
+		&i.RouteID,
+		&i.Strategy,
+		&i.Timestamp,
+	)
+	return i, err
+}
+
+const getTelemetryBySessionDesc = `-- name: GetTelemetryBySessionDesc :one
+SELECT
+    request_id,
+    decision_model,
+    decision_provider,
+    route_id,
+    strategy,
+    timestamp
+FROM router.model_router_request_telemetry
+WHERE installation_id = $1::uuid
+  AND session_key = $2::bytea
+  AND role = $3::varchar
+  AND turn_type = 'main_loop'
+  AND span_type = 'router.upstream'
+ORDER BY timestamp DESC, request_id DESC
+LIMIT 1 OFFSET $4::int
+`
+
+type GetTelemetryBySessionDescParams struct {
+	InstallationID uuid.UUID
+	SessionKey     []byte
+	Role           string
+	TurnOffset     int32
+}
+
+type GetTelemetryBySessionDescRow struct {
+	RequestID        string
+	DecisionModel    *string
+	DecisionProvider *string
+	RouteID          *string
+	Strategy         *string
+	Timestamp        pgtype.Timestamptz
+}
+
+// Returns the Nth-from-latest main_loop telemetry row for a (session_key, role)
+// within an installation, ordered descending by timestamp. abs_seq is 1-based
+// (1 = latest, 2 = one-before-latest, etc.). request_id is the secondary sort
+// key so timestamp ties resolve deterministically.
+//
+//	SELECT
+//	    request_id,
+//	    decision_model,
+//	    decision_provider,
+//	    route_id,
+//	    strategy,
+//	    timestamp
+//	FROM router.model_router_request_telemetry
+//	WHERE installation_id = $1::uuid
+//	  AND session_key = $2::bytea
+//	  AND role = $3::varchar
+//	  AND turn_type = 'main_loop'
+//	  AND span_type = 'router.upstream'
+//	ORDER BY timestamp DESC, request_id DESC
+//	LIMIT 1 OFFSET $4::int
+func (q *Queries) GetTelemetryBySessionDesc(ctx context.Context, arg GetTelemetryBySessionDescParams) (GetTelemetryBySessionDescRow, error) {
+	row := q.db.QueryRow(ctx, getTelemetryBySessionDesc,
+		arg.InstallationID,
+		arg.SessionKey,
+		arg.Role,
+		arg.TurnOffset,
+	)
+	var i GetTelemetryBySessionDescRow
+	err := row.Scan(
+		&i.RequestID,
+		&i.DecisionModel,
+		&i.DecisionProvider,
+		&i.RouteID,
+		&i.Strategy,
+		&i.Timestamp,
+	)
+	return i, err
+}
+
 const getTelemetryModelBreakdownDaily = `-- name: GetTelemetryModelBreakdownDaily :many
 SELECT
     date_trunc('day', timestamp)::timestamptz                                AS bucket,

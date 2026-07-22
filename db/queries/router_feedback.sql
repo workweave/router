@@ -2,6 +2,8 @@
 -- context.Background() (the synthetic ack response may already have been
 -- flushed and the request ctx canceled). served_model is the session pin's
 -- LastServedModel at submission time; empty when the session had no pin.
+-- request_id and route_id are populated when a turn sequence was specified
+-- so the policy sidecar can join the rating to the specific routing decision.
 -- name: InsertRouterFeedback :exec
 INSERT INTO router.router_feedback (
     installation_id,
@@ -15,7 +17,9 @@ INSERT INTO router.router_feedback (
     feedback,
     rating,
     suggested_label,
-    source
+    source,
+    request_id,
+    route_id
 ) VALUES (
     @installation_id::uuid,
     @session_key::bytea,
@@ -28,5 +32,7 @@ INSERT INTO router.router_feedback (
     @feedback::text,
     sqlc.narg('rating')::varchar,
     sqlc.narg('suggested_label')::varchar,
-    @source::varchar
+    @source::varchar,
+    sqlc.narg('request_id')::varchar,
+    sqlc.narg('route_id')::varchar
 );

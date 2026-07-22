@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // InstallationIDContextKey is the request-context key for the authenticated installation UUID.
@@ -19,6 +21,7 @@ type TelemetryRepository interface {
 	GetTelemetryRowsAll(ctx context.Context, from, to time.Time, limit int32) ([]TelemetryRow, error)
 	GetTelemetryModelBreakdown(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryModelBucket, error)
 	GetTelemetryModelBreakdownAll(ctx context.Context, from, to time.Time, granularity string) ([]TelemetryModelBucket, error)
+	GetTelemetryBySessionSequence(ctx context.Context, installationID uuid.UUID, sessionKey []byte, role string, seq int) (TelemetryTurnResult, error)
 }
 
 // InsertTelemetryParams mirrors one router.upstream span row.
@@ -175,4 +178,15 @@ type TelemetryRow struct {
 	ClientApp           string
 	TurnType            string
 	UserEmail           string
+}
+
+// TelemetryTurnResult is the per-turn telemetry metadata relevant for
+// sequence-based router feedback attribution.
+type TelemetryTurnResult struct {
+	RequestID        string
+	DecisionModel    string
+	DecisionProvider string
+	RouteID          string
+	Strategy         string
+	Timestamp        time.Time
 }

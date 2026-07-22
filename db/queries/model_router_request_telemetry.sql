@@ -463,3 +463,46 @@ WHERE t.installation_id = @installation_id::uuid
   AND t.timestamp < @to_time::timestamptz
 ORDER BY t.timestamp DESC
 LIMIT @row_limit::int;
+
+-- Returns the Nth main_loop telemetry row for a (session_key, role) within
+-- an installation, ordered ascending by timestamp. seq is 1-based.
+-- request_id is the secondary sort key so the same query for the same input
+-- resolves to the same row across replicas (timestamp ties would otherwise
+-- make sequence assignment nondeterministic).
+-- name: GetTelemetryBySessionAsc :one
+SELECT
+    request_id,
+    decision_model,
+    decision_provider,
+    route_id,
+    strategy,
+    timestamp
+FROM router.model_router_request_telemetry
+WHERE installation_id = @installation_id::uuid
+  AND session_key = @session_key::bytea
+  AND role = @role::varchar
+  AND turn_type = 'main_loop'
+  AND span_type = 'router.upstream'
+ORDER BY timestamp ASC, request_id ASC
+LIMIT 1 OFFSET @turn_offset::int;
+
+-- Returns the Nth-from-latest main_loop telemetry row for a (session_key, role)
+-- within an installation, ordered descending by timestamp. abs_seq is 1-based
+-- (1 = latest, 2 = one-before-latest, etc.). request_id is the secondary sort
+-- key so timestamp ties resolve deterministically.
+-- name: GetTelemetryBySessionDesc :one
+SELECT
+    request_id,
+    decision_model,
+    decision_provider,
+    route_id,
+    strategy,
+    timestamp
+FROM router.model_router_request_telemetry
+WHERE installation_id = @installation_id::uuid
+  AND session_key = @session_key::bytea
+  AND role = @role::varchar
+  AND turn_type = 'main_loop'
+  AND span_type = 'router.upstream'
+ORDER BY timestamp DESC, request_id DESC
+LIMIT 1 OFFSET @turn_offset::int;

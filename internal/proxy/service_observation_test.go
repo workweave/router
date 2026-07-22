@@ -29,6 +29,11 @@ type captureTelemetry struct {
 	shadowRows   []proxy.PolicyShadowDecision
 	notify       chan struct{}
 	shadowNotify chan struct{}
+	// seqResult and seqErr configure GetTelemetryBySessionSequence; seqCalls
+	// records the sequence arguments the code under test resolved against.
+	seqResult proxy.TelemetryTurnResult
+	seqErr    error
+	seqCalls  []int
 }
 
 func newCaptureTelemetry() *captureTelemetry {
@@ -90,6 +95,15 @@ func (c *captureTelemetry) GetTelemetryModelBreakdown(context.Context, string, t
 
 func (c *captureTelemetry) GetTelemetryModelBreakdownAll(context.Context, time.Time, time.Time, string) ([]proxy.TelemetryModelBucket, error) {
 	return nil, nil
+}
+
+func (c *captureTelemetry) GetTelemetryBySessionSequence(_ context.Context, _ uuid.UUID, _ []byte, _ string, seq int) (proxy.TelemetryTurnResult, error) {
+	c.mu.Lock()
+	c.seqCalls = append(c.seqCalls, seq)
+	res := c.seqResult
+	err := c.seqErr
+	c.mu.Unlock()
+	return res, err
 }
 
 func (c *captureTelemetry) firstRow(t *testing.T) proxy.InsertTelemetryParams {

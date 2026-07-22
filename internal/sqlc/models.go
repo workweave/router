@@ -389,6 +389,10 @@ type RouterRouterFeedback struct {
 	SuggestedLabel *string
 	// How the feedback was submitted: "user" (explicit /rf command), "auto" (automated judge at session stop).
 	Source string
+	// Telemetry request_id for the specific turn this feedback targets. NULL when no sequence was specified.
+	RequestID *string
+	// Sidecar correlation id from the telemetry row (HMM/RL). NULL when no sequence was specified.
+	RouteID *string
 }
 
 // Session-sticky routing pins; sliding 1h TTL matching Anthropic prompt cache

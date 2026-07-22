@@ -152,6 +152,21 @@ func newPinSvc(fr *fakeRouter, store *fakePinStore) *proxy.Service {
 	)
 }
 
+func newPinSvcWithTelemetry(fr *fakeRouter, store *fakePinStore, telemetry proxy.TelemetryRepository) *proxy.Service {
+	return proxy.NewService(
+		fr,
+		map[string]providers.Client{providers.ProviderAnthropic: &fakeProvider{}},
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAnthropic,
+		"claude-haiku-4-5",
+		telemetry,
+	)
+}
+
 func authedCtx(installationID string) context.Context {
 	ctx := context.WithValue(context.Background(), proxy.APIKeyIDContextKey{}, "key-1")
 	return context.WithValue(ctx, proxy.InstallationIDContextKey{}, installationID)
