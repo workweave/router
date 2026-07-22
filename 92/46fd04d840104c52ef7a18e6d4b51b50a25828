@@ -1,0 +1,32 @@
+.env.example
+  s_fa4de19d7bcca5::t_10d073936a600c 81-86
+internal/proxy/baseline_internal_test.go
+  s_fa4de19d7bcca5::t_a14b77c48c2da1 1-35
+internal/proxy/service.go
+  s_fa4de19d7bcca5::t_34ac87c720c041 730,949,1382,1592
+  s_fa4de19d7bcca5::t_eee947a57d076d 830,848
+  s_fa4de19d7bcca5::t_621866578861d9 89-94
+  s_fa4de19d7bcca5::t_5fcbcb071494c1 372-392
+  s_fa4de19d7bcca5::t_cfc17911325f52 744,1396
+internal/proxy/gemini.go
+  s_fa4de19d7bcca5::t_8794cb8617f238 191
+  s_fa4de19d7bcca5::t_d7e39b2386b061 92
+cmd/router/main.go
+  s_fa4de19d7bcca5::t_c14dd643d3f144 365-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "9246fd04d840104c52ef7a18e6d4b51b50a25828",
+  "prompts": {},
+  "sessions": {
+    "s_fa4de19d7bcca5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3b6a692-884a-424a-9e3d-c5133e5941bf",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

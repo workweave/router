@@ -1,0 +1,23 @@
+internal/proxy/service.go
+  s_f7f2fc8a22ebd8::t_6bef9272a81197 1666-1667
+internal/api/anthropic/messages_test.go
+  s_f7f2fc8a22ebd8::t_6bef9272a81197 389-404,468,482,495,508
+internal/api/anthropic/route.go
+  s_f7f2fc8a22ebd8::t_6bef9272a81197 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d9925303e824dc7334d02efb0efe085303786530",
+  "prompts": {},
+  "sessions": {
+    "s_f7f2fc8a22ebd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f72c5-cca0-7f02-898a-35730b985af0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+internal/proxy/service.go
+  s_87d67628e1063e::t_2dbb8f57bda862 109-110,117-127
+  s_87d67628e1063e::t_75d14c90185f55 710-711
+  s_87d67628e1063e::t_072e6942341b85 693-694
+  s_87d67628e1063e::t_80e1dbd4857b0b 111-116
+internal/translate/translate_test.go
+  s_87d67628e1063e::t_50550926532d2e 575-577
+  s_87d67628e1063e::t_b66b6ecfd41def 547-573,579,581,585-593,596-604,606-617,620-651
+  s_87d67628e1063e::t_0b53e1d6099b2e 574,578,580,582-584,594-595,605,618-619
+internal/translate/stream.go
+  s_87d67628e1063e::t_5573043ea4bc5a 365-372
+  s_87d67628e1063e::t_922e57228b9fab 636-659,666-668
+  s_87d67628e1063e::t_8fab82ffe27dea 388-398
+  s_87d67628e1063e::t_d90ff12cd28305 550-552
+scripts/demo-statusline-watcher.sh
+  s_87d67628e1063e::t_167936d3cb861f 37-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.7",
+  "base_commit_sha": "edf3ca3b819d3b14600d3f9f49ffc8c795f0d331",
+  "prompts": {},
+  "sessions": {
+    "s_87d67628e1063e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b76cc82-198d-44c7-b4db-7689a1007adc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

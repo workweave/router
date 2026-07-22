@@ -1,0 +1,70 @@
+internal/server/server.go
+  s_cbe96eceea9a61::t_32234552c91ca3 139,156,190
+internal/billing/service_test.go
+  s_cbe96eceea9a61::t_5a80f09e3c640b 248-294
+db/migrations/0032_telemetry-api-key-id.up.sql
+  s_cbe96eceea9a61::t_285b40b7de7980 1-14
+internal/sqlc/model_router_api_keys.sql.go
+  s_cbe96eceea9a61::t_bdc31d0944cc65 33,66,90-91,97,116,137-138,158,167,193-194
+db/migrations/0031_api-key-spend-cap.down.sql
+  s_cbe96eceea9a61::t_5703d657ad111d 1-7
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_cbe96eceea9a61::t_bdc31d0944cc65 813,869,872-873,877-880,882,889-899,901,903-905,907,909,911,913-914,916-919,921-922,929,1010,1066,1069-1070,1074-1077,1079,1086-1096,1098,1100-1102,1104,1106,1108,1110-1111,1113-1116,1118-1119,1125
+db/queries/billing.sql
+  s_cbe96eceea9a61::t_e21423b619cc02 73-74,76
+  s_cbe96eceea9a61::t_b5d7b8274c13d5 36-42,50-72,75,77,79
+internal/server/middleware/api_key_spend_cap_test.go
+  s_cbe96eceea9a61::t_9dd096c5d75198 1-72
+internal/postgres/billing_repo.go
+  s_cbe96eceea9a61::t_7d64fb054651d3 64
+internal/auth/api_key.go
+  s_cbe96eceea9a61::t_53f93b62ac6f6f 20-26
+internal/billing/repo.go
+  s_cbe96eceea9a61::t_d3471a6925613a 41-44
+internal/billing/service.go
+  s_cbe96eceea9a61::t_d95b108e5d0256 109-112
+  s_cbe96eceea9a61::t_ecb9e48ecd96c0 142
+db/migrations/0032_telemetry-api-key-id.down.sql
+  s_cbe96eceea9a61::t_efaaa53faecc3e 1-8
+db/queries/model_router_request_telemetry.sql
+  s_cbe96eceea9a61::t_4bf8a04a35cc10 26
+  s_cbe96eceea9a61::t_e6d6388892afe3 82
+internal/proxy/telemetry.go
+  s_cbe96eceea9a61::t_8beb0a3563519f 25-27
+internal/sqlc/billing.sql.go
+  s_cbe96eceea9a61::t_bdc31d0944cc65 50,52,54-76,79,81,83,88,93,110-116,119,121,123-145,148,150,152,156,161
+  s_cbe96eceea9a61::t_e4a1a081dd9c6c 77-78,80,146-147,149
+internal/postgres/telemetry.go
+  s_cbe96eceea9a61::t_947a998df2d13f 55
+db/migrations/0031_api-key-spend-cap.up.sql
+  s_cbe96eceea9a61::t_3788078b87c224 1-12
+internal/sqlc/models.go
+  s_cbe96eceea9a61::t_bdc31d0944cc65 40-46,153
+internal/proxy/service.go
+  s_cbe96eceea9a61::t_be6bde6cee7270 226-232
+  s_cbe96eceea9a61::t_c161d24fca89a0 2401,2413
+  s_cbe96eceea9a61::t_025d27c6908ff2 3022
+  s_cbe96eceea9a61::t_4c5ecd04b9b74b 2988,3001
+  s_cbe96eceea9a61::t_d44a6e826e87cf 2314
+  s_cbe96eceea9a61::t_89190109319876 3749
+internal/postgres/converters.go
+  s_cbe96eceea9a61::t_fb3744cb7d35c1 53-58
+internal/server/middleware/api_key_spend_cap.go
+  s_cbe96eceea9a61::t_e12aadcaf3e6cc 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "38e724a47157af1d848c5e92aba212ea120a6da1",
+  "prompts": {},
+  "sessions": {
+    "s_cbe96eceea9a61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b81cf4c8-d104-4245-b7a4-d3071c7b21b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

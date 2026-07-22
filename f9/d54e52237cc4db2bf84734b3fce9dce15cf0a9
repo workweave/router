@@ -1,0 +1,25 @@
+internal/translate/reasoning.go
+  s_14149f8f972376::t_dfa3a6b7be13c1 126
+internal/translate/emit_gemini.go
+  s_14149f8f972376::t_dfa3a6b7be13c1 1274-1275
+internal/translate/fidelity_test.go
+  s_14149f8f972376::t_dfa3a6b7be13c1 145-167
+internal/translate/gemini_test.go
+  s_14149f8f972376::t_2506229f96df81 607,636,712,774,806,949,972
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f9d54e52237cc4db2bf84734b3fce9dce15cf0a9",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

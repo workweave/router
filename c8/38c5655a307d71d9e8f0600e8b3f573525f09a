@@ -1,0 +1,23 @@
+internal/providers/openai/codex_internal_test.go
+  s_67155943c0d732::t_606ba13f540774 126-196
+internal/providers/openai/client.go
+  s_67155943c0d732::t_b417230b9f3e4a 210,214-217,219
+  s_67155943c0d732::t_5111807cb34a1b 20-22
+  s_67155943c0d732::t_960d50466ef580 43-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c838c5655a307d71d9e8f0600e8b3f573525f09a",
+  "prompts": {},
+  "sessions": {
+    "s_67155943c0d732": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2ad091d-1a58-4430-80d3-28747c9035f0",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

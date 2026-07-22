@@ -1,0 +1,21 @@
+internal/api/anthropic/route.go
+  s_c4ecee41717be0::t_fe509f029ff61d 31,33-36
+internal/proxy/service.go
+  s_c4ecee41717be0::t_664d4c977d3679 1320-1348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "23ffa8a61213e033da072bc0c0d47c87eaa6f332",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

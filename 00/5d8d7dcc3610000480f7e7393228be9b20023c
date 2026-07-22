@@ -1,0 +1,45 @@
+internal/translate/gemini_marker.go
+  s_836acf51854e15::t_283881063795a8 21-23
+  s_836acf51854e15::t_0f8e8091c03b6a 44-46,49,65-88
+internal/proxy/service.go
+  s_836acf51854e15::t_d61d3aeb0f61b4 839-841
+  s_836acf51854e15::t_c8aca9ddb5f347 817-819
+  s_836acf51854e15::t_e1c5f97c0b6367 1742,1747-1751
+  s_836acf51854e15::t_4dcccd6932612d 1570-1582
+  s_836acf51854e15::t_eec7f919097a4d 1583
+internal/translate/openai_marker.go
+  s_836acf51854e15::t_f9bf73f8b15a05 23-25
+  s_836acf51854e15::t_bbe728d4a25d1f 47-49,52,68-96
+internal/translate/stream.go
+  s_836acf51854e15::t_adb7289d4aa65f 425-442,444-450
+  s_836acf51854e15::t_0ff47d3a2190b5 443
+  s_836acf51854e15::t_3b4f33a162d96a 403-405,416
+  s_836acf51854e15::t_7539aee9e9b137 332-335
+internal/translate/responses.go
+  s_836acf51854e15::t_9611c95ecd7c14 272-275
+  s_836acf51854e15::t_2b016331566015 360
+  s_836acf51854e15::t_0cc1a028191f5e 379-390,395-398
+  s_836acf51854e15::t_428f2192d5fdde 391-394
+  s_836acf51854e15::t_a384eeb038063c 340-341
+  s_836acf51854e15::t_f95b3fd9c6084f 339
+internal/translate/openai_marker_test.go
+  s_836acf51854e15::t_581f7de2df73af 111-139
+internal/proxy/gemini.go
+  s_836acf51854e15::t_89ed7e1824a221 151-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "005d8d7dcc3610000480f7e7393228be9b20023c",
+  "prompts": {},
+  "sessions": {
+    "s_836acf51854e15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03f1fbfe-8854-4dc9-8cb2-8a126f7d6750",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+internal/router/cluster/artifacts/v0.39/model_registry.json
+  s_dc646ce68847be::t_00a7e86916bb9c 1-2,4-9,11-21,23-24
+  s_dc646ce68847be::t_c2e81d30115116 22
+  s_dc646ce68847be::t_87f558ad673c82 10
+  s_dc646ce68847be::t_1cf96d213b794b 3
+internal/router/cluster/artifacts/v0.39/metadata.yaml
+  s_dc646ce68847be::t_418496cf528052 1,3,5-58,60-62
+  s_dc646ce68847be::t_9f23cc4ac4ba47 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "8ddd8d4d93b6100270c14cf8286e74597b695fb7",
+  "prompts": {},
+  "sessions": {
+    "s_dc646ce68847be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b5d9e73-99bd-41ec-add7-1027d67979ff",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

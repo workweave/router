@@ -1,0 +1,24 @@
+internal/proxy/router_feedback.go
+  s_d3fc1c517ba243::t_aa442dce2d8cc0 60,62
+  s_d3fc1c517ba243::t_6f6b050273f23f 133
+  s_d3fc1c517ba243::t_3512667ab31360 135
+internal/proxy/router_feedback_proxy_test.go
+  s_d3fc1c517ba243::t_21de3424c70557 72
+  s_d3fc1c517ba243::t_493ca8bf0a6443 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "00c22d99c0170c931e038cf0597559df9d081d1d",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

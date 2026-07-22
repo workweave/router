@@ -1,0 +1,59 @@
+internal/proxy/service.go
+  s_35fec47598245b::t_ff6f8a1c6337ff 1988,3958
+  s_c21bfd5b246b3b::t_fe0f6f0b402f1e 1955,1999,3924,3969
+internal/proxy/service_session_pin_test.go
+  s_35fec47598245b::t_06bfd86038e9be 751-756
+  s_35fec47598245b::t_03302e70ba9b90 789-794
+internal/proxy/turnloop.go
+  s_35fec47598245b::t_0a13b1fa890e3e 371-374
+  s_35fec47598245b::t_76ac6fc88a40f2 508-511
+  s_35fec47598245b::t_63c14be3a945c3 282
+  s_35fec47598245b::t_713bcfbf523e07 213-217,224
+  s_35fec47598245b::t_f30b5ccf9ae060 273,276,315-318
+  s_35fec47598245b::t_be4c077d0caaeb 230
+  s_35fec47598245b::t_cefbb3106fc961 271-272,274-275
+  s_35fec47598245b::t_6e8568539c64d3 218-223
+  s_35fec47598245b::t_5f8ab6768e907e 312-313
+  s_35fec47598245b::t_e95c5d706d2277 488-491
+internal/proxy/force_model.go
+  s_35fec47598245b::t_11d5fd5651500f 348-349
+  s_35fec47598245b::t_46e7e20d3af7cd 360-361
+  s_35fec47598245b::t_421a5136b65a5e 29-30
+  s_35fec47598245b::t_d321bc0e4594a9 318-320,350
+  s_35fec47598245b::t_88102a9eec5aac 291-292
+  s_35fec47598245b::t_fc545fb8b4903d 252,260
+  s_35fec47598245b::t_712b7c31716a08 307
+  s_35fec47598245b::t_3426f2d0d6a4e2 191-249,286,351
+  s_35fec47598245b::t_4d2957cadc709b 283-284
+  s_35fec47598245b::t_ec8bc9f163bd7c 250
+  s_35fec47598245b::t_49a94d65d61cef 285
+internal/proxy/session_key.go
+  s_35fec47598245b::t_af5a639e1980d2 7
+  s_35fec47598245b::t_a26e98b7b32799 67-103
+internal/proxy/force_model_session_internal_test.go
+  s_35fec47598245b::t_e2c6fafbfb581d 1-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a6f26cfa7cb5969b6d9872b1bc374bdb843e2e25",
+  "prompts": {},
+  "sessions": {
+    "s_35fec47598245b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c702952b-1a1d-484f-8864-95d73121dd7b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_c21bfd5b246b3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6831-3013-73c2-b856-83cda62dd4b8",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
