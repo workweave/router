@@ -165,11 +165,7 @@ func (s *Service) handleRouterFeedbackCommand(
 			return err
 		}
 	}
-	// When the sequence resolved to a specific request, also converge onto the
-	// per-request feedback table so both channels share one truth. The
-	// up/down-only rating column rejects empty ratings (note-only), so skip
-	// the upsert in that case to avoid overwriting a prior thumb on the same
-	// request_id with an invalid row.
+	// Skip upsert for note-only ratings: up/down-only column rejects empty rating and would overwrite a prior thumb.
 	if telemetryRequestID != "" && rating != "" && s.feedbackRepo != nil {
 		comment := feedback
 		upsertParams := UpsertFeedbackParams{
@@ -186,11 +182,8 @@ func (s *Service) handleRouterFeedbackCommand(
 		}
 	}
 
-	// Reporter must be selected by the rated turn's strategy, not the current
-	// request. When a sequence points at an earlier HMM/RL decision but the
-	// current request sits on cluster, StrategyFromContext routes the rating
-	// to the wrong reporter (or skips it entirely). The resolved strategy is
-	// empty only when the row fell back to the pin path.
+	// Use the resolved turn's strategy, not the current request: StrategyFromContext would route credit to the wrong reporter
+	// when the rated turn was served by a different strategy (e.g. HMM) than the active one.
 	strategy := router.StrategyFromContext(ctx)
 	if telemetryStrategy != "" {
 		if rs, ok := s.strategies[router.Strategy(telemetryStrategy)]; ok && rs.feedback != nil {

@@ -132,9 +132,7 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 		}
 		feedback += rest
 	}
-	// splitSequence must run before splitLeadingRating so a bare "-" in
-	// feedback is left for the verdict parser rather than being eaten as
-	// part of a negative sequence token.
+	// Must precede splitLeadingRating so a bare "-" is left for the verdict parser.
 	var seq int
 	seq, feedback = splitSequence(feedback)
 	// A note that opens with a bare verdict ("/rf 👍 too slow") promotes to a
@@ -142,9 +140,7 @@ func parseRouterFeedbackCommand(text string) (res RouterFeedbackResult, found bo
 	if rating == "" {
 		rating, feedback = splitLeadingRating(feedback)
 	}
-	// splitSequence must also run before stripTrailingLabel so a slash at the start
-	// of the note is disambiguated as a sequence index rather than read as
-	// prose by the --label scanner.
+	// Must precede stripTrailingLabel so a leading digit is not misread as prose by the --label scanner.
 	var label string
 	if rating == RouterFeedbackRatingDown {
 		label, feedback = stripTrailingLabel(feedback)
@@ -317,16 +313,10 @@ func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
 	return val, tail, true
 }
 
-// splitSequence extracts an optional leading sequence token from s. Returns
-// the sequence value and the remaining text.
-//
-// Rules:
-//   - /\d+/ (1–2 digits) = absolute positive sequence number, always consumed
-//   - 3+ digits stay in the note text (almost always status codes or IDs)
-//   - /-[1-9]\d*/ = relative negative sequence (must have digits after minus)
-//   - A bare "-" followed by space or end is NOT a sequence (it's a verdict down)
-//   - "-0" does NOT parse as a sequence
-//   - Only the first sequence-parseable token is consumed
+// splitSequence extracts an optional leading sequence token from s.
+// Negative token (-N, N>=1) = relative offset from last turn; positive 1-2 digit token = absolute 1-based index
+// (3+ digits stay in the note — almost always status codes or IDs, so "404 not found" is not a sequence).
+// "-", "-0", and bare zero are left untouched. Returns (0, s) when no sequence is found.
 func splitSequence(s string) (seq int, rest string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -380,4 +370,3 @@ func splitSequence(s string) (seq int, rest string) {
 	}
 	return 0, s
 }
-
