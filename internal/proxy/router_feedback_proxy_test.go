@@ -664,9 +664,7 @@ func TestService_RouterFeedbackCommand_SequenceWithRatingUpsertsRequestFeedback(
 }
 
 func TestService_RouterFeedbackCommand_SequenceResolvesStrategyRoutesToItsReporter(t *testing.T) {
-	// Current request context is on the cluster strategy (no policy reporter).
-	// The user's `/rf -2` resolves to telemetry whose strategy is RL, which
-	// has a registered feedback reporter. Policy feedback must land on RL.
+	// cluster strategy has no policy reporter; RL does — resolved turn must route to RL, not fall through to context.
 	const body = `{
 		"model":"claude-sonnet-4-6",
 		"max_tokens":1024,
@@ -785,9 +783,7 @@ func TestService_RouterFeedbackCommand_NegativeOnePreservesTrainingDelta(t *test
 }
 
 func TestService_RouterFeedbackCommand_ClusterResolvedTurnSkipsPolicyFeedback(t *testing.T) {
-	// The rated turn was served by the cluster scorer (no feedback reporter).
-	// The active session strategy is HMM — reporting there would credit HMM
-	// with a cluster decision's request_id, so policy feedback must be skipped.
+	// The rated turn was served by cluster (no feedback reporter); crediting the active HMM reporter would pair its request_id with the wrong strategy.
 	const body = `{
 		"model":"claude-sonnet-4-6",
 		"max_tokens":1024,
