@@ -18,6 +18,10 @@ import (
 // escalateModel is the strong model a looping cheap/mid session is rescued onto.
 const escalateModel = "claude-opus-4-8"
 
+// geminiEscalateModel is the same-format TierHigh Google rescue target for
+// Gemini-source cyclic loops (Anthropic/OpenAI keep escalateModel).
+const geminiEscalateModel = "gemini-3.1-pro-preview"
+
 // LoopEscalationStore persists cyclic-loop detections (one row per
 // session+role); CountLoopEscalationEvents enforces the once-per-session budget.
 type LoopEscalationStore interface {
@@ -183,6 +187,27 @@ func (s *Service) handleLoopEscalation(
 	role string,
 	routedModel string,
 ) {
+	s.handleLoopEscalationTo(ctx, top, topCount, distinctRatio, window, installationID, sessionKey, role, routedModel,
+		providers.ProviderAnthropic, escalateModel)
+}
+
+// handleLoopEscalationTo is the provider/model-parameterized core used by
+// handleLoopEscalation (Anthropic/opus) and Gemini-source callers (Google /
+// geminiEscalateModel). Behavior matches the former hard-coded path when
+// targetProvider/targetModel are ProviderAnthropic + escalateModel.
+func (s *Service) handleLoopEscalationTo(
+	ctx context.Context,
+	top translate.ToolCallSig,
+	topCount int,
+	distinctRatio float64,
+	window int,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	routedModel string,
+	targetProvider string,
+	targetModel string,
+) {
 	log := observability.FromContext(ctx)
 
 	loopingModel := routedModel
@@ -229,7 +254,7 @@ func (s *Service) handleLoopEscalation(
 		action = loopActionDisabled
 	case userForced:
 		action = loopActionUserForced
-	case loopingModel == escalateModel:
+	case loopingModel == targetModel:
 		action = loopActionAlreadyStrong
 	case holdout:
 		action = loopActionHoldout
@@ -243,7 +268,7 @@ func (s *Service) handleLoopEscalation(
 		"action", action,
 		"escalated", willEscalate,
 		"user_forced", userForced,
-		"escalation_target", escalateModel,
+		"escalation_target", targetModel,
 		"loop_tool", top.Name,
 		"loop_input_hash", top.InputHash,
 		"repeat_count", topCount,
@@ -257,8 +282,8 @@ func (s *Service) handleLoopEscalation(
 	// budget, so recording before the pin lands would permanently block retry
 	// on a failed rescue. On upsert failure, return without a row so the loop re-detects next turn.
 	if willEscalate {
-		// Pin opus for the rest of the session (immutable sticky via
-		// ReasonLoopEscalation).
+		// Pin the escalation target for the rest of the session (immutable
+		// sticky via ReasonLoopEscalation).
 		if s.pinStore == nil || installationID == uuid.Nil {
 			return
 		}
@@ -270,8 +295,8 @@ func (s *Service) handleLoopEscalation(
 			SessionKey:      sessionKey,
 			Role:            role,
 			InstallationID:  installationID,
-			Provider:        providers.ProviderAnthropic,
-			Model:           escalateModel,
+			Provider:        targetProvider,
+			Model:           targetModel,
 			Reason:          translate.ReasonLoopEscalation,
 			TurnCount:       1,
 			PinnedUntil:     time.Now().Add(pinSessionTTL),
@@ -295,7 +320,7 @@ func (s *Service) handleLoopEscalation(
 			Role:             role,
 			LoopingModel:     loopingModel,
 			Action:           action,
-			EscalationTarget: escalateModel,
+			EscalationTarget: targetModel,
 			LoopTool:         top.Name,
 			LoopInputHash:    top.InputHash,
 			RepeatCount:      int32(topCount),
@@ -360,6 +385,8 @@ func (s *Service) handleToolCallLoopBreak(
 	switch env.SourceFormat() {
 	case translate.FormatOpenAI:
 		return writeSyntheticOpenAIResponse(w, env, msg, inputTokens)
+	case translate.FormatGemini:
+		return writeSyntheticGeminiResponse(w, env, msg, inputTokens)
 	default:
 		return writeSyntheticAnthropicResponse(w, env, msg, inputTokens)
 	}

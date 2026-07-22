@@ -419,3 +419,246 @@ func TestAssistantToolCallSignatures_UserTextResetsLoop_OpenAI(t *testing.T) {
 	require.Len(t, sigs, 1)
 	assert.Equal(t, "read", sigs[0].Name)
 }
+
+func TestAssistantToolCallSignatures_Gemini(t *testing.T) {
+	body := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"text": "do stuff"},
+			}},
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "ls",
+					"args": map[string]any{"path": "/tmp"},
+				}},
+			}},
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"functionResponse": map[string]any{
+					"name": "ls", "response": map[string]any{"result": "a"},
+				}},
+			}},
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "ls",
+					"args": map[string]any{"path": "/tmp"},
+				}},
+				map[string]any{"text": "ignore me"},
+				map[string]any{"functionCall": map[string]any{
+					"name": "read",
+					"args": map[string]any{"path": "/etc/hosts"},
+				}},
+			}},
+		},
+	})
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 3)
+	assert.Equal(t, "ls", sigs[0].Name)
+	assert.Equal(t, "ls", sigs[1].Name)
+	assert.Equal(t, "read", sigs[2].Name)
+	assert.Equal(t, sigs[0].InputHash, sigs[1].InputHash, "identical args must produce identical hash")
+	assert.NotEqual(t, sigs[1].InputHash, sigs[2].InputHash, "different tool args must produce different hash")
+}
+
+func TestAssistantToolCallSignatures_Gemini_UserTextResetsLoop(t *testing.T) {
+	// Genuine user text (not functionResponse-only) resets the window, same as
+	// Anthropic/OpenAI. Signatures before the reset are excluded.
+	body := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"text": "do stuff"},
+			}},
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "ls",
+					"args": map[string]any{"path": "/tmp"},
+				}},
+			}},
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"functionResponse": map[string]any{
+					"name": "ls", "response": map[string]any{"result": "a"},
+				}},
+				map[string]any{"text": "continue please"}, // resets
+			}},
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "read",
+					"args": map[string]any{"path": "/etc/hosts"},
+				}},
+			}},
+		},
+	})
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 1) // Only "read"; "ls" was before the user text
+	assert.Equal(t, "read", sigs[0].Name)
+}
+
+func TestAssistantToolCallSignatures_Gemini_InjectedTextDoesNotResetLoop(t *testing.T) {
+	// Claude Code's <system-reminder> (and siblings matched by
+	// isClaudeCodeInjectedBlock) must NOT reset the Gemini window — same
+	// parity as Anthropic. Six identical calls with an injected reminder on
+	// every functionResponse turn should all survive.
+	contents := []any{
+		map[string]any{"role": "user", "parts": []any{
+			map[string]any{"text": "do stuff"},
+		}},
+	}
+	for i := 0; i < 6; i++ {
+		contents = append(contents,
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "ls",
+					"args": map[string]any{"path": "/tmp"},
+				}},
+			}},
+			map[string]any{"role": "user", "parts": []any{
+				map[string]any{"functionResponse": map[string]any{
+					"name": "ls", "response": map[string]any{"result": "a"},
+				}},
+				map[string]any{"text": "<system-reminder>be helpful</system-reminder>"},
+			}},
+		)
+	}
+	body := mustMarshalJSON(t, map[string]any{"contents": contents})
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 6, "injected reminder blocks must not reset the loop window")
+}
+
+func TestAssistantToolCallSignatures_Gemini_SkipsEmptyInputEntries(t *testing.T) {
+	// Mirror TestAssistantToolCallSignatures_SkipsEmptyInputEntries: empty
+	// args objects and null args are stream-incomplete artifacts and must
+	// not count toward loop detection.
+	body := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{"file_path": "/a"},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{"file_path": "/b"},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": nil,
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{"file_path": "/c"},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					// missing args entirely
+				}},
+			}},
+		},
+	})
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 3, "empty/null/missing-args functionCall entries must be filtered")
+	assert.NotEqual(t, sigs[0].InputHash, sigs[1].InputHash)
+	assert.NotEqual(t, sigs[1].InputHash, sigs[2].InputHash)
+}
+
+func TestAssistantToolCallSignatures_Gemini_CamelAndSnakeCase(t *testing.T) {
+	// geminiToolCalls accepts both spellings; signature extraction must too,
+	// and produce identical Name + InputHash for equivalent payloads.
+	camel := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "bash",
+					"args": map[string]any{"command": "ls /tmp"},
+				}},
+			}},
+		},
+	})
+	snake := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"function_call": map[string]any{
+					"name":      "bash",
+					"arguments": map[string]any{"command": "ls /tmp"},
+				}},
+			}},
+		},
+	})
+
+	envCamel, err := translate.ParseGemini(camel)
+	require.NoError(t, err)
+	envSnake, err := translate.ParseGemini(snake)
+	require.NoError(t, err)
+
+	sigsCamel := envCamel.AssistantToolCallSignatures()
+	sigsSnake := envSnake.AssistantToolCallSignatures()
+	require.Len(t, sigsCamel, 1)
+	require.Len(t, sigsSnake, 1)
+	assert.Equal(t, sigsCamel[0].Name, sigsSnake[0].Name)
+	assert.Equal(t, sigsCamel[0].InputHash, sigsSnake[0].InputHash,
+		"camelCase functionCall/args and snake_case function_call/arguments must hash identically")
+}
+
+func TestAssistantToolCallArgsPreview_Gemini(t *testing.T) {
+	// Window-dump preview must follow the same Name:rawJSON shape as
+	// Anthropic/OpenAI, filtered identically to AssistantToolCallSignatures
+	// (empty args dropped; offset indexes the filtered sequence).
+	body := mustMarshalJSON(t, map[string]any{
+		"contents": []any{
+			map[string]any{"role": "model", "parts": []any{
+				map[string]any{"functionCall": map[string]any{
+					"name": "Setup",
+					"args": map[string]any{"step": 0},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Read",
+					"args": map[string]any{},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Loop",
+					"args": map[string]any{"n": 1},
+				}},
+				map[string]any{"functionCall": map[string]any{
+					"name": "Loop",
+					"args": map[string]any{"n": 1},
+				}},
+			}},
+		},
+	})
+	env, err := translate.ParseGemini(body)
+	require.NoError(t, err)
+
+	sigs := env.AssistantToolCallSignatures()
+	require.Len(t, sigs, 3, "empty-args Read must be filtered from the signature sequence")
+
+	preview := env.AssistantToolCallArgsPreview(0, 200)
+	require.Len(t, preview, len(sigs),
+		"preview must contain exactly as many entries as the aligned signature sequence")
+	for i, s := range sigs {
+		require.True(t, strings.HasPrefix(preview[i], s.Name+":"),
+			"preview[%d] = %q must describe the same tool call as sigs[%d] = %q", i, preview[i], i, s.Name)
+	}
+	require.Equal(t, []string{
+		`Setup:{"step":0}`,
+		`Loop:{"n":1}`,
+		`Loop:{"n":1}`,
+	}, preview)
+}
