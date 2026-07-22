@@ -135,3 +135,50 @@ func TestProxyMessages_OverEngineerCap_NoSubscription_402s(t *testing.T) {
 	assert.ErrorIs(t, err, billing.ErrUserMonthlySpendLimitReached)
 	assert.Empty(t, p.proxyBodies, "no dispatch may occur when the cap rejects the turn")
 }
+
+// TestProxyMessages_OverEngineerCap_ExhaustedSubscription_Refuses402 closes the
+// loop that the first two tests in this file leave open: an engineer past the
+// monthly cap AND the caller's own subscription at its limit must be refused —
+// never dispatched to a paid model, never debited. The cap pushes the request
+// into subscription-only mode; the subscription-only mode's pre-dispatch guard
+// sees the observed-exhausted sub and returns the credits-exhausted sentinel.
+// Without this test, the cap→subscription-only handoff and the
+// exhausted-sub→refusal handoff are covered separately; this one pins that
+// they compose correctly end-to-end so a refactor of either flag site can't
+// silently break the corner.
+func TestProxyMessages_OverEngineerCap_ExhaustedSubscription_Refuses402(t *testing.T) {
+	const subToken = "sk-ant-oat01-covering-subscription"
+	limit := int64(10_000_000)
+	repo := &capturingBillingRepo{userSpent: 10_002_854, userLimit: &limit} // over the engineer cap
+
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-sonnet-4-6"}}
+	p := &fakeProvider{proxyResponse: bypassStreamResponse}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	// Weekly window exhausted: the pre-dispatch guard reads this and refuses
+	// before any upstream call, so no doomed round-trip against the would-be
+	// spent subscription.
+	obs.Record(obs.Key([]byte(subToken)), usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
+		WithUsageObserver(obs).
+		WithBillingService(billing.NewService(repo))
+
+	ctx := context.WithValue(context.Background(), proxy.ExternalIDContextKey{}, "org-capped")
+	ctx = context.WithValue(ctx, auth.UserIDContextKey{}, "engineer-1")
+	ctx = context.WithValue(ctx, proxy.InstallationUsageBypassContextKey{}, proxy.UsageBypassConfig{Enabled: true})
+	ctx = context.WithValue(ctx, proxy.AnthropicSubscriptionContextKey{}, subToken)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer "+subToken)
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`)
+
+	err := svc.ProxyMessages(ctx, body, rec, req)
+	require.Error(t, err, "over-cap engineer with an exhausted subscription must be refused")
+	assert.ErrorIs(t, err, proxy.ErrCreditsExhaustedSubscriptionUnavailable,
+		"the refusal must be the credits-exhausted sentinel so the API mapper emits HTTP 402 with the top-up CTA")
+	assert.Empty(t, p.proxyBodies, "no dispatch may occur when both the cap and the subscription are spent")
+	assert.Empty(t, repo.recordedDebits(),
+		"nothing must be debited when the turn is refused before dispatch — paid spend stays bounded at the cap")
+}
