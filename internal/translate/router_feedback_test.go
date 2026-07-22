@@ -17,6 +17,7 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 		wantRating         string
 		wantSuggestedLabel string
 		wantFeedback       string
+		wantSequence       int
 		wantFound          bool
 		wantStripped       string
 	}{
@@ -218,6 +219,56 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			wantFeedback:       "too simple for this",
 			wantFound:          true,
 		},
+		{
+			name:         "rf with negative one-digit sequence consumes as sequence",
+			input:        "/rf -1 too slow",
+			wantSequence: -1,
+			wantFeedback: "too slow",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with negative sequence plus rating up",
+			input:        "/rf -3 + too slow on haiku",
+			wantRating:   "up",
+			wantSequence: -3,
+			wantFeedback: "too slow on haiku",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with one-digit absolute sequence consumes as sequence",
+			input:        "/rf 3 the diff was incomplete",
+			wantSequence: 3,
+			wantFeedback: "the diff was incomplete",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with two-digit absolute sequence consumes as sequence",
+			input:        "/rf 12 stuck in a loop",
+			wantSequence: 12,
+			wantFeedback: "stuck in a loop",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with three-digit prefix stays in note (status code)",
+			input:        "/rf 1001 too slow",
+			wantSequence: 0,
+			wantFeedback: "1001 too slow",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with status code 404 stays in note",
+			input:        "/rf 404 not found",
+			wantSequence: 0,
+			wantFeedback: "404 not found",
+			wantFound:    true,
+		},
+		{
+			name:         "rf with zero token is note text not sequence",
+			input:        "/rf 0 days late",
+			wantSequence: 0,
+			wantFeedback: "0 days late",
+			wantFound:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -233,6 +284,7 @@ func TestParseRouterFeedbackCommand(t *testing.T) {
 			assert.Equal(t, tt.wantRating, res.Rating)
 			assert.Equal(t, tt.wantSuggestedLabel, res.SuggestedLabel)
 			assert.Equal(t, tt.wantFeedback, res.Feedback)
+			assert.Equal(t, tt.wantSequence, res.Sequence)
 
 			stripped := lastUserMessageText(t, env)
 			assert.Equal(t, tt.wantStripped, stripped)

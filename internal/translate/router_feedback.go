@@ -321,15 +321,12 @@ func extractQuotedOrBareValue(s string) (val, rest string, ok bool) {
 // the sequence value and the remaining text.
 //
 // Rules:
-//   - /\d+/ = absolute positive sequence number
+//   - /\d+/ (1–2 digits) = absolute positive sequence number, always consumed
+//   - 3+ digits stay in the note text (almost always status codes or IDs)
 //   - /-[1-9]\d*/ = relative negative sequence (must have digits after minus)
 //   - A bare "-" followed by space or end is NOT a sequence (it's a verdict down)
 //   - "-0" does NOT parse as a sequence
 //   - Only the first sequence-parseable token is consumed
-//   - Positive integers only consume when they are the lone remaining token
-//     or the immediately following token is a verdict; otherwise the digit
-//     stays in the note so things like "404 not found" don't trigger a
-//     sequence lookup that would drop the feedback.
 func splitSequence(s string) (seq int, rest string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -365,10 +362,11 @@ func splitSequence(s string) (seq int, rest string) {
 		}
 	}
 	if allDigits {
-		next := strings.TrimSpace(after)
-		lone := next == ""
-		verdictFollows := lone || isVerdictToken(next)
-		if !verdictFollows {
+		// Bound the absolute-sequence consume to short turns (1-2 digits): 3+
+		// digit prefixes are almost always status codes or IDs (`404`, `1001`)
+		// and must stay in the note text. This matches the relative heuristic
+		// where -1, -2, -3 are consumed unconditionally.
+		if len(tok) > 2 {
 			return 0, s
 		}
 		seq := 0
@@ -383,14 +381,3 @@ func splitSequence(s string) (seq int, rest string) {
 	return 0, s
 }
 
-// isVerdictToken reports whether s opens with a verdict recognized by
-// splitLeadingRating. Used to disambiguate `/rf N <verdict>` from
-// `/rf N <prose>`.
-func isVerdictToken(s string) bool {
-	tok, _, _ := strings.Cut(s, " ")
-	switch strings.ToLower(tok) {
-	case "+", "-", "👍", "👎", "up", "down", "thumbsup", "thumbsdown":
-		return true
-	}
-	return false
-}
