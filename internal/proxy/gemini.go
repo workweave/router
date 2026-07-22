@@ -106,6 +106,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		ExcludedModels:               s.excludedModelsForRequest(ctx),
 		PreferredModels:              s.preferredModelsForRequest(ctx),
 		RoutingKnobs:                 router.RoutingKnobsFromContext(ctx),
+		ClusterArmOverrides:          clusterArmOverridesForRequest(ctx),
 	}
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)

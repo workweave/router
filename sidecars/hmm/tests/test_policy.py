@@ -120,3 +120,7 @@ async def test_published_package_routes_an_offered_candidate(
     assert result.selected_roster_id == roster_id
     assert result.policy_label == selected_label
     assert result.policy_artifact_sha256 == sha256_file(package)
+    # ranked_fallback must be populated so the Go side can apply per-key
+    # cluster allowlist overrides.
+    assert result.ranked_fallback
+    assert any(group.group == selected_label for group in result.ranked_fallback)

@@ -9,10 +9,11 @@ import (
 
 // CachedKey is the value stored in APIKeyCache. Negative marks a known-bad token.
 type CachedKey struct {
-	APIKey       *APIKey
-	Installation *Installation
-	ExternalKeys []*ExternalAPIKey
-	Negative     bool
+	APIKey            *APIKey
+	Installation      *Installation
+	ExternalKeys      []*ExternalAPIKey
+	ClusterModelLists []ClusterModelList
+	Negative          bool
 }
 
 // APIKeyCache is an in-process read-through cache for the auth lookup.

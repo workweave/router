@@ -107,6 +107,34 @@ func (c *Client) Capabilities(ctx context.Context) (policy.Capabilities, error) 
 	return capabilities, nil
 }
 
+// Roster fetches the sidecar's frozen per-cluster arm roster.
+func (c *Client) Roster(ctx context.Context) (policy.RosterSnapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/roster", nil)
+	if err != nil {
+		return policy.RosterSnapshot{}, fmt.Errorf("build policy roster request: %w", err)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return policy.RosterSnapshot{}, fmt.Errorf("call policy roster endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return policy.RosterSnapshot{}, fmt.Errorf("read policy roster response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return policy.RosterSnapshot{}, fmt.Errorf("policy roster status %d", resp.StatusCode)
+	}
+	var parsed struct {
+		Clusters     map[string][]string `json:"clusters"`
+		RosterSHA256 string              `json:"roster_sha256"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return policy.RosterSnapshot{}, fmt.Errorf("decode policy roster response: %w", err)
+	}
+	return policy.RosterSnapshot{Clusters: parsed.Clusters, RosterSHA256: parsed.RosterSHA256}, nil
+}
+
 func (c *Client) post(ctx context.Context, path string, payload map[string]interface{}, label string) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -271,6 +299,7 @@ type routeResponse struct {
 	RosterVersion        string                 `json:"roster_version"`
 	DebugRef             string                 `json:"debug_ref"`
 	Debug                map[string]interface{} `json:"debug"`
+	RankedFallback       []policy.PreviewGroup  `json:"ranked_fallback"`
 	Error                string                 `json:"error"`
 }
 
@@ -349,6 +378,7 @@ func (c *Client) Decide(ctx context.Context, query policy.Query) (policy.Result,
 		RosterVersion:        parsed.RosterVersion,
 		DebugRef:             parsed.DebugRef,
 		Debug:                parsed.Debug,
+		RankedFallback:       parsed.RankedFallback,
 	}, nil
 }
 
@@ -852,3 +882,4 @@ var _ policy.Decider = (*Client)(nil)
 var _ policy.PreviewDecider = (*Client)(nil)
 var _ policy.OutcomeReporter = (*Client)(nil)
 var _ policy.FeedbackReporter = (*Client)(nil)
+var _ policy.RosterSource = (*Client)(nil)

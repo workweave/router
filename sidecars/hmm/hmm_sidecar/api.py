@@ -90,6 +90,7 @@ def capabilities() -> JSONResponse:
             "supports_debug_route_detail": True,
             "supports_preview": True,
             "supports_shadow": True,
+            "reports_ranked_fallback": True,
             "authoritative_per_turn_selection": False,
             "learning": {
                 "enabled": False,
@@ -108,6 +109,26 @@ def outcome() -> None:
 @app.post("/feedback", status_code=204)
 def feedback() -> None:
     return None
+
+
+@app.get("/roster")
+def roster() -> JSONResponse:
+    """Return the frozen roster: per-cluster ordered arm lists + sha256."""
+    artifacts = _artifacts()
+    policy: FrozenPolicy | None = getattr(app.state, "policy", None)
+    if policy is None or artifacts is None:
+        return JSONResponse({"error": "policy not loaded"}, status_code=503)
+    clusters: dict[str, list[str]] = {
+        label: [str(arm) for arm in cluster.get("arms") or []]
+        for label, cluster in policy.clusters.items()
+    }
+    return JSONResponse(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "clusters": clusters,
+            "roster_sha256": policy.roster_version,
+        }
+    )
 
 
 @app.post("/route")

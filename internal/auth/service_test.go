@@ -321,7 +321,7 @@ func (r *repoCallCounter) getCallCount() int {
 func TestService_VerifyAPIKey_RejectsTokenWithWrongPrefix(t *testing.T) {
 	svc, apiKeys := makeService(t)
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), "wcckey_irrelevant")
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), "wcckey_irrelevant")
 
 	require.ErrorIs(t, err, auth.ErrInvalidPrefix,
 		"non-rk_ tokens must be rejected with ErrInvalidPrefix")
@@ -332,7 +332,7 @@ func TestService_VerifyAPIKey_RejectsTokenWithWrongPrefix(t *testing.T) {
 func TestService_VerifyAPIKey_RejectsEmptyToken(t *testing.T) {
 	svc, _ := makeService(t)
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), "")
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), "")
 
 	require.ErrorIs(t, err, auth.ErrInvalidPrefix,
 		"empty tokens must be rejected with ErrInvalidPrefix (no prefix)")
@@ -341,7 +341,7 @@ func TestService_VerifyAPIKey_RejectsEmptyToken(t *testing.T) {
 func TestService_VerifyAPIKey_RejectsUnknownToken(t *testing.T) {
 	svc, _ := makeService(t)
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_unknown")
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_unknown")
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken,
 		"a rk_ token whose hash isn't in the repo must return ErrInvalidToken")
@@ -352,7 +352,7 @@ func TestService_VerifyAPIKey_PropagatesNonNotFoundRepoError(t *testing.T) {
 	repoErr := errors.New("postgres connection refused")
 	apiKeys.override = repoErr
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_anything")
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), "rk_anything")
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, auth.ErrInvalidToken,
@@ -385,7 +385,7 @@ func TestService_VerifyAPIKey_HappyPathReturnsInstallationAndKey(t *testing.T) {
 
 	svc, apiKeys := makeService(t, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	gotInstall, gotKey, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	require.NotNil(t, gotInstall)
@@ -437,7 +437,7 @@ func TestService_VerifyAPIKey_RecoversFromMarkUsedPanic(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	require.NotPanics(t, func() {
-		gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+		gotInstall, gotKey, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 		require.NoError(t, err)
 		require.NotNil(t, gotInstall)
 		require.NotNil(t, gotKey)
@@ -489,7 +489,7 @@ func TestService_VerifyAPIKey_CacheHitSkipsRepo(t *testing.T) {
 
 	svc, repo := makeServiceWithCacheAndCounter(t, cache, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	gotInstall, gotKey, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	gotInstall, gotKey, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	assert.Equal(t, "install_cached", gotInstall.ID,
@@ -511,7 +511,7 @@ func TestService_VerifyAPIKey_NegativeCacheHitSkipsRepo(t *testing.T) {
 
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken,
 		"a negative cache hit must return ErrInvalidToken without consulting the DB")
@@ -528,7 +528,7 @@ func TestService_VerifyAPIKey_PopulatesCacheOnSuccessfulMiss(t *testing.T) {
 	cache := newRecordingAPIKeyCache()
 	svc, repo := makeServiceWithCacheAndCounter(t, cache, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, repo.getCallCount(),
@@ -552,7 +552,7 @@ func TestService_VerifyAPIKey_PopulatesNegativeCacheOnNotFound(t *testing.T) {
 	cache := newRecordingAPIKeyCache()
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.ErrorIs(t, err, auth.ErrInvalidToken)
 	assert.Equal(t, 1, repo.getCallCount())
@@ -570,7 +570,7 @@ func TestService_VerifyAPIKey_DoesNotCacheTransportErrors(t *testing.T) {
 	svc, repo := makeServiceWithCacheAndCounter(t, cache)
 	repo.fakeAPIKeyRepository.override = errors.New("postgres connection refused")
 
-	_, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, _, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, auth.ErrInvalidToken,
@@ -619,7 +619,7 @@ func TestService_VerifyAPIKey_WithExternalKeys(t *testing.T) {
 	fakeExternal := &fakeExternalAPIKeyRepo{keys: []*auth.ExternalAPIKey{externalKey}}
 	svc := makeServiceWithExternalKeys(t, fakeExternal, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	_, _, externalKeys, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, externalKeys, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err)
 	require.Len(t, externalKeys, 1,
@@ -645,7 +645,7 @@ func TestService_VerifyAPIKey_ExternalKeyErrorIsNonFatal(t *testing.T) {
 	fakeExternal := &fakeExternalAPIKeyRepo{err: errors.New("external key repo unavailable")}
 	svc := makeServiceWithExternalKeys(t, fakeExternal, fakeKeyRow{apiKey: wantKey, installation: wantInstall})
 
-	gotInstall, gotKey, externalKeys, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	gotInstall, gotKey, externalKeys, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 
 	require.NoError(t, err,
 		"an external key fetch error must not fail authentication")
@@ -693,12 +693,12 @@ func TestService_VerifyAPIKey_ExternalKeysAreCached(t *testing.T) {
 	)
 
 	// First call: populates cache with external keys.
-	_, _, externalKeys1, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, externalKeys1, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 	require.NoError(t, err)
 	require.Len(t, externalKeys1, 1)
 
 	// Second call: should hit the cache — DB must not be called again.
-	_, _, externalKeys2, err := svc.VerifyAPIKey(context.Background(), rawToken)
+	_, _, externalKeys2, _, err := svc.VerifyAPIKey(context.Background(), rawToken)
 	require.NoError(t, err)
 	require.Len(t, externalKeys2, 1,
 		"external keys must be returned on a cache hit")

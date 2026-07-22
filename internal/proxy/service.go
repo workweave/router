@@ -330,6 +330,10 @@ type InstallationPreferredModelsContextKey struct{}
 // routingKnobsForRequest.
 type InstallationRoutingKnobsContextKey struct{}
 
+// ClusterModelListsContextKey is the context key for the authed API key's
+// per-cluster ordered allowlists (map[string][]string). Set by auth middleware.
+type ClusterModelListsContextKey struct{}
+
 // InstallationUsageBypassContextKey is the context key for the authed
 // installation's subscription usage-bypass gate config. Carried as
 // UsageBypassConfig. Absent when the installation hasn't enabled the gate.
@@ -650,6 +654,17 @@ func installationPreferredModelsFromContext(ctx context.Context) []string {
 // env override (priority is a per-installation product knob, not an eval lever).
 func (s *Service) preferredModelsForRequest(ctx context.Context) []string {
 	return installationPreferredModelsFromContext(ctx)
+}
+
+// clusterArmOverridesForRequest returns per-cluster arm overrides from ctx, or
+// nil when none are configured. Only consumed by the HMM sidecar router.
+func clusterArmOverridesForRequest(ctx context.Context) map[string][]string {
+	v := ctx.Value(ClusterModelListsContextKey{})
+	if v == nil {
+		return nil
+	}
+	out, _ := v.(map[string][]string)
+	return out
 }
 
 // contextWindowOutputReserve is the minimum tokens reserved for the model's
@@ -2184,6 +2199,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		SafetyExcludedModels: s.safetyExcludedModels(env, outputReserve),
 		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
+		ClusterArmOverrides:  clusterArmOverridesForRequest(ctx),
 	}
 	if installationID != uuid.Nil {
 		req.InstallationID = installationID.String()
@@ -4290,6 +4306,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		SafetyExcludedModels: s.safetyExcludedModels(env, outputReserveOAI),
 		PreferredModels:      s.preferredModelsForRequest(ctx),
 		RoutingKnobs:         routingKnobsForRequest(ctx),
+		ClusterArmOverrides:  clusterArmOverridesForRequest(ctx),
 	}
 	routeStart := time.Now()
 	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)

@@ -97,6 +97,7 @@ class RouteResult(FrozenModel):
     policy_artifact_id: str
     policy_artifact_sha256: str
     roster_version: str
+    ranked_fallback: tuple[RankedFallback, ...] = ()
     debug: dict[str, Any]
 
 

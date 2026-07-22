@@ -9,6 +9,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type RouterClusterModelList struct {
+	ID             uuid.UUID
+	OrganizationID string
+	APIKeyID       uuid.UUID
+	ClusterLabel   string
+	Models         []string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
 // Cyclic tool-call loop detections: ops signal and (session, looping_model) -> looped training labels
 type RouterLoopEscalationEvent struct {
 	ID             uuid.UUID

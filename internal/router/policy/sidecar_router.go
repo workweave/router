@@ -310,11 +310,44 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		observability.FromContext(ctx).Error("Policy router sidecar decision failed", "strategy", strategy, "err", err)
 		return router.Decision{}, fmt.Errorf("%s: sidecar decide: %w: %w", strategy, err, r.config.Unavailable)
 	}
-	binding, ok := resolved.BindingForSelection(res.ArmID, res.Model)
-	if !ok {
-		return router.Decision{}, fmt.Errorf("%s: sidecar returned unknown arm %q or model %q: %w", strategy, res.ArmID, res.Model, r.config.Unavailable)
+
+	// Per-key cluster allowlist enforcement. Applies whenever the request
+	// carries overrides AND this /route response includes ranked_fallback — the
+	// presence of that data is itself proof the sidecar reports it, so we don't
+	// gate on the boot-time ReportsRankedFallback capability (which can be stale
+	// after a sidecar upgrade with no capability refresh). Older sidecars omit
+	// ranked_fallback entirely → the outer guard is false → fail open, serving
+	// the sidecar's own arm.
+	overrideArmID := res.ArmID
+	overrideRosterID := res.Model
+	overrideReasonSuffix := ""
+	if len(req.ClusterArmOverrides) > 0 && len(res.RankedFallback) > 0 {
+		outcome := ApplyClusterArmOverrides(req.ClusterArmOverrides, res.RankedFallback, resolved, res.Model)
+		if outcome.Applied && outcome.RosterID != "" {
+			// ApplyClusterArmOverrides selects a roster ID. Clear the arm ID so
+			// BindingForSelection resolves via ByRosterID — for arm-enumerating
+			// resolvers armID != rosterID, and passing the roster ID as an arm ID
+			// would miss ByArmID and hard-fail. (On HMM's legacy resolver the two
+			// are equal, so this is also correct there.)
+			overrideArmID = ""
+			overrideRosterID = outcome.RosterID
+			if outcome.Changed {
+				overrideReasonSuffix = ":cluster_override"
+				observability.FromContext(ctx).Info("Cluster allowlist override applied",
+					"strategy", strategy,
+					"group", outcome.Group,
+					"sidecar_arm", res.Model,
+					"override_arm", outcome.RosterID,
+				)
+			}
+		}
 	}
-	if res.Provider != "" && res.Provider != binding.Provider {
+
+	binding, ok := resolved.BindingForSelection(overrideArmID, overrideRosterID)
+	if !ok {
+		return router.Decision{}, fmt.Errorf("%s: sidecar returned unknown arm %q or model %q: %w", strategy, overrideArmID, overrideRosterID, r.config.Unavailable)
+	}
+	if res.Provider != "" && overrideReasonSuffix == "" && res.Provider != binding.Provider {
 		return router.Decision{}, fmt.Errorf("%s: sidecar returned provider %q for %q, expected %q: %w", strategy, res.Provider, res.Model, binding.Provider, r.config.Unavailable)
 	}
 
@@ -336,6 +369,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 	} else if res.Reason != "" {
 		reason += "(" + res.Reason + ")"
 	}
+	reason += overrideReasonSuffix
 
 	observability.FromContext(ctx).Info("Policy router decided",
 		"strategy", strategy,
@@ -343,8 +377,8 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		"route_id", routeID,
 		"model", binding.CatalogID,
 		"provider", binding.Provider,
-		"arm_id", res.ArmID,
-		"roster_model", res.Model,
+		"arm_id", binding.ArmID,
+		"roster_model", overrideRosterID,
 		"score", res.Score,
 	)
 	return router.Decision{
@@ -366,7 +400,7 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 			PolicyArtifactID:              res.PolicyArtifactID,
 			PolicyArtifactSHA256:          res.PolicyArtifactSHA256,
 			RosterVersion:                 res.RosterVersion,
-			SelectedArmID:                 res.ArmID,
+			SelectedArmID:                 binding.ArmID,
 			SidecarSchemaVersion:          res.SchemaVersion,
 			DebugRef:                      debugRef,
 			AuthoritativePerTurnSelection: capabilities.AuthoritativePerTurnSelection,

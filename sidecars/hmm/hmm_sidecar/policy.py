@@ -158,13 +158,20 @@ class FrozenPolicy:
             payload, allow_empty_candidates=False
         )
         by_roster = {candidate.roster_id: candidate for candidate in candidates}
-        selected_label, selected_roster = select_roster_arm(
+        selected_label, selected_roster, ranked_fallback = select_roster_group(
             probabilities=classification.probabilities,
             classes=tuple(self.classifier.classes),
             clusters=self.clusters,
             available_roster_ids=set(by_roster),
         )
-        selected = by_roster[selected_roster]
+        if selected_label is None or not selected_roster:
+            raise ValueError("no candidate is present in the frozen HMM roster")
+        selected_roster_id = (
+            selected_roster[0]
+            if isinstance(selected_roster, tuple)
+            else selected_roster
+        )
+        selected = by_roster[selected_roster_id]
         card = self.state_cards.get(readout.state, {})
         state_label = str(card.get("name") or f"state_{readout.state}")
         candidate_scores = {
@@ -185,7 +192,7 @@ class FrozenPolicy:
             f"classifier group {selected_label!r} "
             f"(p={score:.3f}, margin={margin:.3f}, "
             f"raw_top={classification.label!r}); "
-            f"frozen roster arm {selected_roster!r}"
+            f"frozen roster arm {selected_roster_id!r}"
         )
         return RouteResult(
             route_id=route_id,
@@ -204,6 +211,7 @@ class FrozenPolicy:
             policy_artifact_id=self.artifacts.manifest.model_id,
             policy_artifact_sha256=self.artifacts.package_sha256,
             roster_version=self.roster_version,
+            ranked_fallback=ranked_fallback,
             debug={
                 "hmm_state_id": readout.state,
                 "hmm_state_path": list(readout.state_path),

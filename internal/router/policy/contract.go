@@ -29,6 +29,9 @@ type Capabilities struct {
 	SupportsDebugRouteDetail bool   `json:"supports_debug_route_detail"`
 	SupportsPreview          bool   `json:"supports_preview"`
 	SupportsShadow           bool   `json:"supports_shadow"`
+	// ReportsRankedFallback declares that the sidecar returns ranked_fallback on
+	// the serving /route response. When false, cluster arm overrides fail open.
+	ReportsRankedFallback bool `json:"reports_ranked_fallback"`
 	// AuthoritativePerTurnSelection makes eligible main/tool-result decisions
 	// model-authoritative through dispatch.
 	AuthoritativePerTurnSelection bool `json:"authoritative_per_turn_selection"`
@@ -103,6 +106,10 @@ type Result struct {
 	RosterVersion        string
 	DebugRef             string
 	Debug                map[string]interface{}
+	// RankedFallback is every classifier group in serving fallback order, each
+	// with its full and eligible roster arms. Populated when ReportsRankedFallback;
+	// empty on older sidecars (arm override fails open).
+	RankedFallback []PreviewGroup
 }
 
 // PreviewGroup records one classifier group in serving fallback order.
@@ -132,6 +139,19 @@ type PreviewResult struct {
 	EligibleRosterIDs     []string           `json:"eligible_roster_ids"`
 	ResolverCandidates    []Candidate        `json:"resolver_candidates"`
 	ResolverExclusions    []Diagnostic       `json:"resolver_exclusions"`
+}
+
+// RosterSnapshot is the frozen artifact's per-cluster arm roster: a map from
+// classifier cluster label to the ordered roster arm IDs, plus the roster's
+// content hash. Used to seed the UI's default arm order.
+type RosterSnapshot struct {
+	Clusters     map[string][]string `json:"clusters"`
+	RosterSHA256 string              `json:"roster_sha256"`
+}
+
+// RosterSource returns the sidecar's frozen per-cluster arm roster.
+type RosterSource interface {
+	Roster(ctx context.Context) (RosterSnapshot, error)
 }
 
 // Decider asks a policy sidecar to choose one supplied candidate.

@@ -17,6 +17,7 @@ import (
 	"workweave/router/internal/billing"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
+	"workweave/router/internal/router/policy"
 	"workweave/router/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,11 @@ const (
 // leaves inference routes open (BYOK/platform key still controls upstream auth).
 //
 // readinessChecker gates /readyz only; /health remains process liveness.
-func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker) {
+//
+// hmmRosterSource, when non-nil, mounts GET /v1/router/hmm-roster so the Weave
+// control plane can read the frozen per-cluster arm roster for the cluster
+// allowlist UI. Nil (no HMM sidecar wired) leaves the endpoint unmounted.
+func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker, hmmRosterSource policy.RosterSource) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
 	byokDisabled := mode == DeploymentModeManaged
@@ -99,6 +104,13 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		if dist, ok := deployedModels.(admin.RoutingDistributionSource); ok {
 			engine.GET("/v1/router/routing-distribution", middleware.WithTimeout(healthTimeout), admin.RoutingDistributionHandler(dist))
 		}
+	}
+
+	// /v1/router/hmm-roster exposes the frozen per-cluster arm roster (mapped to
+	// catalog model IDs) so the control plane can render the cluster allowlist
+	// UI's default order. Same unauthed rationale as /v1/router/models.
+	if hmmRosterSource != nil {
+		engine.GET("/v1/router/hmm-roster", middleware.WithTimeout(readinessTimeout), admin.HMMRosterHandler(hmmRosterSource))
 	}
 
 	// /validate is a token-validity probe used by clients (not the dashboard), so it stays mounted in both modes.

@@ -167,6 +167,10 @@ type Request struct {
 	// at full catalog so Haiku↔Opus spread is preserved); the planner instead
 	// treats it as a literal cost multiplier for dollar-EV cache-switch math.
 	SubsidizedModelCostFactor map[string]float64
+	// ClusterArmOverrides is the per-API-key HMM cluster allowlist: cluster label
+	// → ordered catalog model IDs (index 0 = highest priority). Absent clusters
+	// keep the artifact default. Nil means no override.
+	ClusterArmOverrides map[string][]string
 }
 
 type ConversationMessage struct {

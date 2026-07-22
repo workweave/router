@@ -399,6 +399,132 @@ func TestSidecarRouterCapabilitiesCanRefreshAfterStartup(t *testing.T) {
 	assert.True(t, adapter.CurrentCapabilities().SupportsShadow)
 }
 
+// clusterOverrideMapper mirrors the HMM roster aliasing closely enough for the
+// override path: anthropic models map to "anthropic/<id>".
+func clusterOverrideMapper(model catalog.Model) string { return "anthropic/" + model.ID }
+
+func TestSidecarRouterAppliesClusterArmOverride(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8", "claude-sonnet-5"),
+		set(providers.ProviderAnthropic),
+		clusterOverrideMapper,
+		policy.ManagedProviderPolicy(),
+	)
+	// Sidecar classifies into "maximum" and would serve opus first.
+	decider := &recordingPolicy{result: policy.Result{
+		SchemaVersion: policy.SchemaVersionV1,
+		Model:         "anthropic/claude-opus-4-8",
+		Provider:      providers.ProviderAnthropic,
+		Score:         0.8,
+		PolicyGroup:   "maximum",
+		RankedFallback: []policy.PreviewGroup{{
+			Group:        "maximum",
+			Probability:  0.8,
+			RosterArms:   []string{"anthropic/claude-opus-4-8", "anthropic/claude-sonnet-5"},
+			EligibleArms: []string{"anthropic/claude-opus-4-8", "anthropic/claude-sonnet-5"},
+		}},
+	}}
+	// Capability flag is deliberately false: the presence of ranked_fallback in
+	// the /route response must be enough to enforce overrides, so a stale
+	// boot-time capability (older sidecar, no refresh) can't block them.
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.StrategyHMM,
+	}, decider, resolver).WithCapabilities(policy.Capabilities{
+		SchemaVersion:         policy.SchemaVersionV1,
+		ReportsRankedFallback: false,
+	})
+
+	// The key reorders the maximum cluster so sonnet-5 wins over opus.
+	decision, err := adapter.Route(context.Background(), router.Request{
+		ClusterArmOverrides: map[string][]string{
+			"maximum": {"claude-sonnet-5", "claude-opus-4-8"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "claude-sonnet-5", decision.Model,
+		"override order must decide the served model, not the sidecar's first arm")
+	assert.Equal(t, providers.ProviderAnthropic, decision.Provider)
+	assert.Contains(t, decision.Reason, "cluster_override",
+		"an override that changes the pick must annotate the reason")
+}
+
+func TestSidecarRouterClusterOverrideResolvesArmEnumeratingBinding(t *testing.T) {
+	// Arm-enumerating resolver: arm IDs differ from roster IDs. The override
+	// selects a roster ID, so binding resolution must go through ByRosterID —
+	// passing the roster ID as an arm ID would miss ByArmID and hard-fail.
+	resolver := policy.NewArmResolver(
+		set("claude-opus-4-8", "claude-sonnet-5"),
+		set(providers.ProviderAnthropic),
+		clusterOverrideMapper,
+		policy.ManagedProviderPolicy(),
+	)
+	resolved := resolver.Resolve(router.Request{})
+	require.NotEmpty(t, resolved.Candidates)
+	// Confirm the premise: arm IDs are not equal to roster IDs on this resolver.
+	require.NotEqual(t, resolved.Candidates[0].ArmID, resolved.Candidates[0].RosterID)
+
+	decider := &recordingPolicy{result: policy.Result{
+		SchemaVersion: policy.SchemaVersionV2,
+		ArmID:         resolved.Candidates[0].ArmID,
+		Model:         resolved.Candidates[0].RosterID,
+		Provider:      providers.ProviderAnthropic,
+		Score:         0.8,
+		RankedFallback: []policy.PreviewGroup{{
+			Group:        "maximum",
+			Probability:  0.8,
+			RosterArms:   []string{"anthropic/claude-opus-4-8", "anthropic/claude-sonnet-5"},
+			EligibleArms: []string{"anthropic/claude-opus-4-8", "anthropic/claude-sonnet-5"},
+		}},
+	}}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.StrategyHMM,
+	}, decider, resolver)
+
+	decision, err := adapter.Route(context.Background(), router.Request{
+		ClusterArmOverrides: map[string][]string{
+			"maximum": {"claude-sonnet-5", "claude-opus-4-8"},
+		},
+	})
+
+	require.NoError(t, err, "override must resolve via ByRosterID on an arm-enumerating resolver")
+	assert.Equal(t, "claude-sonnet-5", decision.Model)
+	assert.Equal(t, providers.ProviderAnthropic, decision.Provider)
+}
+
+func TestSidecarRouterClusterOverrideFailsOpenWithoutRankedFallback(t *testing.T) {
+	resolver := policy.NewResolver(
+		set("claude-opus-4-8", "claude-sonnet-5"),
+		set(providers.ProviderAnthropic),
+		clusterOverrideMapper,
+		policy.ManagedProviderPolicy(),
+	)
+	// Old sidecar: no ranked fallback in the result, capability off.
+	decider := &recordingPolicy{result: policy.Result{
+		SchemaVersion: policy.SchemaVersionV1,
+		Model:         "anthropic/claude-opus-4-8",
+		Provider:      providers.ProviderAnthropic,
+		Score:         0.8,
+	}}
+	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
+		Strategy: router.StrategyHMM,
+	}, decider, resolver).WithCapabilities(policy.Capabilities{
+		SchemaVersion:         policy.SchemaVersionV1,
+		ReportsRankedFallback: false,
+	})
+
+	decision, err := adapter.Route(context.Background(), router.Request{
+		ClusterArmOverrides: map[string][]string{
+			"maximum": {"claude-sonnet-5"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-8", decision.Model,
+		"an old sidecar without ranked fallback must serve its own selection unchanged")
+	assert.NotContains(t, decision.Reason, "cluster_override")
+}
+
 func TestSidecarRouterCapabilityRefreshIsConcurrentSafe(t *testing.T) {
 	adapter := policy.NewSidecarRouter(policy.SidecarRouterConfig{
 		Strategy: router.Strategy("future-policy"),

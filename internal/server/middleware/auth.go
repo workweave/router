@@ -89,7 +89,7 @@ func WithAdminOnly(svc *auth.Service) gin.HandlerFunc {
 func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
-		installation, apiKey, externalKeys, err := svc.VerifyAPIKey(c.Request.Context(), token)
+		installation, apiKey, externalKeys, clusterModelLists, err := svc.VerifyAPIKey(c.Request.Context(), token)
 		if err != nil {
 			handleAuthError(c, err)
 			return
@@ -150,6 +150,18 @@ func withAPIKey(svc *auth.Service, byokDisabled bool) gin.HandlerFunc {
 		}
 		if externalKeys != nil && !byokDisabled {
 			ctx = context.WithValue(ctx, proxy.ExternalAPIKeysContextKey{}, externalKeys)
+		}
+		if len(clusterModelLists) > 0 {
+			overrides := make(map[string][]string, len(clusterModelLists))
+			for _, list := range clusterModelLists {
+				if len(list.Models) == 0 {
+					continue
+				}
+				overrides[list.ClusterLabel] = list.Models
+			}
+			if len(overrides) > 0 {
+				ctx = context.WithValue(ctx, proxy.ClusterModelListsContextKey{}, overrides)
+			}
 		}
 		if installation != nil && installation.ID != "" {
 			ctx = context.WithValue(ctx, proxy.InstallationIDContextKey{}, installation.ID)

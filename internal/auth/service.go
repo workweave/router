@@ -35,15 +35,16 @@ func (NoOpInstallationChangeNotifier) NotifyInstallationChanged(string) {}
 
 // Service authenticates incoming bearer tokens. Identity only; routing/dispatch lives in proxy.Service.
 type Service struct {
-	installations InstallationRepository
-	apiKeys       APIKeyRepository
-	externalKeys  ExternalAPIKeyRepository
-	users         UserRepository
-	cache         APIKeyCache
-	userCache     UserCache
-	notifier      InstallationChangeNotifier
-	now           Clock
-	encryptor     Encryptor
+	installations     InstallationRepository
+	apiKeys           APIKeyRepository
+	externalKeys      ExternalAPIKeyRepository
+	users             UserRepository
+	clusterModelLists ClusterModelListRepository
+	cache             APIKeyCache
+	userCache         UserCache
+	notifier          InstallationChangeNotifier
+	now               Clock
+	encryptor         Encryptor
 
 	// adminPassword and adminSessionKey are empty when admin login is disabled.
 	adminPassword   string
@@ -81,6 +82,14 @@ func NewService(
 
 func (s *Service) WithEncryptor(e Encryptor) *Service {
 	s.encryptor = e
+	return s
+}
+
+// WithClusterModelLists wires the per-key per-cluster allowlist repo. When
+// unset, VerifyAPIKey returns no cluster lists and routing keeps artifact
+// defaults. Kept off NewService so existing callers/tests stay source-stable.
+func (s *Service) WithClusterModelLists(repo ClusterModelListRepository) *Service {
+	s.clusterModelLists = repo
 	return s
 }
 
@@ -301,21 +310,23 @@ func (s *Service) SetInstallationSubscriptionRoutingDisabled(ctx context.Context
 
 // VerifyAPIKey authenticates a raw bearer token against the cache then Postgres,
 // returning ErrInvalidPrefix/ErrInvalidToken on failure. The returned
-// ExternalAPIKey slice has Plaintext populated, or nil if none exist.
-func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, error) {
+// ExternalAPIKey slice has Plaintext populated, or nil if none exist. The
+// ClusterModelList slice carries the key's per-cluster ordered allowlists, or
+// nil when none are configured.
+func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installation, *APIKey, []*ExternalAPIKey, []ClusterModelList, error) {
 	if !HasAPIKeyPrefix(rawToken) {
-		return nil, nil, nil, ErrInvalidPrefix
+		return nil, nil, nil, nil, ErrInvalidPrefix
 	}
 
 	keyHash := HashAPIKeySHA256(rawToken)
 
 	if cached, ok := s.cache.Get(keyHash); ok {
 		if cached.Negative {
-			return nil, nil, nil, ErrInvalidToken
+			return nil, nil, nil, nil, ErrInvalidToken
 		}
 		if cached.APIKey != nil {
 			s.fireMarkUsed(cached.APIKey.ID)
-			return cached.Installation, cached.APIKey, cached.ExternalKeys, nil
+			return cached.Installation, cached.APIKey, cached.ExternalKeys, cached.ClusterModelLists, nil
 		}
 		// Malformed positive entry (nil APIKey): fall through to DB lookup.
 	}
@@ -324,9 +335,9 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.cache.Set(keyHash, CachedKey{Negative: true})
-			return nil, nil, nil, ErrInvalidToken
+			return nil, nil, nil, nil, ErrInvalidToken
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	var externalKeys []*ExternalAPIKey
@@ -338,9 +349,19 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 		}
 	}
 
-	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys})
+	var clusterModelLists []ClusterModelList
+	if s.clusterModelLists != nil {
+		clusterModelLists, err = s.clusterModelLists.GetForAPIKey(ctx, apiKey.ID)
+		if err != nil {
+			// Non-fatal: proceed with artifact-default routing.
+			observability.Get().Warn("Failed to fetch cluster model lists", "api_key_id", apiKey.ID, "err", err)
+			clusterModelLists = nil
+		}
+	}
+
+	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys, ClusterModelLists: clusterModelLists})
 	s.fireMarkUsed(apiKey.ID)
-	return installation, apiKey, externalKeys, nil
+	return installation, apiKey, externalKeys, clusterModelLists, nil
 }
 
 // ResolveAndStashUser upserts a router user and stashes the ID on ctx. Email
