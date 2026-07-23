@@ -57,9 +57,8 @@ func isClaudeCodeOnlyTool(name string) bool {
 }
 
 // claudeCodeOrchestrationToolNames is the subset of claudeCodeOnlyToolNames
-// whose tools a capable non-Anthropic model can act on (subagent dispatch,
-// workflow runs, skill invocation, plan-mode toggles). Must stay a strict
-// subset of claudeCodeOnlyToolNames — see TestOrchestrationToolsAreSubsetOfCCOnly.
+// a capable non-Anthropic model can act on. Must stay a strict subset of
+// claudeCodeOnlyToolNames — see TestOrchestrationToolsAreSubsetOfCCOnly.
 var claudeCodeOrchestrationToolNames = map[string]struct{}{
 	"Task":          {},
 	"TaskCreate":    {},
