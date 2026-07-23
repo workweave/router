@@ -42,7 +42,7 @@ func TestCaching(t *testing.T) {
 	// The router must NOT inject a 5th and 400. Pre-#821 the tools[] breakpoints
 	// were undercounted and this over-injected. Assert a clean 200.
 	t.Run("client at capacity does not over-inject", func(t *testing.T) {
-		// 2 extra cached tools + toolCache on the last tool + sysCache = 4 total
+		// 2 extra cached tools + toolCache on the Edit tool + sysCache = 4 total
 		// explicit breakpoints, exactly at capacity.
 		body := newRequest("smoke-cache-capacity").tokens(32).
 			cachedTools(2).toolCache("5m").sysCache("5m").

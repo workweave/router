@@ -105,7 +105,10 @@ func (s *store) save(key string, c *cassette) error {
 // request-id headers are dropped too: they're real per-call values that would
 // make every recording look suspicious in a diff, and nothing in the smoke
 // suite reads them back (only the router's own x-router-* response headers
-// are asserted on, never anything replayed from a cassette).
+// are asserted on, never anything replayed from a cassette). Covers both
+// Anthropic and OpenAI response header dialects — the smoke suite records
+// both providers (smoke/openai_test.go), and each has its own org-id and
+// rate-limit header names.
 func sanitizeHeaders(h http.Header) map[string]string {
 	drop := map[string]struct{}{
 		"authorization":                          {},
@@ -128,6 +131,19 @@ func sanitizeHeaders(h http.Header) map[string]string {
 		"anthropic-ratelimit-tokens-limit":            {},
 		"anthropic-ratelimit-tokens-remaining":        {},
 		"anthropic-ratelimit-tokens-reset":            {},
+		// OpenAI's own org identifier + request-id + rate-limit headers.
+		"openai-organization":                  {},
+		"openai-processing-ms":                 {},
+		"x-request-id":                         {},
+		"x-ratelimit-limit-requests":           {},
+		"x-ratelimit-remaining-requests":       {},
+		"x-ratelimit-reset-requests":           {},
+		"x-ratelimit-limit-tokens":             {},
+		"x-ratelimit-remaining-tokens":         {},
+		"x-ratelimit-reset-tokens":             {},
+		"x-ratelimit-limit-project-tokens":     {},
+		"x-ratelimit-remaining-project-tokens": {},
+		"x-ratelimit-reset-project-tokens":     {},
 	}
 	out := make(map[string]string, len(h))
 	for k, v := range h {
