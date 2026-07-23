@@ -99,6 +99,10 @@ var forceModelAliases = map[string]string{
 	"minimax-m3":   "minimax/minimax-m3",
 	"minimax-m2.7": "minimax/minimax-m2.7",
 	"mistral":      "mistralai/mistral-small-2603",
+	"meta":         "muse-spark-1.1",
+	"muse":         "muse-spark-1.1",
+	"muse-spark":   "muse-spark-1.1",
+	"musespark":    "muse-spark-1.1",
 }
 
 // resolveForceModel is the legacy two-return surface. New pin-and-effort

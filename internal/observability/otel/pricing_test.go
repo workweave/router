@@ -36,6 +36,9 @@ func TestLookup(t *testing.T) {
 		// ── xAI Grok ───────────────────────────────────────────
 		{name: "grok-4.5", model: "grok-4.5", wantInput: 2.00, wantOutput: 6.00},
 
+		// ── Meta ───────────────────────────────────────────────
+		{name: "muse-spark-1.1", model: "muse-spark-1.1", wantInput: 1.25, wantOutput: 4.25},
+
 		// ── OpenAI GPT-5.4 ─────────────────────────────────────
 		{name: "gpt-5.4", model: "gpt-5.4", wantInput: 2.50, wantOutput: 15.00},
 		{name: "gpt-5.4-pro", model: "gpt-5.4-pro", wantInput: 30.00, wantOutput: 180.00},

@@ -34,6 +34,11 @@ const (
 	TogetherBaseURL = "https://api.together.xyz/v1"
 	// XAIBaseURL is SpaceXAI's OpenAI-compatible Chat Completions surface.
 	XAIBaseURL = "https://api.x.ai/v1"
+	// MetaBaseURL is Meta Superintelligence Labs' Model API — first-party
+	// upstream for muse-spark-1.1, in public preview (US-only) since
+	// 2026-07-09. OpenAI-compatible Chat Completions surface; model IDs match
+	// the router's public slug so no modelIDMap rewrite is needed.
+	MetaBaseURL = "https://api.meta.ai/v1"
 )
 
 // BedrockMantleBaseURLTemplate is the OpenAI-compatible bedrock-mantle endpoint

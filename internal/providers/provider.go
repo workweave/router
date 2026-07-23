@@ -55,6 +55,7 @@ const (
 	ProviderMakora     = "makora"
 	ProviderTogether   = "together"
 	ProviderXAI        = "xai"
+	ProviderMeta       = "meta"
 )
 
 // TranslationFamily is the wire-format family a provider speaks; the proxy
@@ -89,6 +90,7 @@ var ProviderFamilies = map[string]TranslationFamily{
 	ProviderMakora:     FamilyOpenAICompat,
 	ProviderTogether:   FamilyOpenAICompat,
 	ProviderXAI:        FamilyOpenAICompat,
+	ProviderMeta:       FamilyOpenAICompat,
 }
 
 // FamilyFor returns the translation family for a provider, or FamilyUnknown
@@ -143,6 +145,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderMakora:     "MAKORA_API_KEY",
 	ProviderTogether:   "TOGETHER_API_KEY",
 	ProviderXAI:        "XAI_API_KEY",
+	ProviderMeta:       "META_API_KEY",
 }
 
 // APIKeyEnvVar returns the env-var name for the given provider, or empty

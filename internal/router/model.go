@@ -167,6 +167,14 @@ var registry = map[string]ModelSpec{
 	// rejects stop / presence / frequency penalties (CapReasoning strips stop).
 	"grok-4.5": openaiReasoning,
 
+	// muse-spark-1.1: OpenAI-compat reasoning_effort, mandatory (cannot
+	// disable), supports minimal/low/medium/high/xhigh upstream — but neither
+	// tier is in router.ReasoningCapabilities.Levels' ordered vocabulary yet,
+	// so it shares openaiReasoning's low/medium/high; a request for xhigh or
+	// minimal clamps to the nearest of those (nearestReasoningLevel) rather
+	// than 400ing.
+	"muse-spark-1.1": openaiReasoning,
+
 	"gpt-5.4":      openaiReasoning,
 	"gpt-5.4-pro":  openaiReasoning,
 	"gpt-5.4-mini": openaiReasoning,

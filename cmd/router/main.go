@@ -278,6 +278,17 @@ func main() {
 	}
 
 	{
+		// Meta Model API (muse-spark-1.1) — first-party, public preview since
+		// 2026-07-09. Model ID matches our public slug 1:1, so no modelIDMap.
+		metaBaseURL := config.GetOr("META_BASE_URL", openaiCompatProvider.MetaBaseURL)
+		registerDeploymentKeyedProvider(providerMap, envKeyedProviders, logger,
+			providers.ProviderMeta, "Meta", "META_API_KEY", metaBaseURL, byokOnly,
+			func(key, baseURL string) providers.Client {
+				return openaiCompatProvider.NewClient(key, baseURL)
+			})
+	}
+
+	{
 		// "bedrock-mantle" OpenAI-compatible surface (AWS-recommended over
 		// bedrock-runtime/InvokeModel). Auth is a static Bedrock API key
 		// (AWS_BEARER_TOKEN_BEDROCK), not SigV4, so the standard bearer flow
@@ -1451,8 +1462,8 @@ func envVarHint(provider string) string {
 // key (respecting byokOnly), constructs its client via newClient, registers
 // it in providerMap, and logs its BYOK/keyed/passthrough state. Shared by the
 // providers whose registration collapses to "resolve key -> build client ->
-// three-way log switch" (Fireworks, Makora, Together, Bedrock, Google);
-// OpenRouter and Anthropic/OpenAI have genuinely different gating
+// three-way log switch" (Fireworks, Makora, Together, XAI, Bedrock, Meta,
+// Google); OpenRouter and Anthropic/OpenAI have genuinely different gating
 // logic and stay bespoke. extraLogAttrs are appended only to the
 // deployment-keyed log line (e.g. Bedrock's region).
 func registerDeploymentKeyedProvider(
