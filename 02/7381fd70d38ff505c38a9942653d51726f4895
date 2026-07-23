@@ -1,0 +1,37 @@
+internal/proxy/usage_bypass_internal_test.go
+  s_59e1ca6b60b3f5::t_8ef5d315a313f4 16,77-104
+  s_59e1ca6b60b3f5::t_4466b08c75a8c8 105-106
+internal/proxy/service.go
+  s_59e1ca6b60b3f5::t_8011a159ff0244 2117-2120,2128-2131,2136
+internal/proxy/AGENTS.md
+  s_59e1ca6b60b3f5::t_b8e47089105851 36
+internal/proxy/turnloop.go
+  s_59e1ca6b60b3f5::t_aa7cfb03ea023c 213-221,289
+internal/proxy/usage/CLAUDE.md
+  s_59e1ca6b60b3f5::t_b8e47089105851 19
+internal/proxy/usage/AGENTS.md
+  s_59e1ca6b60b3f5::t_b8e47089105851 19
+internal/proxy/CLAUDE.md
+  s_59e1ca6b60b3f5::t_b8e47089105851 36
+internal/proxy/usage_bypass.go
+  s_59e1ca6b60b3f5::t_aa7cfb03ea023c 21-26,28-29,33,40-41,45-50,58,61,64-74,76-80,83-84,88,90-91,97,99,101-104,106,109
+  s_59e1ca6b60b3f5::t_17b872a2e6e4e9 9,75
+internal/proxy/usage_bypass_test.go
+  s_59e1ca6b60b3f5::t_949c6ebdf7ff33 111-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "027381fd70d38ff505c38a9942653d51726f4895",
+  "prompts": {},
+  "sessions": {
+    "s_59e1ca6b60b3f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5f02-9c2d-7912-948d-e0085b87d7ef",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

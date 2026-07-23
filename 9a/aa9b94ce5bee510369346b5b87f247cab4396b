@@ -1,0 +1,121 @@
+internal/auth/user.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 17,21,28-29,44
+internal/translate/gemini_response.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 12,37,56-57,142-144,204
+internal/router/sessionpin/store.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 2-3,13-14,24-27,46,55-57
+internal/auth/external_api_key.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 38
+internal/providers/openaicompat/client.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1,43,111,167
+internal/translate/emit_openai.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16
+internal/proxy/turnloop.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 38,47-49,52-56,58,60,62-63,65,77-79,81-82,101-106,148,181,191,226-230,232-234,276-278,293-296,299-300,323,329-332,356-358,381-382,403
+internal/router/cluster/scorer.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 15-16,20,49,55,63-64,129-130,227,246,295
+internal/providers/openai/client.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 80
+internal/router/model.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 37-38,72-74,119-120
+internal/translate/handover.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16-18,35-36,56,67,98-99,110-111,142-143,201-202,253
+internal/proxy/handover.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 25-26,30,33,37-38,43-45,53-54,80,83-85,147-148,181,196-197
+internal/proxy/service.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 37-39,44,46-47,52,56-59,61-62,66-67,70,73-74,76,78-79,81-82,84-86,88-89,93-94,106-107,113,120-121,138,150-151,163,177,210-211,227,237-239,242-243,246-247,282-284,294-295,301-302,308-310,324-326,332-333,339,345-346,357,364,378,383,397,402-404,682,926,932,950,965-966,995-1002,1070-1071,1080,1088,1119-1124,1146-1152,1167-1168,1174-1177,1189-1192,1232,1264-1267
+internal/auth/apikey_cache.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 10,18-19,26,33-36,42-44,113-114,129-130
+internal/auth/crypto.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 13-14,47,52
+internal/auth/errors.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 5-6,11
+internal/auth/installation.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1,18-19,34-35
+internal/router/cluster/artifacts.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 19-23,30,34,37,42,46,56-57,77,105-106,119,125-126,307-308,313,346-347
+internal/translate/emit_gemini.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16-18,20,199,232,245,255,413-414,462-463,620-621,670-671,704-705,714-715,729,747-748
+internal/providers/google/client.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1,20,72
+internal/providers/google/native_client.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 21,25,32,44,113,173
+internal/router/cluster/embedder.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 2-3,5,10
+internal/router/pricing/pricing.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 2-3,13-14,18-20,24,83,89,98-99,112
+internal/proxy/telemetry.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 22,54-55,87-88
+internal/router/cluster/multiversion.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 64,91,96-97
+internal/router/handover/summarizer.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 2-5,7-9,18-19,21-22,27-29,31,39-41
+internal/router/cluster/embedder_onnx.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 17,21-23,26,28-29,42,59-60,74,88
+internal/proxy/observation.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 11,17-18,22-23,42-43,56
+internal/proxy/cache_writer.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 8-10,53
+internal/router/planner/policy.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 3-4,6,8-9,11-14,28-29,32,43-44,47,49-50,54,73,83-84,91,103-104,131
+internal/translate/features_gemini.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 10-11,60,111,176
+internal/providers/anthropic/client.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 39
+internal/router/router.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 10-11,13-14,22,26-27,29-31
+internal/providers/provider.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1,22,37,49,78-79,88,95,98
+internal/translate/translate.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1-3,13,110,152-153,229,256,274
+internal/router/cache/cache.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1-4,18,22,29-31,41,49,107,119,135,147,156-157,173-174,189-190
+internal/auth/service.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16,21-22,27,45,49,84,104,129-131,154,164,166,203-204,233-235,277-280
+internal/proxy/turnloop_internal_test.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16,46-49,52,72,106-108,130-132,151-152
+internal/translate/gemini_stream.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16-18,35-36,92,263-265,310-311
+internal/translate/stream.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 17-18,31,55,61,80,90,339,342,357-359,362,381,387-388,400,438-439,716-718,770-771
+internal/translate/thought_signature_id.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 8-12,14,17,25
+internal/auth/admin.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 18,21,30,43,49,56-57,63-64,83,88,99,122-123,146-147,161,181
+internal/auth/user_cache.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 11,17
+internal/proxy/client_identity.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 13,26,32-35,62-63,71-72,84,87-88,91-93,101-105
+internal/proxy/session_key.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 10-13,17
+internal/router/capability/tier.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 1-4,18,38,77-78,108-110
+internal/router/turntype/detect.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 16-17,19,21-22,24-25,27-28,34-36,43,52,79-83,85-86,101-105,122-126,128-130,132-133
+internal/translate/emit_anthropic.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 15,285,309-310
+internal/translate/envelope.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 17-19,40,42,83,95-96,110,129,137,181-183,206-207,298,363-364,377-378,382-383
+internal/translate/provider_hint.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 5-8,27-29
+internal/translate/billing_header.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 5-6
+internal/translate/features.go
+  s_2ca575863b93ba::t_e20f7fb5f9e52d 18-19,21,23,25,30,131-132,144-145,153,165,228-229,378-379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9aaa9b94ce5bee510369346b5b87f247cab4396b",
+  "prompts": {},
+  "sessions": {
+    "s_2ca575863b93ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af44a648-2b59-4fd9-b14e-bf134894c74f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

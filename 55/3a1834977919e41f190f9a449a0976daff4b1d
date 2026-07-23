@@ -1,0 +1,80 @@
+internal/proxy/turnloop_test.go
+  s_b6ea7217b3c1e9::t_d366066b8a0a5c 1080-1083
+db/queries/router_feedback.sql
+  s_b6ea7217b3c1e9::t_b55dc02217b21d 5-6,17-19,29-31
+internal/translate/router_feedback.go
+  s_b6ea7217b3c1e9::t_93e2ae79da5487 236-257,259-269,271-291
+  s_b6ea7217b3c1e9::t_3f672cd68959b1 133
+  s_b6ea7217b3c1e9::t_1dc1a029c3e003 270
+  s_b6ea7217b3c1e9::t_87eb2e0d97e4d2 258
+  s_b6ea7217b3c1e9::t_a05b64f14e6d74 18-22
+  s_b6ea7217b3c1e9::t_762f983c2a04fb 124-127
+internal/proxy/fire_telemetry_panic_internal_test.go
+  s_b6ea7217b3c1e9::t_0ef8209e374fc4 13
+  s_b6ea7217b3c1e9::t_a0b4746365f972 57-60
+internal/proxy/service_observation_test.go
+  s_b6ea7217b3c1e9::t_7ae41a15586d6f 100-107
+  s_b6ea7217b3c1e9::t_bb21f0818d4b18 32-36
+  s_b6ea7217b3c1e9::t_35c5f5ec26b767 108-109
+internal/proxy/service_session_pin_test.go
+  s_b6ea7217b3c1e9::t_aad6c60a714738 155-169
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_b6ea7217b3c1e9::t_6a1e99fbcdaacf 74-216
+internal/proxy/telemetry.go
+  s_b6ea7217b3c1e9::t_e6f1fdaef4c3d3 6-7
+  s_b6ea7217b3c1e9::t_9351b097cb6243 182-192
+  s_b6ea7217b3c1e9::t_76a6c85b7cca03 24
+internal/postgres/telemetry.go
+  s_b6ea7217b3c1e9::t_7eb8e379a7d635 207,216-232
+  s_b6ea7217b3c1e9::t_d7f23fbb88c71b 196-197,201-206,208-215,233-241
+  s_5cb80359447816::t_204fe395cfe377 242-243
+internal/sqlc/models.go
+  s_b6ea7217b3c1e9::t_6a1e99fbcdaacf 386-389
+db/queries/model_router_request_telemetry.sql
+  s_b6ea7217b3c1e9::t_2f607f043a66f1 484,504
+  s_b6ea7217b3c1e9::t_9f0b0a2a1ed79c 466-483,485-503
+internal/translate/router_feedback_test.go
+  s_b6ea7217b3c1e9::t_c8ef5542a7f21a 19
+  s_b6ea7217b3c1e9::t_a2a58621d8a739 154-213
+  s_b6ea7217b3c1e9::t_76c0ce0d3b63d1 228
+internal/proxy/router_feedback_proxy_test.go
+  s_b6ea7217b3c1e9::t_f2336c68e7d3fc 464-469,471-496,498-511,513-560
+  s_b6ea7217b3c1e9::t_33279e06989cfb 7
+  s_b6ea7217b3c1e9::t_cc304831e74c6f 470,497
+  s_b6ea7217b3c1e9::t_7fe230271d1714 512
+db/migrations/0040_router-feedback-request-id.up.sql
+  s_b6ea7217b3c1e9::t_1babf4529722fb 1-12
+internal/sqlc/router_feedback.sql.go
+  s_b6ea7217b3c1e9::t_6a1e99fbcdaacf 25-27,37-39,53-54,61-62,73-75,85-87,100-101
+db/migrations/0040_router-feedback-request-id.down.sql
+  s_b6ea7217b3c1e9::t_8a5fae85f17ba8 1-3
+internal/proxy/router_feedback.go
+  s_b6ea7217b3c1e9::t_c306c78692c984 176,187
+  s_b6ea7217b3c1e9::t_78d4be1e1e0094 84-87,89-115,138-139,146-164,172,177-186,188-194,199,209-211
+  s_b6ea7217b3c1e9::t_e5a682bd336450 232-233,246-247
+  s_b6ea7217b3c1e9::t_ea09f5413f3dc5 50-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "553a1834977919e41f190f9a449a0976daff4b1d",
+  "prompts": {},
+  "sessions": {
+    "s_5cb80359447816": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83053aa7-7aba-4301-a845-a9fd1ce2005c",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

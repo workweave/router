@@ -1,0 +1,19 @@
+internal/translate/router_feedback_test.go
+  s_822a04e3969173::t_8f887481b2971c 15-17,19-21,155-157,159-160,163-165,167-168,171-173,175-176,179-184,187-189,191-192,195-197,199-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8037124dc44f4cf2bf8def02c7dd232a31f20709",
+  "prompts": {},
+  "sessions": {
+    "s_822a04e3969173": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8af687f-7198-40ff-8f1e-d272ebf132eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

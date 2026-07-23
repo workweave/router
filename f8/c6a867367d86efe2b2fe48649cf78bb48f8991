@@ -1,0 +1,22 @@
+internal/server/server.go
+  s_d7c5c5bbb49c18::t_6923abb75d0336 36-38
+cmd/router/hmm_roster_source.go
+  s_d7c5c5bbb49c18::t_8f6924600ed4e1 44-47,81-88
+  s_d7c5c5bbb49c18::t_0ddef73479717b 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f8c6a867367d86efe2b2fe48649cf78bb48f8991",
+  "prompts": {},
+  "sessions": {
+    "s_d7c5c5bbb49c18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15055bfd-f65a-4383-bf0e-cde54b4807c5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

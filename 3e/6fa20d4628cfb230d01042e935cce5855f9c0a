@@ -1,0 +1,28 @@
+internal/proxy/service.go
+  s_14149f8f972376::t_6a4971e13b0db6 4321,4333,4341,4358,4376,4402,4404,4446
+internal/observability/apm/translation_metrics.go
+  s_14149f8f972376::t_6a4971e13b0db6 33
+internal/proxy/translation_plan.go
+  s_14149f8f972376::t_6a4971e13b0db6 113-115
+internal/translate/responses.go
+  s_14149f8f972376::t_6a4971e13b0db6 63-65
+internal/proxy/service_test.go
+  s_14149f8f972376::t_6a4971e13b0db6 80-82,84-104
+  s_14149f8f972376::t_216176cdc393fd 83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3e6fa20d4628cfb230d01042e935cce5855f9c0a",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

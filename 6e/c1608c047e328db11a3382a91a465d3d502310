@@ -1,0 +1,116 @@
+internal/api/anthropic/route.go
+  s_f7f2fc8a22ebd8::t_b64e7a2e778a39 10,12,56-98
+  s_f7f2fc8a22ebd8::t_51c509d43eab3b 99-100
+internal/router/policy/sidecar_router.go
+  s_f7f2fc8a22ebd8::t_69f873c7e2a05b 94-142,146-165,252-253,363
+  s_f7f2fc8a22ebd8::t_d027969c3c0165 175,177-194
+  s_f7f2fc8a22ebd8::t_66171ceed8f2a3 217-238
+  s_f7f2fc8a22ebd8::t_24f629b9af5b90 6-7,143-145,166-174,176,195-216,239-251
+  s_f7f2fc8a22ebd8::t_2b6cfbdebf9085 364
+internal/server/middleware/balance_check.go
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 45-48
+internal/server/middleware/org_monthly_spend_cap.go
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 8,18-21
+sidecars/hmm/tests/test_api.py
+  s_f7f2fc8a22ebd8::t_e5e7f1a4e99279 6
+  s_f7f2fc8a22ebd8::t_c113d6a80be880 25
+  s_f7f2fc8a22ebd8::t_0507620ee9048c 15-24,26-46,95-99,101-111
+  s_f7f2fc8a22ebd8::t_be6e1da0b6baa3 100
+internal/policyclient/client_test.go
+  s_f7f2fc8a22ebd8::t_c113d6a80be880 154,182
+  s_f7f2fc8a22ebd8::t_c2247967df2439 147-153,155-156
+  s_f7f2fc8a22ebd8::t_62428719d14ead 141-146,157-181,183-194
+internal/router/policy/contract.go
+  s_f7f2fc8a22ebd8::t_69f873c7e2a05b 15,98-108,125-126,132-141
+  s_f7f2fc8a22ebd8::t_c2247967df2439 109-116,118-124
+  s_f7f2fc8a22ebd8::t_d027969c3c0165 117
+  s_f7f2fc8a22ebd8::t_bb3f69210587b0 142
+sidecars/hmm/hmm_sidecar/schemas.py
+  s_f7f2fc8a22ebd8::t_e16584c343eff6 118-122,127-137,140-144
+  s_f7f2fc8a22ebd8::t_0507620ee9048c 96-111,113-117
+  s_f7f2fc8a22ebd8::t_d027969c3c0165 112
+  s_f7f2fc8a22ebd8::t_28086782943ab0 3,123-126,138-139
+internal/server/middleware/api_key_spend_cap.go
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 8,29-32
+sidecars/hmm/hmm_sidecar/api.py
+  s_f7f2fc8a22ebd8::t_0507620ee9048c 135-144,148-163
+  s_f7f2fc8a22ebd8::t_be6e1da0b6baa3 145-147
+sidecars/hmm/hmm_sidecar/policy.py
+  s_f7f2fc8a22ebd8::t_0507620ee9048c 20,23,29-30,35-37,40-41,43-73,105-107,111,129-147,149-160
+  s_f7f2fc8a22ebd8::t_d027969c3c0165 148
+  s_f7f2fc8a22ebd8::t_be6e1da0b6baa3 42
+internal/router/policy/resolver.go
+  s_f7f2fc8a22ebd8::t_69f873c7e2a05b 60-62
+internal/server/server.go
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 150
+  s_f7f2fc8a22ebd8::t_e11769a28867ae 219-229
+internal/proxy/service.go
+  s_f7f2fc8a22ebd8::t_0bcb16a50a3da2 1667-1668,1671
+  s_f7f2fc8a22ebd8::t_be39779eb9ca22 2082-2100,2267
+  s_f7f2fc8a22ebd8::t_597866e18483b8 1960-1961,1997,2003-2004,2007,2013-2016,2025,2145-2151,2206-2208,2221,2231,2243,2313-2315,3029,3060-3061,3064-3065,3088-3090
+  s_f7f2fc8a22ebd8::t_109bca584133e9 2424
+  s_f7f2fc8a22ebd8::t_74684f768b73b9 2904-2910,2917-2920
+  s_f7f2fc8a22ebd8::t_7630a36ec68fab 2162-2164,2418,2425-2427,2913-2915,2927
+  s_f7f2fc8a22ebd8::t_57b3939d02e3cf 2005-2006,2026,2028-2036,3063
+internal/policyclient/client.go
+  s_f7f2fc8a22ebd8::t_d027969c3c0165 246,351
+  s_f7f2fc8a22ebd8::t_c2247967df2439 239-245,247-252,344-350,352-356
+  s_f7f2fc8a22ebd8::t_8fa505233f8d1e 340
+  s_f7f2fc8a22ebd8::t_28728bf15f6515 238,253-254,257,259,264,315-339,341-343,358-412,415,689
+  s_f7f2fc8a22ebd8::t_cf3819be73ff3a 357
+internal/api/anthropic/messages_test.go
+  s_f7f2fc8a22ebd8::t_a6830526efc3c9 18,36-40,63-71,327,389-436
+  s_f7f2fc8a22ebd8::t_ef806364ecc984 13
+  s_f7f2fc8a22ebd8::t_3b982902c26041 41-62,304-326
+  s_f7f2fc8a22ebd8::t_f0bec0bd0a92ee 328
+  s_f7f2fc8a22ebd8::t_12e2452da2b380 437
+internal/router/policy/sidecar_router_test.go
+  s_f7f2fc8a22ebd8::t_17d4bfd703aff5 19-24,32-36,130-131,141-145,149-182,192-222,238-254
+  s_f7f2fc8a22ebd8::t_d4f7d96b39814e 146-148,232-237
+  s_f7f2fc8a22ebd8::t_c2247967df2439 132-137,139-140,183-188,190-191,223-228,230-231
+  s_f7f2fc8a22ebd8::t_c113d6a80be880 138,189,229
+  s_f7f2fc8a22ebd8::t_ca4c5b5323cd9b 255
+sidecars/hmm/tests/test_policy.py
+  s_f7f2fc8a22ebd8::t_0507620ee9048c 9-14,43-81
+  s_f7f2fc8a22ebd8::t_03550a510eb373 82-83
+internal/proxy/route_preview.go
+  s_f7f2fc8a22ebd8::t_0bcb16a50a3da2 1-110
+internal/proxy/service_test.go
+  s_f7f2fc8a22ebd8::t_2abc298cef6db8 7
+  s_f7f2fc8a22ebd8::t_d4df7995f75819 18,32-49,78-81,83-120
+  s_f7f2fc8a22ebd8::t_b12e293cf4bafd 19
+  s_f7f2fc8a22ebd8::t_a6206f34dafc59 82
+  s_f7f2fc8a22ebd8::t_cf3180bfd9bff5 121,123,128-134,139-143,155-161,163-165,178-179
+  s_f7f2fc8a22ebd8::t_4c041a5523d6c4 13,124,166-170
+  s_f7f2fc8a22ebd8::t_af7b50bbab1c72 125-127,135,171-177
+  s_f7f2fc8a22ebd8::t_f49dc732e233a1 136-138,144-154,162
+  s_f7f2fc8a22ebd8::t_b40a5a9e9d297c 122
+internal/api/anthropic/messages.go
+  s_f7f2fc8a22ebd8::t_3b982902c26041 46-51
+internal/proxy/agent_shadow_eval.go
+  s_f7f2fc8a22ebd8::t_6edea8425423bb 10,60,75
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 1-9,11-59,61-74,76-98
+internal/server/server_test.go
+  s_f7f2fc8a22ebd8::t_e9e981e0f5f6d0 51
+internal/server/middleware/agent_shadow_eval.go
+  s_f7f2fc8a22ebd8::t_c85b6c27823e86 1-41
+internal/server/middleware/agent_shadow_eval_test.go
+  s_f7f2fc8a22ebd8::t_434b8b8c7ceb61 59-85
+  s_f7f2fc8a22ebd8::t_cf3180bfd9bff5 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6ec1608c047e328db11a3382a91a465d3d502310",
+  "prompts": {},
+  "sessions": {
+    "s_f7f2fc8a22ebd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f72c5-cca0-7f02-898a-35730b985af0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

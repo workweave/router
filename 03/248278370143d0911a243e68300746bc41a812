@@ -1,0 +1,25 @@
+CLAUDE.md
+  s_17e3d28e890125::t_c9593a8add79ad 42,147-148
+internal/router/cluster/embedder_onnx.go
+  s_17e3d28e890125::t_c9593a8add79ad 83
+AGENTS.md
+  s_17e3d28e890125::t_c9593a8add79ad 42,147-148
+README.md
+  s_17e3d28e890125::t_c9593a8add79ad 176,200,329-333,389-391,393-400,403-407,410-417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "03248278370143d0911a243e68300746bc41a812",
+  "prompts": {},
+  "sessions": {
+    "s_17e3d28e890125": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a2dac13e-f967-4a5e-87a6-3056eee149ba",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

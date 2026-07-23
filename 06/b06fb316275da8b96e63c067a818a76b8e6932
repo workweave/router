@@ -1,0 +1,32 @@
+install/cc-statusline.sh
+  s_dc646ce68847be::t_c0e00893a92c3d 136,166,176,206
+internal/router/cluster/artifacts/v0.39/model_registry.json
+  s_dc646ce68847be::t_87f558ad673c82 10
+  s_dc646ce68847be::t_1cf96d213b794b 3
+  s_dc646ce68847be::t_00a7e86916bb9c 1-2,4-9,11-21,23-24
+  s_dc646ce68847be::t_c2e81d30115116 22
+internal/router/cluster/artifacts/v0.39/metadata.yaml
+  s_dc646ce68847be::t_418496cf528052 1-58,60-62
+  s_dc646ce68847be::t_9f23cc4ac4ba47 59
+install/install.sh
+  s_dc646ce68847be::t_c0e00893a92c3d 752,782,792,822
+internal/router/catalog/catalog.go
+  s_dc646ce68847be::t_c0e00893a92c3d 128-130,272-275
+  s_dc646ce68847be::t_e68eb8a508825d 276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "06b06fb316275da8b96e63c067a818a76b8e6932",
+  "prompts": {},
+  "sessions": {
+    "s_dc646ce68847be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b5d9e73-99bd-41ec-add7-1027d67979ff",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

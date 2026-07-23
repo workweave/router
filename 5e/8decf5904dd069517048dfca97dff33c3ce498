@@ -1,0 +1,41 @@
+frontend/src/components/molecules/Popover/Popover.tsx
+  s_7ebf68fe3281a5::t_3bb12a060a85ac 27
+frontend/src/components/Statistic/Statistic.tsx
+  s_7ebf68fe3281a5::t_80070752c76127 7
+frontend/src/components/Chart/types.ts
+  s_7ebf68fe3281a5::t_cd1a034de7468d 228-230
+  s_7ebf68fe3281a5::t_86c24ac1fb8ecb 189
+frontend/src/components/DashboardPageFilters/useDashboardFilters.ts
+  s_7ebf68fe3281a5::t_9e046fe86b532e 89-96
+frontend/src/components/Page/Page.tsx
+  s_7ebf68fe3281a5::t_73c20cfe03b373 40-43
+frontend/src/components/atoms/Skeleton/Skeleton.tsx
+  s_7ebf68fe3281a5::t_06976452375193 49-51
+frontend/src/tools/LoadState.ts
+  s_7ebf68fe3281a5::t_d919e2ce1486c6 11
+  s_7ebf68fe3281a5::t_892a080911180a 28
+  s_7ebf68fe3281a5::t_ba67e213624fad 33
+  s_7ebf68fe3281a5::t_9050f43ed99585 19
+  s_7ebf68fe3281a5::t_e284f6bb88ba63 15
+frontend/src/components/DashboardPageFilters/FilterPill.tsx
+  s_7ebf68fe3281a5::t_8907429d85da0b 9
+  s_7ebf68fe3281a5::t_fd0024ac297fd5 36
+frontend/src/components/molecules/Card/Card.tsx
+  s_7ebf68fe3281a5::t_8ddb11e5d38c32 79-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5e8decf5904dd069517048dfca97dff33c3ce498",
+  "prompts": {},
+  "sessions": {
+    "s_7ebf68fe3281a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1c220f8e-f1ba-43d1-ad9f-0a17821d2253",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
