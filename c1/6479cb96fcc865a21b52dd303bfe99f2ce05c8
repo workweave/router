@@ -1,0 +1,19 @@
+internal/translate/claudecode_tool_filter.go
+  s_26d00faa9a8bf5::t_0179edc6146254 60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c16479cb96fcc865a21b52dd303bfe99f2ce05c8",
+  "prompts": {},
+  "sessions": {
+    "s_26d00faa9a8bf5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "413832f5-ae47-41bb-bd03-0a6833d594a1",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
