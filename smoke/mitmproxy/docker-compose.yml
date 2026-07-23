@@ -1,0 +1,67 @@
+# Compose overlay adding the smoke suite's record/replay MITM proxy. Used only
+# by scripts/smoke/run.sh via `-f docker-compose.yml -f smoke/mitmproxy/docker-compose.yml`
+# — never part of the default `docker compose up`.
+#
+# IMPORTANT: when multiple -f files are combined, Compose resolves every
+# relative path in every file against the FIRST file's directory, not each
+# file's own directory (github.com/docker/compose#3568). Since
+# docker-compose.yml (repo root) is always listed first, every relative path
+# below — build.context, the cassette bind mount — is written relative to the
+# REPO ROOT, even though this file lives in smoke/mitmproxy/. Verify with
+# `docker compose -f docker-compose.yml -f smoke/mitmproxy/docker-compose.yml config`
+# if this file ever moves.
+#
+# The router's HTTP transport already honors http.ProxyFromEnvironment
+# (internal/providers/httputil), so pointing the server at this proxy via
+# HTTPS_PROXY needs zero router code changes. SSL_CERT_DIR points Go's
+# crypto/x509 at the proxy's ephemeral CA public cert (mounted read-only via
+# the shared `mitm_certs` volume) so the server trusts the intercepted TLS.
+# HTTPS_PROXY applies to every outbound HTTPS call the server makes, so this
+# intercepts calls to any upstream provider (Anthropic, OpenAI, ...) the smoke
+# suite's fixtures route to — the proxy mints a leaf cert per CONNECT-target
+# hostname (smoke/mitmproxy/ca.go), nothing here is Anthropic-specific.
+#
+# Cassettes are bind-mounted from smoke/mitmproxy/cassettes/ — a real,
+# committed directory in the repo, NOT a docker volume — so a PR CI run in
+# replay-only mode reads the exact cassettes checked in at that commit and
+# needs no upstream API key at all. The nightly workflow runs in `record`
+# mode against the same bind mount to refresh them against the real API.
+services:
+  mitmproxy:
+    build:
+      context: .
+      dockerfile: smoke/mitmproxy/Dockerfile
+    volumes:
+      - mitm_certs:/certs
+      - ./smoke/mitmproxy/cassettes:/cassettes
+    environment:
+      SMOKE_PROXY_LISTEN: ":8888"
+      SMOKE_PROXY_CERT_DIR: /certs
+      SMOKE_PROXY_CACHE_DIR: /cassettes
+      SMOKE_PROXY_MODE: ${SMOKE_PROXY_MODE:-replay-or-record}
+    healthcheck:
+      # distroless/static has no shell/curl; the binary probes its own port.
+      test: ["CMD", "/mitmproxy", "-healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  server:
+    depends_on:
+      mitmproxy:
+        condition: service_healthy
+    environment:
+      HTTPS_PROXY: http://mitmproxy:8888
+      # Excludes the emulator/db/loopback hosts from the proxy. Go's transport
+      # (and the Pub/Sub client's gRPC dialer, which also honors HTTPS_PROXY)
+      # would otherwise try to CONNECT-tunnel the plaintext
+      # PUBSUB_EMULATOR_HOST gRPC traffic through mitmproxy — which only knows
+      # how to terminate real TLS to a real hostname — hanging until the
+      # per-replica subscription setup deadline panics the process.
+      NO_PROXY: pubsub-emulator,postgres,localhost,127.0.0.1
+      SSL_CERT_DIR: /certs
+    volumes:
+      - mitm_certs:/certs:ro
+
+volumes:
+  mitm_certs:

@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Smoke
+
+# Pre-merge smoke suite: boots the real router docker compose stack behind a
+# record/replay MITM proxy (smoke/mitmproxy/) and drives it with
+# Claude-Code-shaped fixtures, asserting end-to-end behavior (status,
+# response/usage shape, prompt-cache accounting, decision headers, and OpenAI
+# tool-schema translation) that in-process unit and conformance tests cannot see.
+#
+# The PR job runs in replay-only mode against the cassettes committed under
+# smoke/mitmproxy/cassettes/ — no upstream API keys, safe on fork PRs, fully
+# deterministic. It's still path-gated to the regression-prone surfaces only;
+# docs, artifacts, the HMM sidecar, and the frontend never trigger it.
+#
+# A separate nightly job (needs ANTHROPIC_API_KEY; OPENAI_API_KEY optional) re-
+# records the cassettes against the real APIs to catch upstream drift (a
+# provider changing a response shape) independent of any code change here. It
+# never runs on a fork.
+on:
+  pull_request:
+    paths:
+      - 'internal/proxy/**'
+      - 'internal/translate/**'
+      - 'internal/providers/**'
+      - 'internal/router/catalog/**'
+      - 'cmd/router/**'
+      - 'smoke/**'
+      - 'scripts/smoke/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.github/workflows/smoke.yml'
+  schedule:
+    # Nightly cassette-refresh: catches Anthropic-side drift the path-gated PR
+    # job (replay-only, no key) can't see. Time chosen off any round hour.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+    inputs:
+      proxy_mode:
+        description: 'MITM proxy mode'
+        type: choice
+        options: [replay-only, record, replay-or-record]
+        default: replay-only
+
+# Force-pushes to a PR shouldn't stack runs; the nightly schedule gets its own
+# group so a manual dispatch never cancels it (and vice versa).
+concurrency:
+  group: smoke-${{ github.event_name == 'schedule' && 'nightly' || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke (replay-only)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v2
+        with:
+          version: latest
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run smoke suite
+        env:
+          SMOKE_PROXY_MODE: ${{ github.event.inputs.proxy_mode || 'replay-only' }}
+          # Only present for a manual record/replay-or-record dispatch; unused
+          # (and unnecessary) for the default replay-only path.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Layers the server/mitmproxy Docker builds against the GitHub
+          # Actions cache (type=gha) via smoke/mitmproxy/docker-compose.ci-cache.yml
+          # — the ONNX/tokenizer downloads, npm build, and Go compile are what
+          # actually make a cold build slow; a warm cache turns an ~8-12 minute
+          # build into low single-digit minutes.
+          SMOKE_CI_CACHE: "1"
+        run: ./scripts/smoke/run.sh
+
+  refresh-cassettes:
+    name: Refresh cassettes (nightly)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v2
+        with:
+          version: latest
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Require Anthropic key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set; the nightly cassette refresh needs it."
+            exit 1
+          fi
+
+      - name: Record fresh cassettes against the real API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SMOKE_PROXY_MODE: record
+          SMOKE_CI_CACHE: "1"
+        run: ./scripts/smoke/run.sh
+
+      - name: Open a PR if the cassettes changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- smoke/mitmproxy/cassettes/; then
+            echo "No drift — cassettes unchanged."
+            exit 0
+          fi
+          BRANCH="smoke-cassette-refresh-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add smoke/mitmproxy/cassettes/
+          git commit -m "chore(smoke): nightly cassette refresh"
+          git push origin "$BRANCH" --force
+          gh pr create --title "chore(smoke): nightly cassette refresh $(date -u +%Y-%m-%d)" \
+            --body "A provider's response shape drifted from what the smoke suite's committed cassettes expect. Review the diff — a real behavior change on the provider's side, or just cosmetic (timestamps/ids)? See docs/SMOKE.md." \
+            --base main --head "$BRANCH" 2>&1 | tee pr-create.log || \
+            echo "::warning::PR creation failed or a PR for this branch already exists; see pr-create.log"
