@@ -100,8 +100,7 @@ func shouldStripCCTool(name string, keepOrchestration bool) bool {
 // without paying a re-serialize cost on the common case.
 //
 // When keepOrchestration is set, the orchestration subset (Task*, Workflow,
-// Skill, plan-mode) is retained so capable non-Anthropic models can drive
-// subagents/workflows/skills; the remaining CC-only tools are still dropped.
+// Skill, plan-mode) is retained; other CC-only tools are still dropped.
 //
 // Only the tools array is rewritten; tool_choice and message content are
 // left alone. tool_choice is rare and Anthropic only honors "any"/"auto"/
