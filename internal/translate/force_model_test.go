@@ -284,8 +284,16 @@ func lastUserMessageText(t *testing.T, env *translate.RequestEnvelope) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		msg, _ := msgs[i].(map[string]any)
 		if msg["role"] == "user" {
-			content, _ := msg["content"].(string)
-			return content
+			if content, ok := msg["content"].(string); ok {
+				return content
+			}
+			blocks, _ := msg["content"].([]any)
+			if len(blocks) > 0 {
+				block, _ := blocks[len(blocks)-1].(map[string]any)
+				if block["type"] == "text" {
+					return block["text"].(string)
+				}
+			}
 		}
 	}
 	return ""

@@ -40,6 +40,58 @@ func parseAndEmit(t *testing.T, body []byte, format string, opts translate.EmitO
 	}
 }
 
+func TestAnthropicSameFormat_AddsTailCacheBreakpointWhenSystemAlreadyCached(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"system":[{"type":"text","text":"cached rules","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"continue"}]}`)
+	out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+
+	system := out["system"].([]any)
+	require.Len(t, system, 1)
+	assert.Equal(t, map[string]any{"type": "ephemeral", "ttl": "1h"}, system[0].(map[string]any)["cache_control"])
+
+	messages := out["messages"].([]any)
+	require.Len(t, messages, 3)
+	first := messages[0].(map[string]any)
+	assert.Equal(t, "first", first["content"])
+
+	last := messages[2].(map[string]any)
+	blocks := last["content"].([]any)
+	require.Len(t, blocks, 1)
+	lastBlock := blocks[0].(map[string]any)
+	assert.Equal(t, "text", lastBlock["type"])
+	assert.Equal(t, "continue", lastBlock["text"])
+	assert.Equal(t, map[string]any{"type": "ephemeral"}, lastBlock["cache_control"])
+}
+
+func TestAnthropicSameFormat_ToolCacheControlCountsTowardCapacity(t *testing.T) {
+	// 1 tool + 3 system = 4 breakpoints; router must not inject a fifth.
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,` +
+		`"tools":[{"name":"a","input_schema":{"type":"object"}},` +
+		`{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
+		`"system":[{"type":"text","text":"one","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"two","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"three","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+
+	lastMessage := out["messages"].([]any)[0].(map[string]any)
+	assert.Equal(t, "hi", lastMessage["content"], "capacity is full (1 tool + 3 system = 4), so the router injects no tail breakpoint")
+}
+
+func TestAnthropicSameFormat_ToolCacheControlOverflowRejected(t *testing.T) {
+	// Five tool breakpoints alone exceed the 4-breakpoint capacity; the count
+	// must include tools or this overflow slips through as a silent upstream 400.
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"tools":[` +
+		`{"name":"a","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"c","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"d","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"e","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	_, err = env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+	require.ErrorIs(t, err, translate.ErrAnthropicCacheControlOverflow)
+}
+
 func TestOpenAISameFormat_ModelRewrite(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	opts := translate.EmitOptions{

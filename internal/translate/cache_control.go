@@ -68,6 +68,13 @@ func validateAnthropicCacheControls(request map[string]any) (int, error) {
 		count++
 		return nil
 	}
+	if tools, ok := request["tools"].([]any); ok {
+		for _, tool := range tools {
+			if err := visit(tool); err != nil {
+				return 0, err
+			}
+		}
+	}
 	if system, ok := request["system"].([]any); ok {
 		for _, block := range system {
 			if err := visit(block); err != nil {
