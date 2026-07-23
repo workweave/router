@@ -11,9 +11,8 @@ import (
 )
 
 func TestDeployedModelsForRosterIDs_MapsRosterSlugsToCatalogEntries(t *testing.T) {
-	// Roster slugs are provider-prefixed (openai/…, anthropic/…); the mapped
-	// entries carry the bare catalog IDs and primary provider, matching the
-	// shape the cluster source produces.
+	// Roster slugs are provider-prefixed (openai/…); entries carry bare
+	// catalog IDs and primary provider, matching the cluster source shape.
 	got := hmm.DeployedModelsForRosterIDs([]string{
 		"openai/gpt-5.6-sol",
 		"anthropic/claude-opus-4.8",

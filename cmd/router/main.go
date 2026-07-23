@@ -617,7 +617,7 @@ func main() {
 			panic(clientErr)
 		}
 		hmmReadinessChecker = hmmClient
-		hmmRosterModels = newHMMRosterSource(hmmClient)
+		hmmRosterModels = newHMMRosterSource(hmmClient, hmmTimeout)
 		capabilityCtx, cancelCapabilityDiscovery := context.WithTimeout(context.Background(), hmmTimeout)
 		var capabilityErr error
 		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)

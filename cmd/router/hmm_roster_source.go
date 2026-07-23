@@ -17,15 +17,8 @@ import (
 const hmmRosterTTL = 5 * time.Minute
 
 // hmmRosterRetryBackoff caps how often a failing refresh re-hits the sidecar
-// while stale data is being served. Without it, every reader after TTL expiry
-// would re-enter the slow failing fetch during a sidecar outage.
+// while stale data is being served, to avoid hammering it during an outage.
 const hmmRosterRetryBackoff = 30 * time.Second
-
-// hmmRosterFetchTimeout bounds the detached shared roster fetch. It matches
-// the sidecar client's own per-call budget; the shared fetch runs under this
-// rather than any single caller's request context so one caller cancelling
-// doesn't abort the refresh for the others.
-const hmmRosterFetchTimeout = policyclient.DefaultTimeout
 
 // rosterFetcher is the subset of the policy sidecar client the roster source
 // needs; satisfied by *policyclient.Client.
@@ -36,12 +29,11 @@ type rosterFetcher interface {
 // hmmRosterSource adapts HMM sidecar roster arms to deployed-model entries.
 // On fetch failure it serves the prior snapshot rather than blanking the roster.
 type hmmRosterSource struct {
-	fetch rosterFetcher
+	fetch        rosterFetcher
+	fetchTimeout time.Duration
 
-	// group collapses concurrent refreshes into a single sidecar call, so a
-	// stampede (including a cold cache) never fans out and there is exactly
-	// one writer per refresh — no marker juggling to protect against a slow
-	// fetch clobbering a newer one.
+	// group collapses concurrent refreshes via singleflight — exactly one
+	// writer per refresh, no clobber risk from a slow fetch racing a newer one.
 	group singleflight.Group
 
 	mu        sync.Mutex
@@ -51,15 +43,16 @@ type hmmRosterSource struct {
 }
 
 // newHMMRosterSource initializes the cached HMM roster source.
-func newHMMRosterSource(fetch rosterFetcher) *hmmRosterSource {
-	return &hmmRosterSource{fetch: fetch}
+func newHMMRosterSource(fetch rosterFetcher, fetchTimeout time.Duration) *hmmRosterSource {
+	if fetchTimeout <= 0 {
+		fetchTimeout = policyclient.DefaultTimeout
+	}
+	return &hmmRosterSource{fetch: fetch, fetchTimeout: fetchTimeout}
 }
 
-// HMMDeployedModels returns catalog entries for the HMM roster. A fresh cache
-// is served without any fetch; otherwise concurrent callers collapse onto one
-// sidecar refresh (singleflight). A failing refresh with a prior snapshot
-// serves stale and backs off so an outage doesn't hammer the sidecar; a
-// failing refresh with no snapshot surfaces the error.
+// HMMDeployedModels returns catalog entries for the HMM roster. Serves a
+// cached snapshot when fresh; collapses concurrent refreshes via singleflight.
+// On failure with a prior snapshot returns stale; otherwise surfaces the error.
 func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []cluster.DeployedEntry, err error) {
 	s.mu.Lock()
 	if s.haveCache && time.Since(s.fetchedAt) < hmmRosterTTL {
@@ -69,13 +62,11 @@ func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []clus
 	}
 	s.mu.Unlock()
 
-	// singleflight collapses a concurrent stampede onto one refresh whose
-	// result is shared with every waiter. The shared fetch runs under its own
-	// detached, budget-bounded context (not this caller's ctx) so one caller
-	// disconnecting doesn't cancel the fetch for the others; each caller still
-	// honors its own ctx via the select below.
-	ch := s.group.DoChan("roster", func() (interface{}, error) {
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hmmRosterFetchTimeout)
+	// singleflight collapses concurrent callers onto one refresh; the shared
+	// fetch runs under a detached context so a cancelling caller doesn't abort
+	// others. Each caller honors its own ctx via the select below.
+	ch := s.group.DoChan("roster", func() (any, error) {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.fetchTimeout)
 		defer cancel()
 		return s.refresh(fetchCtx)
 	})
@@ -91,11 +82,8 @@ func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []clus
 	}
 }
 
-// refresh fetches the roster from the sidecar and updates the cache. On
-// failure it serves the prior snapshot (extending fetchedAt by the backoff so
-// the next refresh doesn't immediately re-hit a failing sidecar), or returns
-// the error when the cache is cold. Runs under singleflight, so it is the sole
-// writer for its refresh.
+// refresh fetches the roster from the sidecar and updates the cache;
+// on failure with a prior snapshot backs off rather than erroring.
 func (s *hmmRosterSource) refresh(ctx context.Context) ([]cluster.DeployedEntry, error) {
 	rosterIDs, fetchErr := s.fetch.Roster(ctx)
 	if fetchErr != nil {

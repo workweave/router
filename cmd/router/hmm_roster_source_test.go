@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,15 +15,20 @@ import (
 )
 
 type stubRosterFetcher struct {
-	ids     []string
-	err     error
-	calls   atomic.Int64
-	gate    chan struct{} // if non-nil, Roster blocks until closed (forces fetch overlap)
-	entered chan struct{} // if non-nil, Roster signals once per entry before blocking
+	ids      []string
+	err      error
+	calls    atomic.Int64
+	gate     chan struct{} // if non-nil, Roster blocks until closed (forces fetch overlap)
+	entered  chan struct{} // if non-nil, Roster signals once per entry before blocking
+	deadline chan time.Time
 }
 
-func (s *stubRosterFetcher) Roster(context.Context) ([]string, error) {
+func (s *stubRosterFetcher) Roster(ctx context.Context) ([]string, error) {
 	s.calls.Add(1)
+	if s.deadline != nil {
+		deadline, _ := ctx.Deadline()
+		s.deadline <- deadline
+	}
 	if s.entered != nil {
 		s.entered <- struct{}{}
 	}
@@ -34,7 +40,7 @@ func (s *stubRosterFetcher) Roster(context.Context) ([]string, error) {
 
 func TestHMMRosterSource_MapsAndCaches(t *testing.T) {
 	fetch := &stubRosterFetcher{ids: []string{"openai/gpt-5.6-sol"}}
-	src := newHMMRosterSource(fetch)
+	src := newHMMRosterSource(fetch, 0)
 
 	first, err := src.HMMDeployedModels(context.Background())
 	require.NoError(t, err)
@@ -48,9 +54,26 @@ func TestHMMRosterSource_MapsAndCaches(t *testing.T) {
 	assert.Equal(t, int64(1), fetch.calls.Load())
 }
 
+func TestHMMRosterSource_UsesConfiguredFetchTimeout(t *testing.T) {
+	const fetchTimeout = 10 * time.Second
+	fetch := &stubRosterFetcher{
+		ids:      []string{"openai/gpt-5.6-sol"},
+		deadline: make(chan time.Time, 1),
+	}
+	src := newHMMRosterSource(fetch, fetchTimeout)
+
+	startedAt := time.Now()
+	_, err := src.HMMDeployedModels(context.Background())
+	require.NoError(t, err)
+
+	deadline := <-fetch.deadline
+	assert.Greater(t, deadline.Sub(startedAt), 9*time.Second)
+	assert.Less(t, deadline.Sub(startedAt), 11*time.Second)
+}
+
 func TestHMMRosterSource_ServesStaleOnFetchFailure(t *testing.T) {
 	fetch := &stubRosterFetcher{ids: []string{"openai/gpt-5.6-sol"}}
-	src := newHMMRosterSource(fetch)
+	src := newHMMRosterSource(fetch, 0)
 
 	_, err := src.HMMDeployedModels(context.Background())
 	require.NoError(t, err)
@@ -74,22 +97,21 @@ func TestHMMRosterSource_ServesStaleOnFetchFailure(t *testing.T) {
 
 func TestHMMRosterSource_ErrorsWhenNoSnapshot(t *testing.T) {
 	fetch := &stubRosterFetcher{err: errors.New("sidecar down")}
-	src := newHMMRosterSource(fetch)
+	src := newHMMRosterSource(fetch, 0)
 
 	_, err := src.HMMDeployedModels(context.Background())
 	require.Error(t, err)
 }
 
 func TestHMMRosterSource_CallerCancelDoesNotAbortSharedFetch(t *testing.T) {
-	// One caller cancels while the shared cold-start fetch is in flight; a
-	// concurrent caller with a live context must still get the roster (the
-	// shared fetch runs under a detached context, not the canceller's).
+	// One caller cancels mid-fetch; the concurrent live-context caller must
+	// still get the roster because the shared fetch runs under a detached context.
 	fetch := &stubRosterFetcher{
 		ids:     []string{"openai/gpt-5.6-sol"},
 		gate:    make(chan struct{}),
 		entered: make(chan struct{}, 2),
 	}
-	src := newHMMRosterSource(fetch)
+	src := newHMMRosterSource(fetch, 0)
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -121,17 +143,15 @@ func TestHMMRosterSource_CallerCancelDoesNotAbortSharedFetch(t *testing.T) {
 }
 
 func TestHMMRosterSource_ColdStartStampedeCollapsesToOneFetch(t *testing.T) {
-	// Cold cache + concurrent callers: singleflight collapses them onto one
-	// sidecar fetch, and every caller gets the successfully-fetched roster
-	// (no caller 503s because a sibling's fetch "won"). The gate forces the
-	// callers to overlap before the fetch returns.
+	// Cold cache + concurrent callers: singleflight collapses to one fetch;
+	// every caller must succeed — no 503 because a sibling's fetch "won".
 	const callers = 8
 	fetch := &stubRosterFetcher{
 		ids:     []string{"openai/gpt-5.6-sol"},
 		gate:    make(chan struct{}),
 		entered: make(chan struct{}, callers),
 	}
-	src := newHMMRosterSource(fetch)
+	src := newHMMRosterSource(fetch, 0)
 
 	var wg sync.WaitGroup
 	results := make([][]string, callers)
