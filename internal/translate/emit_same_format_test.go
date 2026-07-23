@@ -63,9 +63,7 @@ func TestAnthropicSameFormat_AddsTailCacheBreakpointWhenSystemAlreadyCached(t *t
 }
 
 func TestAnthropicSameFormat_ToolCacheControlCountsTowardCapacity(t *testing.T) {
-	// A native client (e.g. Claude Code) pins the last tool and fills the rest
-	// of the 4-breakpoint budget on system blocks. Tool breakpoints count too,
-	// so the router must inject nothing rather than push the total past 4.
+	// 1 tool + 3 system = 4 breakpoints; router must not inject a fifth.
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,` +
 		`"tools":[{"name":"a","input_schema":{"type":"object"}},` +
 		`{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
