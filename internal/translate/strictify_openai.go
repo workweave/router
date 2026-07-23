@@ -168,6 +168,17 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 			return nil, false
 		}
 		if _, req := originallyRequired[name]; !req {
+			// An optional property without a strict-expressible type
+			// (bare {}, bare enum, etc.) has no strict PASSTHROUGH:
+			// makeNullable wraps it in anyOf:[{}, {type:null}] and
+			// the synthetic {} branch either 400s because it lacks
+			// a type key, or — if stamped with a value-type union —
+			// 400s because "object" in that union triggers the
+			// additionalProperties:false requirement. Bail rather
+			// than emit a tool schema the API will reject.
+			if !schemaHasStrictType(sp) {
+				return nil, false
+			}
 			sp = makeNullable(sp)
 		}
 		outProps[name] = sp
@@ -206,16 +217,8 @@ func makeNullable(node map[string]any) map[string]any {
 		node["anyOf"] = append(branches, map[string]any{"type": "null"})
 		return node
 	}
-	// No type and no anyOf (e.g. bare {} or bare enum). Wrap in an
-	// anyOf whose first branch carries an explicit value-type union
-	// so OpenAI strict mode doesn't 400 on a typeless branch.
-	// Preserve any inline constraints (description, etc.) on the
-	// original node.
-	branch := map[string]any{"type": []any{"string", "number", "boolean", "object", "array", "null"}}
-	for k, v := range node {
-		branch[k] = v
-	}
-	return map[string]any{"anyOf": []any{branch, map[string]any{"type": "null"}}}
+	// No type and no anyOf (e.g. bare enum): wrap the node itself.
+	return map[string]any{"anyOf": []any{node, map[string]any{"type": "null"}}}
 }
 
 // schemaHasStrictType reports whether node carries a type OpenAI strict mode

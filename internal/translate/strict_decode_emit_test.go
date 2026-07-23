@@ -91,6 +91,47 @@ func TestPrepareOpenAIResponses_NonStrictifiableFallsBack(t *testing.T) {
 	assert.Contains(t, choice, "oneOf")
 }
 
+// Prod repro (2026-07-23): Workflow.args is a bare {} (optional, typeless).
+// Two prior fix attempts (PR #824, and a follow-up stamping a 6-type union
+// on the synthetic nullable branch) both 400'd on the gpt-5.5 Responses
+// strict path — the first for a missing 'type' key, the second because the
+// "object" arm of the union lacked additionalProperties:false. Strictify
+// must bail for a typeless optional property so the tool falls back to
+// non-strict emission, same as any other non-strictifiable schema.
+func TestPrepareOpenAIResponses_TypelessOptionalArgFallsBackToNonStrict(t *testing.T) {
+	body := `{
+	  "model":"claude-opus-4-8","max_tokens":4096,
+	  "tools":[{"name":"Workflow","input_schema":{
+	    "type":"object",
+	    "properties":{"args":{}},
+	    "required":[]
+	  }}],
+	  "messages":[{"role":"user","content":"run a workflow"}]
+	}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+	prep, err := env.PrepareOpenAIResponses(http.Header{}, translate.EmitOptions{
+		TargetModel:                       "gpt-5.5",
+		Capabilities:                      router.Lookup("gpt-5.5"),
+		KeepCrossVendorOrchestrationTools: true,
+	})
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(prep.Body, &out))
+	tools, _ := out["tools"].([]any)
+	require.Len(t, tools, 1)
+	tool0, _ := tools[0].(map[string]any)
+
+	assert.Equal(t, false, tool0["strict"],
+		"a typeless optional property cannot be strictified; must fall back rather than 400")
+	params, _ := tool0["parameters"].(map[string]any)
+	require.NotNil(t, params)
+	args := params["properties"].(map[string]any)["args"]
+	assert.Equal(t, map[string]any{}, args,
+		"the original bare {} schema is emitted untouched on fallback")
+}
+
 func TestPrepareGemini_ValidatedModeOnGemini3x(t *testing.T) {
 	env, err := translate.ParseAnthropic([]byte(anthropicToolsRequest))
 	require.NoError(t, err)

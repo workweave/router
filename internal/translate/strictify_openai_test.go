@@ -237,23 +237,30 @@ func TestStrictify_UnevaluatedPropertiesBails(t *testing.T) {
 }
 
 // Prod repro (2026-07-23): Workflow.args is a bare {} — optional and typeless.
-// makeNullable wraps it in anyOf:[{}, {type:null}]. Pre-fix the synthetic {}
-// branch had no 'type' key and OpenAI strict mode 400'd with "In
-// context=('properties','args','anyOf','0'), schema must have a 'type' key."
-// After the fix the first branch carries an explicit value-type union.
-func TestStrictify_TypelessOptionalGetsExplicitValueType(t *testing.T) {
-	out, ok := strictifyFromJSON(t, `{
+// Pre-fix, makeNullable wrapped it in anyOf:[{}, {type:null}] and the
+// synthetic {} branch 400'd for missing 'type'. A follow-up attempt stamped
+// an explicit 6-type union on the branch instead, which 400'd differently:
+// the "object" arm of that union has no additionalProperties:false, which
+// OpenAI strict mode also requires. Neither synthesis survives strict mode,
+// so strictify must bail to the non-strict fallback (PR #824 already
+// normalizes the ORIGINAL schema for that path).
+func TestStrictify_TypelessOptionalPropertyBails(t *testing.T) {
+	_, ok := strictifyFromJSON(t, `{
 		"type":"object",
 		"properties":{"args":{}},
 		"required":[]
 	}`)
-	require.True(t, ok, "a typeless optional property must survive strictification, not bail")
+	require.False(t, ok, "a typeless optional property cannot be expressed in strict mode; must bail")
+}
 
-	args := out["properties"].(map[string]any)["args"].(map[string]any)
-	branches, has := args["anyOf"].([]any)
-	require.True(t, has, "a typeless optional is made nullable via anyOf")
-	require.Len(t, branches, 2)
-	assert.Equal(t, []any{"string", "number", "boolean", "object", "array", "null"}, branches[0].(map[string]any)["type"],
-		"a typeless branch must carry an explicit value-type union so OpenAI strict mode doesn't 400")
-	assert.Equal(t, map[string]any{"type": "null"}, branches[1])
+// A typeless REQUIRED property (no optionality, so no makeNullable) still
+// strictifies fine — bare {} just passes through untouched.
+func TestStrictify_TypelessRequiredPropertySurvives(t *testing.T) {
+	out, ok := strictifyFromJSON(t, `{
+		"type":"object",
+		"properties":{"args":{}},
+		"required":["args"]
+	}`)
+	require.True(t, ok, "a typeless required property has no makeNullable step and must survive")
+	assert.Equal(t, map[string]any{}, out["properties"].(map[string]any)["args"])
 }
