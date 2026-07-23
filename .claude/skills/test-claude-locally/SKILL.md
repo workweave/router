@@ -141,3 +141,14 @@ For fixes to `internal/billing` + `internal/server/middleware/balance_check.go` 
 - Local cluster version comes from `ROUTER_CLUSTER_VERSION` in `.env.local`; it may differ from prod, which is why `/force-model` (not the scorer) is the reliable way to hit one model.
 - GLM-5.1's primary binding is Together (then Fireworks, then OpenRouter) — see `internal/router/catalog/catalog.go`.
 - To confirm a deploy contains a given router commit: the prod Cloud Run revision name maps to a monorepo commit; `git ls-tree <monorepo-commit> router-internal/router` shows the pinned router submodule SHA.
+
+## Testing monthly spend limits end-to-end (router + WorkWeave UI)
+
+To exercise the spend-limit gates (per-engineer + org monthly caps, migrations 0037/0038) together with the WorkWeave Spend Limits settings panel:
+
+- **Share one Postgres.** Run the router server against the WorkWeave dev Postgres (`localhost:5432`, db `workweave`, user `backend-user`, password `postgres-password`) so both the backend GraphQL reads and the router enforcement see the same `router` schema. In `docker-compose.override.yml` set the server's DB URL to `postgres://backend-user:postgres-password@host.docker.internal:5432/workweave?search_path=router`, add `extra_hosts: ["host.docker.internal:host-gateway"]`, and `ROUTER_DEPLOYMENT_MODE=managed`. Apply router migrations via `wv db run-migrations --router` in the WorkWeave repo.
+- **The router's own pubsub emulator must be up** (`docker compose up -d pubsub-emulator`) or the server panics at boot creating its invalidation subscription.
+- **Log into the WorkWeave dashboard** by pointing the browser at `http://localhost:8001/api/create-test-account` — it 404s after redirecting to `/` on :8001, but the session cookie IS set; then open `http://localhost:3000/organization/settings/weave-router`.
+- **Seed deterministic month-to-date spend** directly: upsert rows in `router.organization_monthly_spend` and `router.model_router_user_monthly_spend` (joined to `router.model_router_users` by email), month bucket = `date_trunc('month', now() AT TIME ZONE 'UTC')::date`. `router.organization_autopay_config.recharged_month` is also a `date`, not text.
+- **Attribute a curl to an engineer** with the `X-Weave-User-Email: <email>` header on `/v1/messages`. Expected: 402 with `org_monthly_spend_limit_reached` body when org spend ≥ org cap (middleware, checked before dispatch), 402 Anthropic-shaped error when the engineer is at/over their effective limit, and pass-through to upstream otherwise (a fake provider key then yields an upstream 401 — that proves the spend gates passed).
+- Requests must still be MainLoop-shaped (tools + `max_tokens>=4096`) as described above.
