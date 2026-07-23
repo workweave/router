@@ -157,15 +157,9 @@ func (p *proxy) recordLive(host string, req *http.Request, body []byte, key stri
 		return nil, fmt.Errorf("read live response body: %w", err)
 	}
 
-	// Decompress before persisting. Go's transport only auto-decompresses gzip
-	// when the caller leaves Accept-Encoding unset; here the outbound request
-	// clones the tunneled request's headers verbatim (including whatever
-	// Accept-Encoding the router's own client set), so Go's transparent
-	// decompression never engages and resp.Body is raw gzip. Storing it
-	// compressed would make cassettes binary blobs — undiffable in a PR review
-	// and opaque to any secret-scanning of committed fixtures. Decompress here
-	// once, and drop Content-Encoding so replay serves plain bytes the
-	// receiving client doesn't try to gunzip a second time.
+	// Decompress before persisting: the cloned request carries Accept-Encoding verbatim, so
+	// Go's transparent gzip decompression never fires and resp.Body is raw gzip. Storing
+	// compressed bytes makes cassettes binary blobs, undiffable and opaque to secret-scanning.
 	headers := sanitizeHeaders(resp.Header)
 	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
 		gr, gzErr := gzip.NewReader(bytes.NewReader(respBody))
