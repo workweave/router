@@ -170,6 +170,35 @@ func TestKeepOrchestrationTools_OpenAITarget_KeepsOrchestrationDropsRest(t *test
 	assert.NotContains(t, names, "NotebookEdit")
 }
 
+func TestKeepOrchestrationTools_OpenAITarget_NormalizesTypelessAnyOf(t *testing.T) {
+	body := `{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"run a workflow"}],
+		"tools":[{
+			"name":"Workflow",
+			"input_schema":{"type":"object","properties":{"args":{"anyOf":[{}, {"type":"null"}]}}}
+		}]
+	}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:                       "deepseek/deepseek-v4-pro",
+		KeepCrossVendorOrchestrationTools: true,
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out.Body, &doc))
+	tools := doc["tools"].([]any)
+	workflow := tools[0].(map[string]any)["function"].(map[string]any)
+	params := workflow["parameters"].(map[string]any)
+	args := params["properties"].(map[string]any)["args"].(map[string]any)
+	branch := args["anyOf"].([]any)[0].(map[string]any)
+	assert.Equal(t, []any{"string", "number", "boolean", "object", "array", "null"}, branch["type"],
+		"OpenAI requires every anyOf branch to declare a type")
+}
+
 func TestKeepOrchestrationTools_GeminiTarget_KeepsOrchestrationDropsRest(t *testing.T) {
 	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
 	require.NoError(t, err)

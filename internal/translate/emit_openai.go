@@ -889,10 +889,26 @@ func sanitizeOpenAIToolSchema(node any) {
 		if arr, ok := m[key].([]any); ok {
 			for _, v := range arr {
 				sanitizeOpenAIToolSchema(v)
+				if key == "anyOf" {
+					addOpenAIAnyOfBranchType(v)
+				}
 			}
 		}
 	}
 	sanitizeOpenAIToolSchema(m["not"])
+}
+
+// addOpenAIAnyOfBranchType makes an unconstrained JSON Schema branch explicit.
+// OpenAI rejects a typeless anyOf branch, while `{}` means every JSON value.
+func addOpenAIAnyOfBranchType(node any) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if _, hasType := m["type"]; hasType {
+		return
+	}
+	m["type"] = []any{"string", "number", "boolean", "object", "array", "null"}
 }
 
 func appendSchemaConstraintDescription(node map[string]any, key string, value any) {
