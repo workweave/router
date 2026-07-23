@@ -15,6 +15,7 @@ import (
 	openaiapi "workweave/router/internal/api/openai"
 	"workweave/router/internal/auth"
 	"workweave/router/internal/billing"
+	"workweave/router/internal/policyclient"
 	"workweave/router/internal/proxy"
 	"workweave/router/internal/router"
 	"workweave/router/internal/server/middleware"
@@ -32,12 +33,13 @@ const (
 	passthroughTimeout    = 10 * time.Second
 	routeTimeout          = 5 * time.Second
 	adminTimeout          = 10 * time.Second
-	// catalogModelsTimeout bounds GET /v1/router/models. The HMM strategy path
-	// fetches the roster from the sidecar, whose client budget defaults to 3s
-	// (policyclient.DefaultTimeout), so this must exceed that or a cold/expired
-	// cache would be cancelled before the roster returns. The cluster path is
-	// in-memory and returns well within this.
-	catalogModelsTimeout = 5 * time.Second
+	// catalogModelsTimeout bounds GET /v1/router/models. It must exceed the
+	// HMM sidecar client's own per-call budget so the handler doesn't cancel
+	// a cold/expired cache fetch before the sidecar responds. Using 2× the
+	// policy client default leaves room for one retry within the same window.
+	// If ROUTER_HMM_SIDECAR_TIMEOUT_MS is set above policyclient.DefaultTimeout,
+	// increase this to match.
+	catalogModelsTimeout = policyclient.DefaultTimeout * 2
 	// feedbackTimeout bounds the no-login feedback link reads/writes. Both are
 	// single-row Postgres ops plus an async span emit, so 5s is generous.
 	feedbackTimeout = 5 * time.Second
@@ -61,8 +63,7 @@ const (
 // deployedModels may be nil in tests; required in selfhosted prod so the
 // dashboard can render the universe of routable models.
 //
-// hmmModels is the HMM strategy's roster source; nil when no HMM sidecar is
-// wired, in which case /v1/router/models?strategy=hmm falls back to the
+// hmmModels is optional; nil when no HMM sidecar is wired — falls back to the
 // cluster registry.
 //
 // billingSvc is set only in managed mode when credit-billing is enabled; it

@@ -114,9 +114,8 @@ type rosterResponse struct {
 	RosterIDs     []string `json:"roster_ids"`
 }
 
-// Roster fetches the union of roster arm IDs the sidecar can actually select.
-// Unlike the cluster artifact's model registry, this is the roster the HMM
-// strategy routes across, so the control plane can show it per org strategy.
+// Roster fetches roster arm IDs from the sidecar; unlike the cluster
+// artifact registry, this is the set the HMM strategy actually routes across.
 func (c *Client) Roster(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/roster", nil)
 	if err != nil {

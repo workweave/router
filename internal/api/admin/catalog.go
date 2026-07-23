@@ -19,21 +19,16 @@ type CatalogModelsResponse struct {
 	Models []deployedModelDTO `json:"models"`
 }
 
-// HMMRosterSource exposes the models the HMM policy strategy actually routes
-// across (the sidecar roster arms mapped to catalog entries), which differs
-// from the cluster artifact's registry that DeployedModelsSource reports.
+// HMMRosterSource exposes the HMM sidecar roster arms as catalog entries;
+// its roster differs from the cluster artifact's DeployedModelsSource.
 type HMMRosterSource interface {
 	HMMDeployedModels(ctx context.Context) ([]cluster.DeployedEntry, error)
 }
 
 // CatalogModelsHandler returns the deployed-models catalog for the caller's
 // routing strategy. Read-only, unauthed metadata — mounted in both selfhosted
-// and managed deployment modes so the Weave control plane (which is the only
-// caller in managed mode) can fetch it without juggling router API keys.
-//
-// Without a ?strategy= query (or the cluster strategy) it returns the cluster
-// artifact's registry. For an HMM strategy it returns the HMM sidecar roster;
-// a nil hmmModels (HMM not wired) falls back to the cluster list.
+// and managed modes. For ?strategy=hmm* returns the HMM sidecar roster;
+// nil hmmModels falls back to the cluster list.
 //
 // The list is publicly known (we publish per-version model registries on the
 // RouterArena leaderboard) so there is no leak risk from leaving this open.
