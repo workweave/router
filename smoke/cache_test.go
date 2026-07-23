@@ -8,15 +8,21 @@ import "testing"
 // the surface #820/#821 broke (bad breakpoint injection producing 400s). These scenarios
 // assert the observable outcomes of a correct post-#821 implementation.
 func TestCaching(t *testing.T) {
-	// Router injects its own breakpoint on the large stable prefix. First call warms
-	// (cache_creation > 0); same-prefix second call must read it (cache_read > 0).
+	// Router injects its own breakpoint on the large stable prefix. Assert
+	// caching actually engages (cache_creation or cache_read > 0 on the first
+	// call — Anthropic's ~5-minute cache TTL means a rapid rerun against the
+	// same fixture text can find the prefix already warm from a prior run, so
+	// this does NOT assume a cold cache), and that a same-prefix follow-up
+	// reads it back.
 	t.Run("router-injected caching warms then reads", func(t *testing.T) {
 		uid := "smoke-cache-injected"
 		warm := call(t, newRequest(uid).tokens(32).text("Say: one").build(t))
 		requireOKMessage(t, warm)
-		if warm.message.Usage.CacheCreationInputTokens <= 0 {
-			t.Errorf("first call: want cache_creation_input_tokens > 0, got %d (router injection not engaging?)",
-				warm.message.Usage.CacheCreationInputTokens)
+		if warm.message.Usage.CacheCreationInputTokens <= 0 && warm.message.Usage.CacheReadInputTokens <= 0 {
+			t.Errorf("first call: want cache_creation_input_tokens > 0 (cold) or cache_read_input_tokens > 0 "+
+				"(already warm from a recent prior run — Anthropic's cache TTL is ~5min), got creation=%d read=%d "+
+				"(router injection not engaging?)",
+				warm.message.Usage.CacheCreationInputTokens, warm.message.Usage.CacheReadInputTokens)
 		}
 
 		// Same session + identical large prefix, different trailing user text.

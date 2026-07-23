@@ -1,0 +1,18 @@
+{
+  "method": "POST",
+  "path": "/v1/messages",
+  "status_code": 200,
+  "headers": {
+    "Cf-Cache-Status": "DYNAMIC",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "Content-Type": "application/json",
+    "Date": "Thu, 23 Jul 2026 23:55:08 GMT",
+    "Server": "cloudflare",
+    "Server-Timing": "x-originResponse;dur=482",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+    "Traceresponse": "00-1729504a52de76ac0f5c3b99491e7d63-c5be9c2a4486a2a1-01",
+    "Vary": "Accept-Encoding",
+    "X-Robots-Tag": "none"
+  },
+  "body": "eyJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUtMjAyNTEwMDEiLCJpZCI6Im1zZ18wMTFDZEt0aFRkZ2VyNVB5SFprM2c1eDUiLCJ0eXBlIjoibWVzc2FnZSIsInJvbGUiOiJhc3Npc3RhbnQiLCJjb250ZW50IjpbeyJ0eXBlIjoidGV4dCIsInRleHQiOiJiZXRhIn1dLCJzdG9wX3JlYXNvbiI6ImVuZF90dXJuIiwic3RvcF9zZXF1ZW5jZSI6bnVsbCwic3RvcF9kZXRhaWxzIjpudWxsLCJ1c2FnZSI6eyJpbnB1dF90b2tlbnMiOjMsImNhY2hlX2NyZWF0aW9uX2lucHV0X3Rva2VucyI6MCwiY2FjaGVfcmVhZF9pbnB1dF90b2tlbnMiOjkyMTcsImNhY2hlX2NyZWF0aW9uIjp7ImVwaGVtZXJhbF81bV9pbnB1dF90b2tlbnMiOjAsImVwaGVtZXJhbF8xaF9pbnB1dF90b2tlbnMiOjB9LCJvdXRwdXRfdG9rZW5zIjo0LCJzZXJ2aWNlX3RpZXIiOiJzdGFuZGFyZCIsImluZmVyZW5jZV9nZW8iOiJub3RfYXZhaWxhYmxlIn19"
+}
