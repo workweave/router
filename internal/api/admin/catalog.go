@@ -32,11 +32,7 @@ type HMMRosterSource interface {
 // caller in managed mode) can fetch it without juggling router API keys.
 //
 // Without a ?strategy= query (or for the cluster strategy) it returns the
-// active cluster artifact's registry. For an HMM strategy it returns the HMM
-// roster from hmmModels; the control plane passes the org's effective strategy
-// so the settings UI shows the roster that actually serves that org. hmmModels
-// may be nil (HMM not wired) — then HMM requests fall back to the cluster list.
-//
+	// For ?strategy=hmm* returns the HMM sidecar roster; nil hmmModels falls back to the cluster list.
 // The list is publicly known (we publish per-version model registries on the
 // RouterArena leaderboard) so there is no leak risk from leaving this open.
 func CatalogModelsHandler(models DeployedModelsSource, hmmModels HMMRosterSource) gin.HandlerFunc {
