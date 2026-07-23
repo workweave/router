@@ -25,16 +25,9 @@ func TestCatalog_EveryModelHasAtLeastOneBinding(t *testing.T) {
 }
 
 func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
-	known := map[string]struct{}{
-		providers.ProviderAnthropic:  {},
-		providers.ProviderOpenAI:     {},
-		providers.ProviderGoogle:     {},
-		providers.ProviderOpenRouter: {},
-		providers.ProviderFireworks:  {},
-		providers.ProviderBedrock:    {},
-		providers.ProviderMakora:     {},
-		providers.ProviderTogether:   {},
-		providers.ProviderXAI:        {},
+	known := map[string]struct{}{}
+	for _, provider := range providers.AllProviders() {
+		known[provider] = struct{}{}
 	}
 	for _, m := range Models {
 		for i, b := range m.Providers {
@@ -42,6 +35,14 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 			require.Truef(t, ok, "model %q binding %d uses unknown provider %q", m.ID, i, b.Provider)
 		}
 	}
+}
+
+func TestResolveBinding_TrustedRouterFallback(t *testing.T) {
+	avail := map[string]struct{}{providers.ProviderTrustedRouter: {}}
+	b, ok := ResolveBinding("deepseek/deepseek-v4-flash", avail)
+	require.True(t, ok)
+	assert.Equal(t, providers.ProviderTrustedRouter, b.Provider)
+	assert.Equal(t, 0.140, b.Price.InputUSDPer1M)
 }
 
 func TestCatalog_BindingsHavePositivePrice(t *testing.T) {

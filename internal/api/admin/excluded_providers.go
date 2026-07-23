@@ -7,6 +7,7 @@ import (
 
 	"workweave/router/internal/auth"
 	"workweave/router/internal/observability"
+	"workweave/router/internal/providers"
 	"workweave/router/internal/proxy"
 
 	"github.com/gin-gonic/gin"
@@ -29,17 +30,21 @@ type updateExcludedProvidersRequest struct {
 	Excluded []string `json:"excluded"`
 }
 
-// deployedProvidersDTO returns distinct provider names from the deployed-models
-// registry, sorted, so GET and PUT responses can't drift apart.
+// deployedProvidersDTO returns the distinct provider names that may be excluded,
+// sorted. It includes provider integrations registered by the binary even when
+// the current deployed-models registry has no row for that provider, so a user
+// can still exclude BYOK/configured providers such as TrustedRouter.
 func deployedProvidersDTO(models DeployedModelsSource) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
+	for p := range providers.APIKeyEnvVars {
+		seen[p] = struct{}{}
+	}
 	for _, e := range models.DefaultDeployedModels() {
-		if _, dup := seen[e.Provider]; dup {
-			continue
-		}
 		seen[e.Provider] = struct{}{}
-		out = append(out, e.Provider)
+	}
+	for p := range seen {
+		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out

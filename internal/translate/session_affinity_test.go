@@ -82,6 +82,21 @@ func TestSessionAffinity_OpenRouterUsesSessionIDHeader(t *testing.T) {
 	assert.Empty(t, out.Headers.Get("x-session-affinity"))
 }
 
+func TestSessionAffinity_TrustedRouterUsesSessionIDHeader(t *testing.T) {
+	env, err := translate.ParseAnthropic(anthropicSrc())
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:     "deepseek/deepseek-v4-pro",
+		TargetProvider:  providers.ProviderTrustedRouter,
+		SessionAffinity: affinityKey,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, affinityKey, out.Headers.Get("x-session-id"))
+	assert.Empty(t, out.Headers.Get("x-session-affinity"))
+}
+
 func TestSessionAffinity_OpenAIUsesPromptCacheKeyBody(t *testing.T) {
 	env, err := translate.ParseAnthropic(anthropicSrc())
 	require.NoError(t, err)

@@ -33,10 +33,11 @@ const (
 // internal/providers/CLAUDE.md's onboarding recipe) or add it to
 // defaultMechanismProviders below to affirm the generic header is correct.
 var expectedSessionAffinityMechanism = map[string]sessionAffinityMechanism{
-	providers.ProviderOpenRouter: mechanismSessionIDHeader,
-	providers.ProviderOpenAI:     mechanismPromptCacheKeyBody,
-	providers.ProviderXAI:        mechanismGrokConvIDHeader,
-	providers.ProviderBedrock:    mechanismNone,
+	providers.ProviderOpenRouter:    mechanismSessionIDHeader,
+	providers.ProviderTrustedRouter: mechanismSessionIDHeader,
+	providers.ProviderOpenAI:        mechanismPromptCacheKeyBody,
+	providers.ProviderXAI:           mechanismGrokConvIDHeader,
+	providers.ProviderBedrock:       mechanismNone,
 }
 
 // defaultMechanismProviders are OpenAI-compat providers intentionally left

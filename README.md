@@ -82,8 +82,10 @@ flag reference: [install/npm/README.md](install/npm/README.md).
 If you want the router (and dashboard) running on your own box:
 
 ```bash
-# 1. Drop a provider key in. OpenRouter is the recommended baseline.
+# 1. Drop a provider key in. OpenRouter or TrustedRouter unlock the OSS pool.
 echo "OPENROUTER_API_KEY=sk-or-v1-..." >> .env.local
+# Or:
+echo "TRUSTEDROUTER_API_KEY=sk-tr-v1-..." >> .env.local
 
 # 2. Boot Postgres + router on :8080 and seed an rk_ key.
 make full-setup
