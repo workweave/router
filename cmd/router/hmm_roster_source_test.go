@@ -51,6 +51,13 @@ func TestHMMRosterSource_ServesStaleOnFetchFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stale, 1)
 	assert.Equal(t, "gpt-5.6-sol", stale[0].Model)
+
+	callsAfterFailure := fetch.calls
+	// Within the backoff window the next reader serves stale without re-hitting
+	// the failing sidecar.
+	_, err = src.HMMDeployedModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, callsAfterFailure, fetch.calls, "backoff must suppress re-fetch during an outage")
 }
 
 func TestHMMRosterSource_ErrorsWhenNoSnapshot(t *testing.T) {

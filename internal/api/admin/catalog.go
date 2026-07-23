@@ -31,8 +31,10 @@ type HMMRosterSource interface {
 // and managed deployment modes so the Weave control plane (which is the only
 // caller in managed mode) can fetch it without juggling router API keys.
 //
-// Without a ?strategy= query (or for the cluster strategy) it returns the
-	// For ?strategy=hmm* returns the HMM sidecar roster; nil hmmModels falls back to the cluster list.
+// Without a ?strategy= query (or the cluster strategy) it returns the cluster
+// artifact's registry. For an HMM strategy it returns the HMM sidecar roster;
+// a nil hmmModels (HMM not wired) falls back to the cluster list.
+//
 // The list is publicly known (we publish per-version model registries on the
 // RouterArena leaderboard) so there is no leak risk from leaving this open.
 func CatalogModelsHandler(models DeployedModelsSource, hmmModels HMMRosterSource) gin.HandlerFunc {

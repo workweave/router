@@ -32,6 +32,12 @@ const (
 	passthroughTimeout    = 10 * time.Second
 	routeTimeout          = 5 * time.Second
 	adminTimeout          = 10 * time.Second
+	// catalogModelsTimeout bounds GET /v1/router/models. The HMM strategy path
+	// fetches the roster from the sidecar, whose client budget defaults to 3s
+	// (policyclient.DefaultTimeout), so this must exceed that or a cold/expired
+	// cache would be cancelled before the roster returns. The cluster path is
+	// in-memory and returns well within this.
+	catalogModelsTimeout = 5 * time.Second
 	// feedbackTimeout bounds the no-login feedback link reads/writes. Both are
 	// single-row Postgres ops plus an async span emit, so 5s is generous.
 	feedbackTimeout = 5 * time.Second
@@ -95,7 +101,7 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 	// hand-copying it per gitlink bump. Unauthed: read-only, and the list is
 	// already public on the RouterArena leaderboard.
 	if deployedModels != nil {
-		engine.GET("/v1/router/models", middleware.WithTimeout(healthTimeout), admin.CatalogModelsHandler(deployedModels, hmmModels))
+		engine.GET("/v1/router/models", middleware.WithTimeout(catalogModelsTimeout), admin.CatalogModelsHandler(deployedModels, hmmModels))
 
 		// Projects the quality-vs-price dial's model mix across dial positions
 		// for the dashboard's distribution preview. Same unauthed rationale as
