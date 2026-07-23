@@ -80,10 +80,8 @@ func fail(step string, err error) {
 func checkRotateKeyRace(ctx context.Context, pool *pgxpool.Pool) error {
 	repo := postgres.NewRepository(pool, auth.NoOpEncryptor{})
 
-	// Hold every caller between ListForInstallation and SoftDelete so the
-	// TOCTOU window is observable. A start-only barrier is not enough: the
-	// List→SoftDelete critical section is microseconds, so one goroutine
-	// usually soft-deletes before the others even list (see earlier runs).
+	// Hold every caller between List and SoftDelete to open the TOCTOU window;
+	// a start-only barrier misses it because List→SoftDelete is microseconds.
 	listHold := newListHold(concurrentRotations)
 	apiKeys := &holdingAPIKeyRepo{inner: repo.APIKeys, hold: listHold}
 
