@@ -62,6 +62,30 @@ func TestAnthropicSameFormat_AddsTailCacheBreakpointWhenSystemAlreadyCached(t *t
 	assert.Equal(t, map[string]any{"type": "ephemeral"}, lastBlock["cache_control"])
 }
 
+func TestAnthropicSameFormat_SkipsSystemBreakpointBeforeLaterOneHourMessage(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"system":[{"type":"text","text":"rules"}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"continue"},{"role":"assistant","content":"ok"},{"role":"user","content":[{"type":"text","text":"cached tail","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+
+	system := out["system"].([]any)
+	require.Len(t, system, 1)
+	assert.NotContains(t, system[0].(map[string]any), "cache_control")
+
+	messages := out["messages"].([]any)
+	require.Len(t, messages, 5)
+	last := messages[4].(map[string]any)
+	blocks := last["content"].([]any)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, map[string]any{"type": "ephemeral", "ttl": "1h"}, blocks[0].(map[string]any)["cache_control"])
+}
+
+func TestAnthropicSameFormat_RejectsExplicitTTLOrderViolation(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"tools":[{"name":"a","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"cached later","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	_, err = env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+	require.ErrorIs(t, err, translate.ErrAnthropicCacheControlInvalid)
+}
+
 func TestAnthropicSameFormat_ToolCacheControlCountsTowardCapacity(t *testing.T) {
 	// 1 tool + 3 system = 4 breakpoints; router must not inject a fifth.
 	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,` +
