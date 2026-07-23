@@ -131,8 +131,12 @@ func TestRoute_PropensityReflectsPosteriorOverlap(t *testing.T) {
 }
 
 func TestRoute_KeepsArgmaxWhenSameModel(t *testing.T) {
+	// Keeping the argmax must leave the scorer's PairedModel untouched.
 	scores := map[string]float32{"claude-haiku-4-5": 0.9, "claude-sonnet-4-6": 0.5}
 	inner := clusterDecision(scores, []int{0}, "claude-haiku-4-5", "anthropic")
+	inner.Metadata.PairedModel = "claude-sonnet-4-6"
+	inner.Metadata.PairedProvider = "anthropic"
+	inner.Metadata.PairedScore = 0.5
 	post, err := LoadPosterior("testdata/ts_posterior.json")
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +152,53 @@ func TestRoute_KeepsArgmaxWhenSameModel(t *testing.T) {
 	}
 	if dec.Metadata.EffectiveKnobsHash != 99 {
 		t.Fatal("keeping argmax must preserve cache key")
+	}
+	if dec.Metadata.PairedModel != "claude-sonnet-4-6" {
+		t.Fatalf("argmax keep must preserve scorer runner-up sonnet, got %q", dec.Metadata.PairedModel)
+	}
+	if dec.Metadata.PairedScore != 0.5 {
+		t.Fatalf("argmax keep must preserve scorer paired score, got %v", dec.Metadata.PairedScore)
+	}
+}
+
+func TestRoute_RepairsBandPairWhenServingRunnerUp(t *testing.T) {
+	// Serving the former runner-up must recompute PairedModel to the prior argmax.
+	scores := map[string]float32{
+		"claude-sonnet-4-6": 0.90,
+		"claude-haiku-4-5":  0.85,
+	}
+	inner := clusterDecision(scores, []int{0}, "claude-sonnet-4-6", "anthropic")
+	inner.Metadata.PairedModel = "claude-haiku-4-5"
+	inner.Metadata.PairedProvider = "anthropic"
+	inner.Metadata.PairedScore = 0.85
+	post := &Posterior{cells: map[int]map[string]Arm{
+		0: {
+			"claude-haiku-4-5":  {Mean: 0.9, Variance: 0},
+			"claude-sonnet-4-6": {Mean: 0.1, Variance: 0},
+		},
+	}}
+	b := New(&fakeInner{dec: inner}, post)
+	b.norm = func() float64 { return 0 }
+	b.trials = 0
+
+	dec, err := b.Route(context.Background(), router.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Model != "claude-haiku-4-5" {
+		t.Fatalf("expected Thompson pick haiku (runner-up), got %q", dec.Model)
+	}
+	if dec.Metadata.PairedModel == dec.Model {
+		t.Fatalf("band pair collapsed: Model and PairedModel are both %q", dec.Model)
+	}
+	if dec.Metadata.PairedModel != "claude-sonnet-4-6" {
+		t.Fatalf("expected runner-up recomputed to sonnet, got %q", dec.Metadata.PairedModel)
+	}
+	if dec.Metadata.PairedProvider != "anthropic" {
+		t.Fatalf("expected paired provider anthropic, got %q", dec.Metadata.PairedProvider)
+	}
+	if dec.Metadata.PairedScore != 0.90 {
+		t.Fatalf("expected paired score 0.90, got %v", dec.Metadata.PairedScore)
 	}
 }
 
