@@ -257,14 +257,14 @@ func (r *apiKeyRepo) MarkUsed(ctx context.Context, id string) error {
 	return q.MarkModelRouterAPIKeyUsed(ctx, parsed)
 }
 
-func (r *apiKeyRepo) SoftDelete(ctx context.Context, installationID, id string) error {
+func (r *apiKeyRepo) SoftDelete(ctx context.Context, installationID, id string) (int64, error) {
 	installationUUID, err := uuid.Parse(installationID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	parsed, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	q := sqlc.New(r.tx)
 	return q.SoftDeleteModelRouterAPIKey(ctx, sqlc.SoftDeleteModelRouterAPIKeyParams{

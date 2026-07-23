@@ -258,7 +258,7 @@ func (q *Queries) MarkModelRouterAPIKeyUsed(ctx context.Context, id uuid.UUID) e
 	return err
 }
 
-const softDeleteModelRouterAPIKey = `-- name: SoftDeleteModelRouterAPIKey :exec
+const softDeleteModelRouterAPIKey = `-- name: SoftDeleteModelRouterAPIKey :execrows
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
 WHERE id = $1::uuid
@@ -271,14 +271,19 @@ type SoftDeleteModelRouterAPIKeyParams struct {
 	InstallationID uuid.UUID
 }
 
-// Soft-deletes a router API key. Cross-tenant safe via installation_id predicate.
+// Soft-deletes a router API key. Cross-tenant safe via installation_id
+// predicate. :execrows so callers (RotateAPIKey) can tell a 0-row no-op
+// from a real transition — see #817.
 //
 //	UPDATE router.model_router_api_keys
 //	SET deleted_at = NOW()
 //	WHERE id = $1::uuid
 //	  AND installation_id = $2::uuid
 //	  AND deleted_at IS NULL
-func (q *Queries) SoftDeleteModelRouterAPIKey(ctx context.Context, arg SoftDeleteModelRouterAPIKeyParams) error {
-	_, err := q.db.Exec(ctx, softDeleteModelRouterAPIKey, arg.ID, arg.InstallationID)
-	return err
+func (q *Queries) SoftDeleteModelRouterAPIKey(ctx context.Context, arg SoftDeleteModelRouterAPIKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteModelRouterAPIKey, arg.ID, arg.InstallationID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

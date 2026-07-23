@@ -132,8 +132,16 @@ func (s *Service) ListAPIKeys(ctx context.Context, installationID string) ([]*AP
 // RotateAPIKey soft-deletes the named key and issues a replacement under the
 // same installation, carrying forward its name. Returns ErrAPIKeyNotFound if
 // keyID isn't an active key owned by installationID, so a foreign key UUID
-// can't be rotated. Not transactional: the brief "no active key" gap is fine
-// since rotation's whole point is invalidating the old token anyway.
+// can't be rotated.
+//
+// SoftDelete's rows-affected count is load-bearing (#817): a 0-row result
+// means another caller already transitioned the key (a concurrent
+// RotateAPIKey, or a DeleteAPIKey that won the race after this caller
+// Listed). In that case we must not mint a successor — doing so produced
+// untracked zombie credentials when SoftDelete was :exec and the count was
+// discarded. The List→SoftDelete→Issue steps are still not wrapped in a
+// single transaction; Postgres row-level locking serializes SoftDelete, and
+// reading rows-affected is enough to close both failure modes.
 func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string, createdBy *string) (*APIKey, string, error) {
 	existing, err := s.apiKeys.ListForInstallation(ctx, installationID)
 	if err != nil {
@@ -149,8 +157,12 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 	if target == nil {
 		return nil, "", ErrAPIKeyNotFound
 	}
-	if err := s.apiKeys.SoftDelete(ctx, installationID, target.ID); err != nil {
+	n, err := s.apiKeys.SoftDelete(ctx, installationID, target.ID)
+	if err != nil {
 		return nil, "", err
+	}
+	if n == 0 {
+		return nil, "", ErrAPIKeyNotFound
 	}
 	key, raw, err := s.IssueAPIKey(ctx, installationID, target.Name, createdBy)
 	if err != nil {
@@ -162,9 +174,11 @@ func (s *Service) RotateAPIKey(ctx context.Context, installationID, keyID string
 
 // DeleteAPIKey soft-deletes an API key and invalidates the installation's
 // cache entry on this replica and all peers, so the key doesn't stay usable
-// for the remainder of the positive cache TTL (5 min).
+// for the remainder of the positive cache TTL (5 min). SoftDelete's
+// rows-affected count is discarded: a 0-row no-op (already deleted) is the
+// existing idempotent success behavior and must not surface as an error.
 func (s *Service) DeleteAPIKey(ctx context.Context, installationID, id string) error {
-	if err := s.apiKeys.SoftDelete(ctx, installationID, id); err != nil {
+	if _, err := s.apiKeys.SoftDelete(ctx, installationID, id); err != nil {
 		return err
 	}
 	s.invalidateInstallation(installationID)
