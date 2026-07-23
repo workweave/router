@@ -5,11 +5,12 @@ name: Comment Length Review
 # the shortened comment. Never blocks merge (no required status check, and the
 # review is posted as event=COMMENT, not REQUEST_CHANGES).
 #
-# Comments are authored by the workweave-bot account (WEAVE_BOT_TOKEN PAT), not
-# github-actions[bot]: the gh api reviews call below runs under that token.
+# Runs on pull_request_target so forked PRs also get reviewed. Safe because the
+# review is advisory-only (COMMENT event, no write to the fork's code) and only
+# runs Claude on the git diff, not user-authored build scripts.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
       - "**/*.go"
@@ -18,7 +19,6 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  id-token: write
 
 concurrency:
   group: comment-length-review-${{ github.event.pull_request.number }}
@@ -31,12 +31,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Run Claude comment-length review
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.WEAVE_BOT_TOKEN }}
           model: "claude-sonnet-4-6"
           allowed_tools: "Bash(git diff:*),Bash(git log:*),Bash(gh api:*)"
           allowed_bots: "devin-ai-integration"
@@ -46,7 +48,7 @@ jobs:
             logic, correctness, naming, tests, or anything other than comment
             length/verbosity.
 
-            1. Run `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- '*.go'`
+            1. Run `git diff origin/${{ github.event.pull_request.base.ref }}...${{ github.event.pull_request.head.sha }} -- '*.go'`
                to see what changed in this PR.
             2. Look only at ADDED comment lines (lines starting with `+` that are
                `//` line comments or inside a `/* */` block). Find comment blocks
@@ -92,6 +94,4 @@ jobs:
                JSON
                ```
         env:
-          # workweave-bot PAT so review comments come from that account, not
-          # github-actions[bot]. Needs pull_requests: write on this repo.
           GH_TOKEN: ${{ secrets.WEAVE_BOT_TOKEN }}
