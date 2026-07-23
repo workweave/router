@@ -150,10 +150,7 @@ func TestStripCCTools_AnthropicSourceAnthropicTarget_KeepsCCOnly(t *testing.T) {
 }
 
 func TestKeepOrchestrationTools_OpenAITarget_KeepsOrchestrationDropsRest(t *testing.T) {
-	// With the cross-vendor orchestration flag on, Task*/Skill/Workflow/plan-mode
-	// survive so a capable non-Anthropic model can drive subagents/workflows,
-	// while the remaining CC-only tools (AskUserQuestion, NotebookEdit) are still
-	// stripped.
+	// Flag on: orchestration tools survive; other CC-only tools (AskUserQuestion, NotebookEdit) are still stripped.
 	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
 	require.NoError(t, err)
 
@@ -194,10 +191,8 @@ func TestKeepOrchestrationTools_GeminiTarget_KeepsOrchestrationDropsRest(t *test
 }
 
 func TestKeepOrchestrationTools_EmitOptionsZeroValue_StripsAll(t *testing.T) {
-	// The translate layer requires explicit opt-in: a zero-value EmitOptions
-	// (KeepCrossVendorOrchestrationTools unset) must strip every CC-only tool,
-	// so a caller that doesn't set the field gets the historical behavior. The
-	// production default (on) is applied by the proxy composition root, not here.
+	// Zero-value EmitOptions strips all CC-only tools; production default
+	// (on) is set by the proxy composition root, not the translate layer.
 	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
 	require.NoError(t, err)
 

@@ -61,13 +61,10 @@ type EmitOptions struct {
 	// instead of 200K, avoiding a 400 "prompt is too long" on large requests.
 	// No-op below 200K input. deriveAnthropicHeaders gates on CapExtendedContext.
 	EnableExtendedContext bool
-	// KeepCrossVendorOrchestrationTools preserves the Claude Code orchestration
-	// tools (Task*, Workflow, Skill, plan-mode) on Anthropic→non-Anthropic emit
-	// instead of stripping them, so a capable upstream can drive subagents /
-	// workflows / skills. The rest of the Claude-Code-only set (Cron*, Monitor,
-	// MCP-resource tools, ...) is still stripped. The proxy sets this from the
-	// ROUTER_CC_ORCH_TOOLS_CROSSVENDOR flag (on by default); the zero value here
-	// is false so a caller that doesn't opt in still gets the historical strip.
+	// KeepCrossVendorOrchestrationTools preserves CC orchestration tools
+	// (Task*, Workflow, Skill, plan-mode) on cross-vendor emit; other CC-only
+	// tools are always stripped. Set from ROUTER_CC_ORCH_TOOLS_CROSSVENDOR;
+	// zero value false preserves historical strip-all behavior.
 	KeepCrossVendorOrchestrationTools bool
 	// DowngradeGeminiValidatedToAuto emits functionCallingConfig.mode=AUTO
 	// instead of VALIDATED for Gemini 3.x. VALIDATED compiles tool schemas into

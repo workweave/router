@@ -57,13 +57,9 @@ func isClaudeCodeOnlyTool(name string) bool {
 }
 
 // claudeCodeOrchestrationToolNames is the subset of claudeCodeOnlyToolNames
-// that drives multi-step work the client executes on the model's behalf:
-// subagent dispatch (Task*), workflow runs, skill invocation, and plan-mode
-// toggles. Unlike the rest of the CC-only set (Cron*, Monitor, MCP-resource
-// tools, worktree/LSP helpers), a capable non-Anthropic model can emit a
-// well-formed call to one of these and have the client action it — so they are
-// optionally preserved on cross-vendor emit to let workflows/subagents run off
-// the Anthropic family. Must stay a strict subset of claudeCodeOnlyToolNames.
+// whose tools a capable non-Anthropic model can act on (subagent dispatch,
+// workflow runs, skill invocation, plan-mode toggles). Must stay a strict
+// subset of claudeCodeOnlyToolNames — see TestOrchestrationToolsAreSubsetOfCCOnly.
 var claudeCodeOrchestrationToolNames = map[string]struct{}{
 	"Task":          {},
 	"TaskCreate":    {},

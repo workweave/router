@@ -2,11 +2,9 @@ package translate
 
 import "testing"
 
-// The orchestration set must stay a strict subset of the CC-only set: shouldStripCCTool
-// only reaches its keep-orchestration branch for names it already treats as CC-only, so
-// an orchestration entry that isn't also CC-only would be a silent no-op (and a lie in
-// the docs). This breaks the moment someone adds an orchestration name without adding it
-// to claudeCodeOnlyToolNames.
+// claudeCodeOrchestrationToolNames must be a strict subset of claudeCodeOnlyToolNames;
+// otherwise shouldStripCCTool silently skips the keep-orchestration branch for any
+// name missing from the CC-only set.
 func TestOrchestrationToolsAreSubsetOfCCOnly(t *testing.T) {
 	for name := range claudeCodeOrchestrationToolNames {
 		if !isClaudeCodeOnlyTool(name) {

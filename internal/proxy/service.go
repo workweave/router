@@ -146,12 +146,9 @@ type Service struct {
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
 	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
 	effortEscalation bool
-	// ccOrchToolsCrossVendor keeps the Claude Code orchestration tools (Task*,
-	// Workflow, Skill, plan-mode) in the tool set on Anthropic→non-Anthropic
-	// routes instead of stripping them, so subagents/workflows can run off the
-	// Anthropic family. On by default (kill switch: ROUTER_CC_ORCH_TOOLS_CROSSVENDOR
-	// =false restores the strip-everything behavior); the rest of the CC-only
-	// tools stay stripped regardless.
+	// ccOrchToolsCrossVendor keeps CC orchestration tools (Task*, Workflow,
+	// Skill, plan-mode) on cross-vendor routes. Kill switch:
+	// ROUTER_CC_ORCH_TOOLS_CROSSVENDOR=false strips all CC-only tools.
 	ccOrchToolsCrossVendor bool
 	// bandSwap is the per-turn large-vs-small action classifier. Non-nil only
 	// when ROUTER_BAND_SWAP is on and the head loaded; a sticky MainLoop STAY
@@ -1051,10 +1048,8 @@ func (s *Service) WithEffortEscalation(enabled bool) *Service {
 	return s
 }
 
-// WithCCOrchestrationToolsCrossVendor preserves the Claude Code orchestration
-// tools (Task*, Workflow, Skill, plan-mode) on Anthropic→non-Anthropic routes
-// instead of stripping them. On by default; passing false restores the
-// strip-everything behavior for all Claude-Code-only tools cross-vendor.
+// WithCCOrchestrationToolsCrossVendor preserves Claude Code orchestration
+// tools (Task*, Workflow, Skill, plan-mode) on cross-vendor emit. False strips all.
 func (s *Service) WithCCOrchestrationToolsCrossVendor(enabled bool) *Service {
 	s.ccOrchToolsCrossVendor = enabled
 	return s
