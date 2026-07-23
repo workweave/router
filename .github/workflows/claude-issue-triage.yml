@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# Automated first-pass triage on every new issue. Posts ONE transparent
+# agent reply (clearly labelled as a bot), checks the report against the
+# docs, looks for likely duplicates, and applies labels. A human maintainer
+# follows up — this just gives the reporter an instant, useful first response
+# and keeps the tracker organized. Requires the Claude GitHub App + secret.
+name: Claude issue triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    # Same-repo only (secret), and skip if the opener is already asking for a
+    # human via @claude — the on-demand workflow handles those.
+    if: |
+      github.repository == 'workweave/router' &&
+      !contains(github.event.issue.body, '@claude') &&
+      !contains(github.event.issue.title, '@claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Triage issue
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: false
+          prompt: |
+            You are the first-pass triage agent for the workweave/router open-source repo.
+            A new issue (#${{ github.event.issue.number }}) was just opened. Triage it by
+            following the repo's triage procedure in .claude/skills/triage-issue/SKILL.md
+            EXACTLY. In short:
+
+            1. Read the issue title and body.
+            2. Search existing issues for likely duplicates:
+               `gh issue list --repo ${{ github.repository }} --state all --limit 60 --search "<keywords>"`.
+               If you find a strong match, link it.
+            3. Check the report against README.md and docs/CONFIGURATION.md — if it's a
+               configuration question already answered there, point to the exact section.
+            4. Apply labels with `gh issue edit` from THIS set only (do not invent labels):
+               bug, enhancement, documentation, question, provider-request, needs-info, duplicate.
+            5. Post exactly ONE comment via `gh issue comment`. It MUST open with this line
+               verbatim so the reporter knows it's automated:
+
+               > 🤖 _Automated first-pass triage — a maintainer will follow up. Reply with `@claude` if you need the agent again, or tag a maintainer if you need a human sooner._
+
+               Then: a one-line restatement of the problem, any duplicate/doc links you
+               found, and (only if essential info is missing) a short list of what you need.
+               Be concise and friendly. Do NOT claim anything is fixed, and do NOT promise a
+               timeline. If you're unsure, say a maintainer will take a look.
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh search:*)"

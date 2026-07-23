@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# Automated code review on every PR open / push. Reviews against the repo's
+# own layering rules (AGENTS.md) and the "what we won't accept" list in
+# CONTRIBUTING.md, then leaves review comments. It never merges.
+#
+# NOTE: PRs from forks do NOT receive secrets, so this auto-review only runs
+# for branches pushed to the canonical repo. For an external contributor's
+# fork PR, a maintainer triggers review by commenting "@claude review this"
+# (handled by claude.yml, which runs in the base-repo context). This avoids
+# pull_request_target, which would expose the API key to untrusted PR code.
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    if: github.repository == 'workweave/router'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Review PR
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: false
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} in workweave/router.
+            You are a maintainer-grade reviewer for a Go model-router. Be direct and
+            specific; cite file:line. Prefer a few high-signal comments over many nits.
+
+            Ground your review in the repo's own rules — read these first:
+              - AGENTS.md (layer model + import rules; the "Things to NEVER do" list)
+              - CONTRIBUTING.md ("What we won't accept")
+              - the CLAUDE.md inside any package the PR touches
+
+            Flag, in priority order:
+              1. Layering / import violations — inner-ring packages doing I/O; adapters
+                 importing each other; presentation importing internal/postgres or a
+                 concrete provider adapter; anything constructed outside cmd/router/main.go.
+              2. Silent fallbacks — any path that quietly degrades to a default model
+                 instead of surfacing an error / HTTP 503.
+              3. Magic strings for provider/model names instead of the internal/providers
+                 constants.
+              4. Hand-edited generated code under internal/sqlc/ (must be regenerated).
+              5. Tautological tests (assert nothing that breaks if prod code is deleted)
+                 and missing tests for new behavior.
+              6. Logging secrets / raw tokens / full request bodies; wrong log levels.
+              7. Missing DCO sign-off on commits.
+
+            If the diff only adds an OpenAI-compatible provider, check it against
+            .claude/skills/add-provider/SKILL.md and call out any skipped step.
+
+            Post your review with `gh pr review` (use --comment, not --approve and not
+            --request-changes — a human makes the merge call). If the PR looks clean,
+            say so briefly. Do not merge.
+          claude_args: |
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr review:*),Bash(gh pr comment:*)"

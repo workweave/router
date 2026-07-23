@@ -1,0 +1,47 @@
+name: ✨ Feature request
+description: Suggest a capability or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We prioritize by the **problem** you're hitting, not a specific code change. Tell us what you're trying to do and why — we'll figure out the right shape with you. If you already have an implementation in mind, great, add it under "Possible solution", but lead with the use case.
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/workweave/router/issues?q=is%3Aissue) and this isn't already requested.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The use case and the problem you're hitting today. What's blocked or painful without this?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Possible solution (optional)
+      description: If you have an idea for how this could work, share it. We may take the goal and the implementation separately.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered (optional)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to open a PR for this (a maintainer can help scope it first in the Slack).
+          required: false

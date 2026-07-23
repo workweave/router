@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/workweave/router#readme
+    about: Most setup, configuration, and routing questions are answered in the README and docs/CONFIGURATION.md. Please read these first.
+  - name: 💬 Contributors Slack
+    url: https://TODO-REPLACE-WITH-SLACK-INVITE
+    about: Questions, ideas, and "should I build this before I open a PR?" conversations happen here. Best place to reach a maintainer.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/workweave/router/security/advisories/new
+    about: Do NOT open a public issue for security problems. Report privately here. See SECURITY.md.

@@ -1,0 +1,72 @@
+name: 🐞 Bug report
+description: Something in the router is broken or behaving incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more precise the repro, the faster we can fix it.
+        A maintainer (or our automated first-pass agent) will respond — please fill this out completely so we don't have to ask for the basics.
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/workweave/router/issues?q=is%3Aissue) and this isn't a duplicate.
+          required: true
+        - label: I read the [README](https://github.com/workweave/router#readme) and [docs/CONFIGURATION.md](https://github.com/workweave/router/blob/main/docs/CONFIGURATION.md), and this isn't a configuration question.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Router version / commit
+      description: Output of the running build, the npm package version, or the git commit SHA you're on.
+      placeholder: "e.g. router-v0.70.2, or commit c2bd4a3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment-mode
+    attributes:
+      label: Deployment mode
+      options:
+        - selfhosted
+        - managed
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe? What did you expect instead?
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact, minimal steps. Include the request (curl is ideal — redact your API keys) and which model/provider was involved.
+      placeholder: |
+        1. Configure ...
+        2. Send `curl -X POST .../v1/messages -d '{...}'`
+        3. ...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Router logs around the failure. Redact API keys, bearer tokens, and any request bodies you can't share.
+      render: shell
+    validations:
+      required: false
