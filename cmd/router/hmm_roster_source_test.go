@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"workweave/router/internal/router/cluster"
 )
 
 type stubRosterFetcher struct {
@@ -76,6 +78,46 @@ func TestHMMRosterSource_ErrorsWhenNoSnapshot(t *testing.T) {
 
 	_, err := src.HMMDeployedModels(context.Background())
 	require.Error(t, err)
+}
+
+func TestHMMRosterSource_CallerCancelDoesNotAbortSharedFetch(t *testing.T) {
+	// One caller cancels while the shared cold-start fetch is in flight; a
+	// concurrent caller with a live context must still get the roster (the
+	// shared fetch runs under a detached context, not the canceller's).
+	fetch := &stubRosterFetcher{
+		ids:     []string{"openai/gpt-5.6-sol"},
+		gate:    make(chan struct{}),
+		entered: make(chan struct{}, 2),
+	}
+	src := newHMMRosterSource(fetch)
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	var liveEntries []cluster.DeployedEntry
+	var liveErr error
+
+	wg.Add(2)
+	// Caller A: will be cancelled mid-fetch.
+	go func() {
+		defer wg.Done()
+		_, _ = src.HMMDeployedModels(cancelCtx)
+	}()
+	// Caller B: live context, must receive the roster.
+	go func() {
+		defer wg.Done()
+		liveEntries, liveErr = src.HMMDeployedModels(context.Background())
+	}()
+
+	// Wait until the (single) shared fetch is in flight, cancel caller A, then
+	// release the fetch. Caller B must still succeed.
+	<-fetch.entered
+	cancel()
+	close(fetch.gate)
+	wg.Wait()
+
+	require.NoError(t, liveErr, "a live-context caller must not inherit another caller's cancellation")
+	require.Len(t, liveEntries, 1)
+	assert.Equal(t, "gpt-5.6-sol", liveEntries[0].Model)
 }
 
 func TestHMMRosterSource_ColdStartStampedeCollapsesToOneFetch(t *testing.T) {

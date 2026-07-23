@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"workweave/router/internal/policyclient"
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/hmm"
 )
@@ -19,6 +20,12 @@ const hmmRosterTTL = 5 * time.Minute
 // while stale data is being served. Without it, every reader after TTL expiry
 // would re-enter the slow failing fetch during a sidecar outage.
 const hmmRosterRetryBackoff = 30 * time.Second
+
+// hmmRosterFetchTimeout bounds the detached shared roster fetch. It matches
+// the sidecar client's own per-call budget; the shared fetch runs under this
+// rather than any single caller's request context so one caller cancelling
+// doesn't abort the refresh for the others.
+const hmmRosterFetchTimeout = policyclient.DefaultTimeout
 
 // rosterFetcher is the subset of the policy sidecar client the roster source
 // needs; satisfied by *policyclient.Client.
@@ -62,16 +69,26 @@ func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []clus
 	}
 	s.mu.Unlock()
 
-	// singleflight collapses a concurrent stampede onto one refresh. The
-	// shared result is returned to every waiter; only that one goroutine
-	// touches the cache, so there is no clobber race in either outcome.
-	result, refreshErr, _ := s.group.Do("roster", func() (interface{}, error) {
-		return s.refresh(ctx)
+	// singleflight collapses a concurrent stampede onto one refresh whose
+	// result is shared with every waiter. The shared fetch runs under its own
+	// detached, budget-bounded context (not this caller's ctx) so one caller
+	// disconnecting doesn't cancel the fetch for the others; each caller still
+	// honors its own ctx via the select below.
+	ch := s.group.DoChan("roster", func() (interface{}, error) {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hmmRosterFetchTimeout)
+		defer cancel()
+		return s.refresh(fetchCtx)
 	})
-	if refreshErr != nil {
-		return nil, refreshErr
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return cloneDeployedEntries(res.Val.([]cluster.DeployedEntry)), nil
 	}
-	return cloneDeployedEntries(result.([]cluster.DeployedEntry)), nil
 }
 
 // refresh fetches the roster from the sidecar and updates the cache. On
