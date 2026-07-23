@@ -272,8 +272,7 @@ type SoftDeleteModelRouterAPIKeyParams struct {
 }
 
 // Soft-deletes a router API key. Cross-tenant safe via installation_id
-// predicate. :execrows so callers (RotateAPIKey) can tell a 0-row no-op
-// from a real transition — see #817.
+// predicate. :execrows lets callers tell a 0-row no-op from a real transition.
 //
 //	UPDATE router.model_router_api_keys
 //	SET deleted_at = NOW()

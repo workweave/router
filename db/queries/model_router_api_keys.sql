@@ -60,8 +60,7 @@ WHERE id = @id::uuid
   AND deleted_at IS NULL;
 
 -- Soft-deletes a router API key. Cross-tenant safe via installation_id
--- predicate. :execrows so callers (RotateAPIKey) can tell a 0-row no-op
--- from a real transition — see #817.
+-- predicate. :execrows lets callers tell a 0-row no-op from a real transition.
 -- name: SoftDeleteModelRouterAPIKey :execrows
 UPDATE router.model_router_api_keys
 SET deleted_at = NOW()
