@@ -35,19 +35,16 @@ type hmmRosterSource struct {
 	haveCache bool
 }
 
-// newHMMRosterSource initializes the cached HMM roster source. The caller
-// must ensure the registered catalogModelsTimeout exceeds the sidecar client
-// budget (policyclient.DefaultTimeout or ROUTER_HMM_SIDECAR_TIMEOUT_MS),
-// otherwise a cold/expired cache is cancelled before the roster returns.
+// newHMMRosterSource initializes the cached HMM roster source.
 func newHMMRosterSource(fetch rosterFetcher) *hmmRosterSource {
 	return &hmmRosterSource{fetch: fetch}
 }
 
 // HMMDeployedModels returns catalog entries for the HMM roster. The lock is
-// not held across the sidecar fetch so concurrent callers don't serialize;
-// a failed refresh with a prior snapshot serves stale + backs off so an
-// outage doesn't hammer the sidecar on every request. A racing successful
-// fetch is preserved — it cannot be overwritten by a slower failing fetch.
+// not held across the fetch so concurrent callers don't serialize; a failing
+// refresh with a prior snapshot serves stale and backs off. Neither the
+// success nor the failure write-back can clobber a concurrent winner: both
+// commit only while our in-flight marker is still the current fetchedAt.
 func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []cluster.DeployedEntry, err error) {
 	s.mu.Lock()
 	if s.haveCache && time.Since(s.fetchedAt) < hmmRosterTTL {
@@ -81,9 +78,14 @@ func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []clus
 
 	mapped := hmm.DeployedModelsForRosterIDs(rosterIDs)
 	s.mu.Lock()
-	s.cached = mapped
-	s.fetchedAt = time.Now()
-	s.haveCache = true
+	// Same guard as the failure path: only commit if no concurrent refresh
+	// has updated the cache since we marked it in flight, so a slower success
+	// can't overwrite a newer winner. Either snapshot is valid to return.
+	if s.fetchedAt.Equal(fetching) {
+		s.cached = mapped
+		s.fetchedAt = time.Now()
+		s.haveCache = true
+	}
 	s.mu.Unlock()
 	return cloneDeployedEntries(mapped), nil
 }

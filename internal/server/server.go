@@ -33,12 +33,9 @@ const (
 	passthroughTimeout    = 10 * time.Second
 	routeTimeout          = 5 * time.Second
 	adminTimeout          = 10 * time.Second
-	// catalogModelsTimeout bounds GET /v1/router/models. It must exceed the
-	// HMM sidecar client's own per-call budget so the handler doesn't cancel
-	// a cold/expired cache fetch before the sidecar responds. Using 2× the
-	// policy client default leaves room for one retry within the same window.
-	// If ROUTER_HMM_SIDECAR_TIMEOUT_MS is set above policyclient.DefaultTimeout,
-	// increase this to match.
+	// catalogModelsTimeout bounds GET /v1/router/models; must exceed the HMM
+	// sidecar client budget (policyclient.DefaultTimeout) or a cold/expired
+	// cache fetch is cancelled and the caller gets 503.
 	catalogModelsTimeout = policyclient.DefaultTimeout * 2
 	// feedbackTimeout bounds the no-login feedback link reads/writes. Both are
 	// single-row Postgres ops plus an async span emit, so 5s is generous.
