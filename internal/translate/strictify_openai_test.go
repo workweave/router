@@ -236,21 +236,16 @@ func TestStrictify_UnevaluatedPropertiesBails(t *testing.T) {
 	require.False(t, ok, "unevaluatedProperties is not expressible in strict mode; must bail")
 }
 
-// Workflow.args is bare {} — makeNullable's synthetic anyOf branch had no 'type' key
-// and OpenAI strict mode 400'd; verify the fix adds an explicit value-type union.
-func TestStrictify_TypelessOptionalGetsExplicitValueType(t *testing.T) {
-	out, ok := strictifyFromJSON(t, `{
+// Workflow.args is a bare {} "any JSON value" optional. #829 kept it strict by
+// synthesizing a 6-type union branch, but that branch admits "object" without
+// additionalProperties:false, so OpenAI strict mode still 400'd
+// (context=('properties','args','anyOf','0','type','3')). An open value has no
+// strict representation, so the whole tool must bail to non-strict emission.
+func TestStrictify_TypelessOptionalBails(t *testing.T) {
+	_, ok := strictifyFromJSON(t, `{
 		"type":"object",
 		"properties":{"args":{}},
 		"required":[]
 	}`)
-	require.True(t, ok, "a typeless optional property must survive strictification, not bail")
-
-	args := out["properties"].(map[string]any)["args"].(map[string]any)
-	branches, has := args["anyOf"].([]any)
-	require.True(t, has, "a typeless optional is made nullable via anyOf")
-	require.Len(t, branches, 2)
-	assert.Equal(t, []any{"string", "number", "boolean", "object", "array", "null"}, branches[0].(map[string]any)["type"],
-		"a typeless branch must carry an explicit value-type union so OpenAI strict mode doesn't 400")
-	assert.Equal(t, map[string]any{"type": "null"}, branches[1])
+	require.False(t, ok, "a bare {} optional (any JSON value) has no strict form; must fall back to non-strict")
 }
