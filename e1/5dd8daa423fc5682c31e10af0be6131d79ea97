@@ -1,0 +1,32 @@
+db/migrations/0004_drop_is_eval_allowlisted.up.sql
+  6da22b6a530ba492 1-3
+internal/observability/otel/pricing.go
+  6da22b6a530ba492 2
+db/migrations/0004_drop_is_eval_allowlisted.down.sql
+  6da22b6a530ba492 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e15dd8daa423fc5682c31e10af0be6131d79ea97",
+  "prompts": {
+    "6da22b6a530ba492": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ac980d2b-a356-4488-96dc-383a83ffa12a",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 1,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_6e20dcf5f4a808": {
+      "author": "steventohme"
+    }
+  }
+}

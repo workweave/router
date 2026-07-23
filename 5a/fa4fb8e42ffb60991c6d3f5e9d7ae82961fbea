@@ -1,0 +1,21 @@
+install/opencode-weave/test/capture.test.ts
+  s_09ca5e2e44a0ed::t_ff9e6ea485e39c 191-213
+install/opencode-weave/src/index.ts
+  s_09ca5e2e44a0ed::t_7fac896285e158 459-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "5afa4fb8e42ffb60991c6d3f5e9d7ae82961fbea",
+  "prompts": {},
+  "sessions": {
+    "s_09ca5e2e44a0ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35ef0a9f-52c3-476b-b860-781312b3d039",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+internal/translate/force_effort_anthropic_test.go
+  s_1f0150b349ee2c::t_d800cf66282228 1-122
+internal/router/router.go
+  s_1f0150b349ee2c::t_2b62e4789c6a08 24-33
+internal/server/server.go
+  s_1f0150b349ee2c::t_be9af1e7197582 159
+internal/translate/emit_openai.go
+  s_1f0150b349ee2c::t_be1e488fdae779 22-49
+  s_1f0150b349ee2c::t_48b41fe32ab7d8 197-207
+internal/translate/force_effort_test.go
+  s_1f0150b349ee2c::t_68807dc8f67c3b 110-140,146,151-155,157-163,168-186
+  s_1f0150b349ee2c::t_715f4fc9b55e2e 141-145,147-150,156
+  s_1f0150b349ee2c::t_ada9bb65aa52ef 164-167
+internal/proxy/force_model.go
+  s_1f0150b349ee2c::t_9960b16eeb19dd 102-103,105-123,125,130,143,148,152,154,156-188,190,236-242,256-262,282
+  s_1f0150b349ee2c::t_503a455744c685 255
+  s_1f0150b349ee2c::t_b6efd3d4b9ff47 14
+internal/server/middleware/force_effort_override_test.go
+  s_1f0150b349ee2c::t_fca725cff719a2 1-96
+internal/translate/envelope.go
+  s_1f0150b349ee2c::t_5d629352817363 1028
+  s_1f0150b349ee2c::t_5f79a256563870 482-500
+  s_1f0150b349ee2c::t_c3975177be0dba 1066-1073,1075-1076
+  s_1f0150b349ee2c::t_05bf6b9a9ae95b 1018-1025,1029,1032-1039
+  s_1f0150b349ee2c::t_2c7ac418b9bd39 1074
+  s_1f0150b349ee2c::t_ca44d2d4b5f1f5 1006-1009,1011-1017,1026-1027,1030-1031,1040-1041
+  s_1f0150b349ee2c::t_0d074b8690ad8e 364-371
+  s_1f0150b349ee2c::t_1c8c166285cadb 1010
+  s_1f0150b349ee2c::t_2a63cfe47a1e83 56-62
+  s_1f0150b349ee2c::t_471ba5d6986313 985,989
+  s_1f0150b349ee2c::t_d4c9b816afea59 978-982,986-988,990-1004
+  s_1f0150b349ee2c::t_8ae4a38023cec7 1005
+internal/server/middleware/force_effort_override.go
+  s_1f0150b349ee2c::t_1ef4e6649053cf 1-58
+internal/proxy/service.go
+  s_1f0150b349ee2c::t_11dc579cf47ca9 2349
+  s_1f0150b349ee2c::t_b57476152ec0b7 4252-4255
+  s_1f0150b349ee2c::t_fb7c2c441c73a6 2339-2348,2350
+  s_1f0150b349ee2c::t_24a83801a8e21a 2678-2681
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a9bb3b81298deac233a7d66a229f9226d509d328",
+  "prompts": {},
+  "sessions": {
+    "s_1f0150b349ee2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b525f980-c9fc-4332-bbe9-8a627ee8612e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

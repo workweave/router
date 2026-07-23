@@ -1,0 +1,23 @@
+internal/router/cluster/artifacts/v0.54/rankings.json
+  s_c207deb4defaf3::t_da2b5fb8f525b8 391
+internal/router/catalog/catalog.go
+  s_c207deb4defaf3::t_30d9a18d8e2165 298-303
+internal/translate/provider_hint_test.go
+  s_c207deb4defaf3::t_58cf3751ee3c28 139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "92c1e3c8d20f23e43589aa2103efd1acbcf6b032",
+  "prompts": {},
+  "sessions": {
+    "s_c207deb4defaf3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "314e9d13-8230-492c-b72a-db9a7a3dd1f5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

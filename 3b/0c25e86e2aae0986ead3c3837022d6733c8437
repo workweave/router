@@ -1,0 +1,21 @@
+install/install.sh
+  s_d3fc1c517ba243::t_1c826bfc00a12d 1545
+install/pi-router/src/dispatch.ts
+  s_d3fc1c517ba243::t_8567de9d36791a 340
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3b0c25e86e2aae0986ead3c3837022d6733c8437",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

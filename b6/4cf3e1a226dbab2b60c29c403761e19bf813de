@@ -1,0 +1,236 @@
+internal/router/cluster/distribution_test.go
+  s_5880a7522b3b5c::t_4eccd62da423fb 129-130
+  s_5880a7522b3b5c::t_741897229b83ce 108-109
+  s_5880a7522b3b5c::t_abbada436ac898 217-222
+  s_5880a7522b3b5c::t_7cfc3fb6da26d7 256-258
+  s_5880a7522b3b5c::t_82668ff265e2fc 142
+  s_5880a7522b3b5c::t_db3797e9ac070f 232-233
+  s_5880a7522b3b5c::t_222038dc39e7c3 148-149
+  s_5880a7522b3b5c::t_72d0b4acc14292 65-67
+  s_5880a7522b3b5c::t_0ac0840b6322a2 54
+  s_5880a7522b3b5c::t_9fcdb37fb8dc07 169-170
+  s_5880a7522b3b5c::t_a12405f9a18864 293-294
+  s_5880a7522b3b5c::t_0b4341cc8c34e1 308
+internal/providers/openai/client_stall_test.go
+  s_5880a7522b3b5c::t_b8006f38e263ff 3-9
+  s_5880a7522b3b5c::t_80cb072123a889 40-41
+  s_5880a7522b3b5c::t_5382289d8fb939 71-72
+  s_5880a7522b3b5c::t_22866ffce3a8dd 77-79
+  s_5880a7522b3b5c::t_23d2621d834f9b 113-115
+internal/router/model.go
+  s_5880a7522b3b5c::t_6795a0485f09e3 13-14
+  s_5880a7522b3b5c::t_d4d4a15cb9a8e7 78-79
+  s_5880a7522b3b5c::t_a4b8c93a98684b 83-84
+  s_5880a7522b3b5c::t_e3265491514251 89-90
+  s_5880a7522b3b5c::t_4eac2aa18e2846 56-58
+internal/api/admin/excluded_models.go
+  s_5880a7522b3b5c::t_d4dfaa611f125e 16-17
+  s_5880a7522b3b5c::t_8e3bbdc0c925ec 61-62
+  s_5880a7522b3b5c::t_7109b5bd195d82 93
+  s_5880a7522b3b5c::t_96000088eda204 22-23
+internal/translate/features.go
+  s_5880a7522b3b5c::t_ce6b8b6c2d6133 449
+  s_5880a7522b3b5c::t_dd2c0804f0f079 508-509
+  s_5880a7522b3b5c::t_f9a89f9b728a7c 42-44,46-47
+  s_5880a7522b3b5c::t_33a8e1d5fa7e6c 51-57
+  s_5880a7522b3b5c::t_484f8931756b94 12-16
+  s_5880a7522b3b5c::t_76040bd0d5787c 529-530
+  s_5880a7522b3b5c::t_f8757f2ebce0b6 74-75
+  s_5880a7522b3b5c::t_a926b947730dac 63-65
+  s_5880a7522b3b5c::t_bfea7d4893acdb 387-391
+internal/router/sessionpin/store.go
+  s_5880a7522b3b5c::t_40d9163cd76d24 2
+  s_5880a7522b3b5c::t_d6168fc7996fb8 37-42
+  s_5880a7522b3b5c::t_ff30ba0af406c8 56-59
+  s_5880a7522b3b5c::t_84481db02789fa 20-21,23-25,27-30
+  s_5880a7522b3b5c::t_a0f4379eb9f79a 61-65
+  s_5880a7522b3b5c::t_a7bb00ccc8c6a9 81-82,84-86
+internal/pubsub/invalidation.go
+  s_5880a7522b3b5c::t_981bf2d43f55b0 22-23
+  s_5880a7522b3b5c::t_22d411db45fca9 67
+  s_5880a7522b3b5c::t_a098efb4647676 105-108
+  s_5880a7522b3b5c::t_4f6d8ccd9d46d0 41
+  s_5880a7522b3b5c::t_5d9641795d627e 60-61
+internal/billing/service_test.go
+  s_5880a7522b3b5c::t_31ca1ab7290b50 245-246
+  s_5880a7522b3b5c::t_69d29cfee62d7e 125-126
+  s_5880a7522b3b5c::t_3bfa3b3831fc4b 153-154
+  s_5880a7522b3b5c::t_c21378dd94d15d 175-176
+  s_5880a7522b3b5c::t_e7de332da866e5 272-273
+  s_5880a7522b3b5c::t_7564db8de9a814 222-223
+  s_5880a7522b3b5c::t_685a4c70e73bac 104
+internal/translate/strictify_openai.go
+  s_5880a7522b3b5c::t_e8ba627ccef33c 23-24,30
+  s_5880a7522b3b5c::t_efebd1ac92cdca 35-38,40-41
+  s_5880a7522b3b5c::t_559a7462e7d3ef 179-180
+internal/proxy/conformance_openai_test.go
+  s_5880a7522b3b5c::t_03fc2f977647c6 3-4
+  s_5880a7522b3b5c::t_cbec70994842d0 24-25
+  s_5880a7522b3b5c::t_c619ab4ebaebf4 70-71,81-83,110-111,121-122
+internal/translate/degenerate_tool_call_test.go
+  s_5880a7522b3b5c::t_c0df185dfbb90c 81-82
+  s_5880a7522b3b5c::t_073bb6fada765f 12-16
+  s_5880a7522b3b5c::t_13a3ec0abc6483 22-23
+  s_5880a7522b3b5c::t_5cd8180393d1c0 98-102
+  s_5880a7522b3b5c::t_f07f38c16c8912 43-46
+internal/proxy/session_key_test.go
+  s_5880a7522b3b5c::t_b8cea97ec6f313 61
+  s_5880a7522b3b5c::t_83673320a9dbc7 173-175
+  s_5880a7522b3b5c::t_19fa87b0293fba 22-23
+  s_5880a7522b3b5c::t_ae956f94590b9a 99-100
+  s_5880a7522b3b5c::t_8846cc08c4028a 123-124
+  s_5880a7522b3b5c::t_611d6ab7bf1730 78-80
+  s_5880a7522b3b5c::t_f32d49fc907579 141-142
+internal/auth/service.go
+  s_5880a7522b3b5c::t_2c2b115a91553b 290-293
+  s_5880a7522b3b5c::t_2074a4c51a9004 302-304
+  s_5880a7522b3b5c::t_c27c3beb058829 346-350
+  s_5880a7522b3b5c::t_b0c023363c38bb 133-136
+  s_5880a7522b3b5c::t_4611fd4750f10f 279-281
+  s_5880a7522b3b5c::t_b5ebc9c1360017 163-165
+internal/auth/apikey_cache_test.go
+  s_5880a7522b3b5c::t_88fbd6f637136f 128
+  s_5880a7522b3b5c::t_b3befba0a02bcd 78-80
+  s_5880a7522b3b5c::t_8d31dbfefa5dfd 114-115
+  s_5880a7522b3b5c::t_af44185623dae1 99-104
+  s_5880a7522b3b5c::t_cfeec692c56072 136-137
+internal/proxy/turnloop_internal_test.go
+  s_5880a7522b3b5c::t_2e2a5ae9167351 17
+  s_5880a7522b3b5c::t_9c3cc19b5404dd 67-68
+  s_5880a7522b3b5c::t_3b061bdcce3337 193-195
+  s_5880a7522b3b5c::t_ed479cb01102fe 106-108
+internal/proxy/force_model_tier_fallback_internal_test.go
+  s_5880a7522b3b5c::t_8cc92860e0ad4c 133-134
+  s_5880a7522b3b5c::t_2ebe0a54fcd094 69-71
+  s_5880a7522b3b5c::t_904d759921b04c 20-22
+  s_5880a7522b3b5c::t_ac40e7994e90b2 120-121
+internal/router/cluster/diff_v2_test.go
+  s_5880a7522b3b5c::t_ed0b6ef453233d 14-17,20-21,24-25,28
+internal/translate/force_model_test.go
+  s_5880a7522b3b5c::t_8af0d2cab124c2 203-204
+  s_5880a7522b3b5c::t_69ee246873b585 89-90
+  s_5880a7522b3b5c::t_ccf6869e1024ad 119-120
+  s_5880a7522b3b5c::t_d0df3b1409d8e6 58-59
+internal/proxy/credentials_test.go
+  s_5880a7522b3b5c::t_b7a7fe2069c328 85-86
+  s_5880a7522b3b5c::t_79d1af3df202fe 150-151
+  s_5880a7522b3b5c::t_3f8f261b617aaa 282-283
+  s_5880a7522b3b5c::t_b78e84fc1d47b3 38-39
+  s_5880a7522b3b5c::t_9a1f0c9c1430ce 321-322
+internal/postgres/session_pin_repo.go
+  s_5880a7522b3b5c::t_3ef8007a915e8f 79-81
+  s_5880a7522b3b5c::t_334daa4e64c1ec 139-140
+  s_5880a7522b3b5c::t_0a732ce589409d 98
+  s_5880a7522b3b5c::t_d5d883c3252018 58-60
+internal/api/admin/excluded_providers.go
+  s_5880a7522b3b5c::t_e427034541e76d 15-16
+  s_5880a7522b3b5c::t_418fa138513f00 77-78
+  s_5880a7522b3b5c::t_ffb18ddc7302de 48-49
+  s_5880a7522b3b5c::t_8dbe8f7ad12490 32-33
+internal/translate/anthropic_marker.go
+  s_5880a7522b3b5c::t_0bbabc205b5062 81-84
+  s_5880a7522b3b5c::t_3aa17345babeff 32-33
+  s_5880a7522b3b5c::t_e065e8c45b8ad0 147
+  s_5880a7522b3b5c::t_cf1f2ff7f10cda 15-16
+  s_5880a7522b3b5c::t_34a94337cb60b4 149-150
+internal/proxy/conformance_responses_test.go
+  s_5880a7522b3b5c::t_825681aa8d33a7 3-5
+  s_5880a7522b3b5c::t_29049bd6019b90 28
+  s_5880a7522b3b5c::t_a9edf37f92b721 74-75
+  s_5880a7522b3b5c::t_4360fcc467d1ed 100-101
+internal/router/handover/summarizer.go
+  s_5880a7522b3b5c::t_8f8b99671d306d 30-31,33-34,36-38
+  s_5880a7522b3b5c::t_c927e5a332430a 1-3,5-7
+  s_5880a7522b3b5c::t_5b200db397c243 54-55,57-59
+  s_5880a7522b3b5c::t_561442b3f6f75c 16-18
+  s_5880a7522b3b5c::t_4eed5f91c9864c 46
+internal/translate/handover.go
+  s_5880a7522b3b5c::t_7247323a36934a 319-321
+  s_5880a7522b3b5c::t_1deffb3cf92d05 11-12
+  s_5880a7522b3b5c::t_c8ffdc2b27a257 358-359
+  s_5880a7522b3b5c::t_4011441c3981ae 15-17
+internal/billing/repo.go
+  s_5880a7522b3b5c::t_c619c66d9a7fa4 8-9,12-14,17-19,22-24,27-29,32-33
+  s_5880a7522b3b5c::t_fa8b9b1394ce47 45-46
+internal/translate/cache_usage_test.go
+  s_5880a7522b3b5c::t_f4a657dee50913 158-160
+  s_5880a7522b3b5c::t_4382ce54ee5abc 199-201
+  s_5880a7522b3b5c::t_d2dd53ae45b8f1 184
+  s_5880a7522b3b5c::t_dff7d8575e8128 78-80
+  s_5880a7522b3b5c::t_9ff50e704b75ba 107-108
+  s_5880a7522b3b5c::t_bc4b680e208e52 132-133
+internal/router/cluster/distribution.go
+  s_5880a7522b3b5c::t_bf1dd7a22268af 15-16
+  s_5880a7522b3b5c::t_dddc5518653df4 14
+  s_5880a7522b3b5c::t_6c4443950b77a9 74
+  s_5880a7522b3b5c::t_e3ba53af97f47a 47-48
+  s_5880a7522b3b5c::t_011ed6e92d3da7 23-26
+  s_5880a7522b3b5c::t_2cd17805ec3cc1 51-52,54-56,58-60,62-63
+internal/providers/openai/client_output_stall_test.go
+  s_5880a7522b3b5c::t_36a4636f64b91e 31-32
+  s_5880a7522b3b5c::t_27fe698bdaf394 73-75
+  s_5880a7522b3b5c::t_34a624a01b49cd 101-102
+  s_5880a7522b3b5c::t_5ef90bd304ed9e 125
+  s_5880a7522b3b5c::t_b34795d9bbf54c 3-10
+internal/router/cluster/artifacts_test.go
+  s_5880a7522b3b5c::t_8f8f8e17c5aebe 253
+  s_5880a7522b3b5c::t_13cee756c041e1 200-201
+  s_5880a7522b3b5c::t_f24d20a6236f01 352
+  s_5880a7522b3b5c::t_c8d6a1dcb837b3 446
+  s_5880a7522b3b5c::t_03eec0131e98c2 479-480
+internal/translate/escape_normalize.go
+  s_5880a7522b3b5c::t_efd70ce10fe270 18-19
+  s_5880a7522b3b5c::t_f1c15ede4a2b76 10-11
+  s_5880a7522b3b5c::t_81db336f4eea61 5-7
+  s_5880a7522b3b5c::t_44aa6600b37265 26
+  s_5880a7522b3b5c::t_d7be1cc956dce3 27-30
+  s_5880a7522b3b5c::t_2dad1d2da06fb1 69-70
+internal/proxy/baseline_failover_integration_test.go
+  s_5880a7522b3b5c::t_698c44b8993216 168-170
+  s_5880a7522b3b5c::t_4062a7ce719e3b 210-212
+  s_5880a7522b3b5c::t_fc5f1e935a728f 126-128
+  s_5880a7522b3b5c::t_4e99567b8ec05b 32-35
+internal/router/handover/summarizer_test.go
+  s_5880a7522b3b5c::t_292a3571f1b886 330-332,336
+  s_5880a7522b3b5c::t_663e48c31f71aa 137
+  s_5880a7522b3b5c::t_bbe920d9e0ab40 206-207
+  s_5880a7522b3b5c::t_d5e3d6181c2b52 17-18
+internal/proxy/turn_logs.go
+  s_5880a7522b3b5c::t_4d4e81cb74d054 108-111,114-116
+  s_5880a7522b3b5c::t_f7f88f301f771c 153-155
+  s_5880a7522b3b5c::t_f40704865fec26 74,76-78
+internal/translate/toolcheck/jsonfix.go
+  s_5880a7522b3b5c::t_0cae3ea4cfb78e 47-49
+  s_5880a7522b3b5c::t_dacad4c3c0aa96 54-55
+  s_5880a7522b3b5c::t_69605cc7b3b0ee 5-7,9
+  s_5880a7522b3b5c::t_4b813ae39554e6 132-133
+cmd/genprices/main.go
+  s_5880a7522b3b5c::t_6aab9093eae989 1-3
+  s_5880a7522b3b5c::t_39a04ad9bca173 111-113
+  s_5880a7522b3b5c::t_991df8e98ab3d3 53-54
+  s_5880a7522b3b5c::t_590691722ce825 22-24
+internal/proxy/router_feedback.go
+  s_5880a7522b3b5c::t_e178c6164cc9f3 43-45
+  s_5880a7522b3b5c::t_d10fe91173cceb 101-102
+  s_5880a7522b3b5c::t_0e7cb7801bba29 61-62
+  s_5880a7522b3b5c::t_f9747be681c7b8 174
+  s_5880a7522b3b5c::t_5899afb8868dd7 141-143
+  s_5880a7522b3b5c::t_0b29395c494ee6 35-36,38-39
+  s_5880a7522b3b5c::t_383d74bf549b02 159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b64cf3e1a226dbab2b60c29c403761e19bf813de",
+  "prompts": {},
+  "sessions": {
+    "s_5880a7522b3b5c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2b4e716-ba1e-4284-bb89-9a29a93c421b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

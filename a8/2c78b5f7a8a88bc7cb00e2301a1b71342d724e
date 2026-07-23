@@ -1,0 +1,23 @@
+sidecars/hmm/CLAUDE.md
+  s_1bd9528555e07b::t_74e3435e36fd38 15
+Makefile
+  s_1bd9528555e07b::t_74e3435e36fd38 149-150
+sidecars/hmm/AGENTS.md
+  s_1bd9528555e07b::t_74e3435e36fd38 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "a82c78b5f7a8a88bc7cb00e2301a1b71342d724e",
+  "prompts": {},
+  "sessions": {
+    "s_1bd9528555e07b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f591f-df79-7591-94f9-edeb03c45610",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

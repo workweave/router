@@ -1,0 +1,29 @@
+internal/translate/router_feedback.go
+  s_b6ea7217b3c1e9::t_486c512471059f 289-291
+internal/proxy/router_feedback_proxy_test.go
+  s_b6ea7217b3c1e9::t_c558e3fe49f575 513
+  s_b6ea7217b3c1e9::t_e7ffeeaef800b2 534-570
+  s_b6ea7217b3c1e9::t_addbe587e7ab95 5
+internal/proxy/router_feedback.go
+  s_b6ea7217b3c1e9::t_8e8d3b2a8827d5 5,7
+  s_b6ea7217b3c1e9::t_edc4eaccd33e48 100-104,106-116
+  s_b6ea7217b3c1e9::t_baff50a1d0ce6a 99
+internal/translate/router_feedback_test.go
+  s_b6ea7217b3c1e9::t_a86a27cc80b42c 214-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "545168fac7916af0ebed798c7c59a4ac76e2b40c",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

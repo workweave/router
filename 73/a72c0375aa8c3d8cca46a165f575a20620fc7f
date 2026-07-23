@@ -1,0 +1,30 @@
+internal/translate/claudecode_tool_filter_test.go
+  s_acb50c30541f91::t_45dfbbe3821e5a 173-201
+internal/translate/emit_openai.go
+  s_acb50c30541f91::t_45dfbbe3821e5a 892-894,901-911
+  s_187e3f39d20d32::t_a8560de6aa2dc3 912-913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "73a72c0375aa8c3d8cca46a165f575a20620fc7f",
+  "prompts": {},
+  "sessions": {
+    "s_187e3f39d20d32": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d85-078d-7442-8331-2c08f2e7f443",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_acb50c30541f91": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9081-2578-7d30-a2a8-b77964d2c623",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

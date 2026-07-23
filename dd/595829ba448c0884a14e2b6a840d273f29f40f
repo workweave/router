@@ -1,0 +1,35 @@
+install/commands/router-off.md
+  s_d3fc1c517ba243::t_07ef24071a5821 2
+install/commands/router-on.md
+  s_d3fc1c517ba243::t_bb36525d72f07a 2
+install/commands/fm.md
+  s_d3fc1c517ba243::t_dcfeb3a2ed51d0 2
+install/commands/unforce-model.md
+  s_d3fc1c517ba243::t_3563015f4e2cd2 2
+install/commands/router-status.md
+  s_d3fc1c517ba243::t_ca4e025d2b3127 2
+install/commands/rf.md
+  s_d3fc1c517ba243::t_e1ea55b7478a84 2
+install/commands/router-feedback.md
+  s_d3fc1c517ba243::t_4c0a4ab7e4b06a 2
+install/commands/ufm.md
+  s_d3fc1c517ba243::t_c5b608e00292d4 2
+install/commands/force-model.md
+  s_d3fc1c517ba243::t_0add3fb73cb85f 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "dd595829ba448c0884a14e2b6a840d273f29f40f",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

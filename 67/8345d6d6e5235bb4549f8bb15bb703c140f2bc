@@ -1,0 +1,29 @@
+internal/proxy/conformance_gemini_test.go
+  s_9bb85f30e5a378::t_4fe34f419efc56 92,98
+internal/translate/gemini_test.go
+  s_9bb85f30e5a378::t_4fe34f419efc56 257,278,412,445
+internal/translate/emit_gemini.go
+  s_9bb85f30e5a378::t_04eec395d2ecad 462-472,477-479,482
+internal/translate/thought_signature_carrier_external_test.go
+  s_9bb85f30e5a378::t_e0e46a2a832b92 15-17
+internal/translate/tool_call_id_internal_test.go
+  s_9bb85f30e5a378::t_c69c3d490c9efa 95-97
+  s_9bb85f30e5a378::t_e2818a3a72afee 99-101,104,106,112-113,115-116
+  s_9bb85f30e5a378::t_68d62c8d915b5e 124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "678345d6d6e5235bb4549f8bb15bb703c140f2bc",
+  "prompts": {},
+  "sessions": {
+    "s_9bb85f30e5a378": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d5c5d0cb-7a3d-4f1d-a023-f8658b02498b",
+        "model": "auto-smart"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

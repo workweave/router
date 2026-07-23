@@ -1,0 +1,21 @@
+install/npm/bin.js
+  s_d3fc1c517ba243::t_adb06214b7f452 39
+  s_d3fc1c517ba243::t_2a2f02733d30f8 20
+  s_d3fc1c517ba243::t_86993c43a516d9 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "52758d33c0c9578ba1c92964598c6ef6f5306883",
+  "prompts": {},
+  "sessions": {
+    "s_d3fc1c517ba243": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a78254e6-4444-43a2-a5a9-8ff8d7b10632",
+        "model": "Weave"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
