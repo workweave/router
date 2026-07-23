@@ -7,13 +7,9 @@
 // touches Postgres. It is gated on ROUTER_TEST_DATABASE_URL (a DSN to a
 // database with the router migrations applied) and is a no-op without it.
 //
-// Timing note: a start-only barrier (line up, then release into RotateAPIKey)
-// does not hit the race in practice — List→SoftDelete is microseconds, so one
-// goroutine soft-deletes before the others list (they then get
-// ErrAPIKeyNotFound). The pool is not the limiter (peak acquired == N). A
-// second barrier inside ListForInstallation holds every caller after the
-// pre-delete read and before SoftDelete, which is the actual TOCTOU window.
-// SoftDelete stays the real :exec SQLC path (silent no-op on 0 rows).
+// Timing note: a start-only barrier misses the race — List→SoftDelete is
+// microseconds, so one goroutine soft-deletes before the others List. A second
+// barrier inside ListForInstallation holds every caller at the TOCTOU window.
 //
 // Usage (from the repo root, against the docker-compose Postgres):
 //

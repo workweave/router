@@ -14,10 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// statefulAPIKeyRepo is an in-memory APIKeyRepository that models real
-// SoftDelete semantics: matching active row → soft-delete; already-deleted
-// or missing → silent no-op (0 rows). Used to exercise RotateAPIKey races
-// without Postgres (see #817).
+// statefulAPIKeyRepo is an in-memory APIKeyRepository whose SoftDelete
+// counts rows affected (0 when already gone), matching live Postgres semantics.
 type statefulAPIKeyRepo struct {
 	mu     sync.Mutex
 	keys   []*auth.APIKey
