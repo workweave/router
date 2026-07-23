@@ -168,6 +168,17 @@ func strictifyNode(node map[string]any, depth int, propCount *int) (out map[stri
 			return nil, false
 		}
 		if _, req := originallyRequired[name]; !req {
+			// An optional property with no strict-expressible type (a bare {}
+			// "any JSON value", e.g. Workflow.args) cannot be made nullable
+			// without either admitting "object" — which strict mode then
+			// requires to carry additionalProperties:false, forbidding the
+			// arbitrary keys the schema exists to accept — or narrowing the
+			// value space and silently dropping valid object/array args.
+			// There is no strict representation of an open value, so bail to
+			// non-strict emission per this file's fail-open contract.
+			if !schemaHasStrictType(sp) {
+				return nil, false
+			}
 			sp = makeNullable(sp)
 		}
 		outProps[name] = sp
@@ -206,13 +217,11 @@ func makeNullable(node map[string]any) map[string]any {
 		node["anyOf"] = append(branches, map[string]any{"type": "null"})
 		return node
 	}
-	// No type and no anyOf: give the synthetic branch an explicit value-type union
-	// so OpenAI strict mode accepts it; preserve any inline constraints on the original node.
-	branch := map[string]any{"type": []any{"string", "number", "boolean", "object", "array", "null"}}
-	for k, v := range node {
-		branch[k] = v
-	}
-	return map[string]any{"anyOf": []any{branch, map[string]any{"type": "null"}}}
+	// No type and no anyOf (e.g. bare enum): wrap the node itself. Callers must
+	// not pass a fully typeless node here — strictifyNode bails on typeless
+	// optionals before reaching this point, since an open value has no strict
+	// representation (see the schemaHasStrictType guard in strictifyNode).
+	return map[string]any{"anyOf": []any{node, map[string]any{"type": "null"}}}
 }
 
 // schemaHasStrictType reports whether node carries a type OpenAI strict mode
