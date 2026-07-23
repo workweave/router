@@ -186,9 +186,8 @@ func (r *signalListRepo) SoftDelete(ctx context.Context, installationID, id stri
 
 const raceInstallID = "inst-rotate-race"
 
-// TestRotateAPIKey_ConcurrentRace_OnlyOneSucceeds is the #817 unit repro:
-// two RotateAPIKey callers both observe the key as active, then SoftDelete;
-// exactly one must mint a successor, the other ErrAPIKeyNotFound.
+// TestRotateAPIKey_ConcurrentRace_OnlyOneSucceeds verifies the #817 fix:
+// the losing racer must return ErrAPIKeyNotFound, not mint an orphan key.
 func TestRotateAPIKey_ConcurrentRace_OnlyOneSucceeds(t *testing.T) {
 	inner := newStatefulAPIKeyRepo()
 	held := newListHoldRepo(inner, 2)
@@ -237,9 +236,8 @@ func TestRotateAPIKey_ConcurrentRace_OnlyOneSucceeds(t *testing.T) {
 		"seed + one successor only (not seed + two successors)")
 }
 
-// TestRotateAPIKey_LosingToDelete_DoesNotIssue is the #817 Delete-vs-Rotate
-// unit repro: Delete wins SoftDelete after Rotate has Listed; Rotate must
-// return ErrAPIKeyNotFound and must not issue a zombie replacement.
+// TestRotateAPIKey_LosingToDelete_DoesNotIssue verifies the #817 Delete-vs-Rotate
+// fix: Rotate must return ErrAPIKeyNotFound and not mint a zombie successor.
 func TestRotateAPIKey_LosingToDelete_DoesNotIssue(t *testing.T) {
 	inner := newStatefulAPIKeyRepo()
 	listed := make(chan struct{})
