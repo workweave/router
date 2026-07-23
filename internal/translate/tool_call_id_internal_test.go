@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -89,3 +90,35 @@ func TestClampOpenAIToolCallID(t *testing.T) {
 	// string, so they must clamp to the same value.
 	assert.Equal(t, got, clampOpenAIToolCallID(long))
 }
+
+func TestEncodeSignatureForJSON_PreservesNonASCIISignatureBytes(t *testing.T) {
+	// Regression: carrier-decoded thoughtSignature bytes are not valid UTF-8;
+	// pw.Str's rune loop would corrupt them to U+FFFD. encodeSignatureForJSON
+	// must re-encode non-base64 bytes as base64url before JSON emit.
+	cases := []struct {
+		name        string
+		sig         string
+		passthrough bool
+	}{
+		{"base64url-delivered", "QU5USFJPUElDX1NJRw", true},
+		{"std-base64-padded-delivered", "QU5USFJPUElDX1NJRw==", true},
+		{"non-ascii-bytes", "\x12\xf5\x11\x0a\xf2\x11\x01\x11\x4d\x32\x0f\x9e\xb8", false},
+		{"ascii-raw-bytes", "\x00\x01ABC", false},
+		{"mixed", "pre-\x00\xff-post", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := encodeSignatureForJSON(tc.sig)
+			if tc.passthrough {
+				assert.Equal(t, tc.sig, got, "wire-form base64 signatures must pass through unchanged")
+			} else {
+				decoded, err := base64.RawURLEncoding.DecodeString(got)
+				assert.NoError(t, err, "raw-byte signatures must be re-encoded as valid base64url, got %q", got)
+				assert.Equal(t, []byte(tc.sig), decoded, "the round-tripped bytes must match the input")
+			}
+		})
+	}
+}
+
+// TestPrepareGemini_ThoughtSignatureCarrierSurvivesMultiTurn moved to
+// thought_signature_carrier_external_test.go (needs translate_test package).
