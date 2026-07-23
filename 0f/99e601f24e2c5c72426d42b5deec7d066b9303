@@ -1,0 +1,39 @@
+internal/router/cluster/scorer.go
+  s_1cea218fcadc55::t_5f74c1de6240d6 589-620
+internal/router/cluster/artifacts/v0.70/metadata.yaml
+  s_1cea218fcadc55::t_115b5543cf0d8f 97-105,108-109,111-116,120-122
+  s_1cea218fcadc55::t_4defec99e22454 87-96,106
+internal/router/catalog/catalog_test.go
+  s_1cea218fcadc55::t_e84089bbb0402a 138-182
+internal/router/cluster/scorer_test.go
+  s_1cea218fcadc55::t_db9465285924ec 956-973,975-980,982-1007,1009-1013,1015-1023
+  s_1cea218fcadc55::t_b6fa21824aa717 974,981
+  s_1cea218fcadc55::t_3890e5ac5f8919 1008,1014
+internal/router/catalog/catalog.go
+  s_1cea218fcadc55::t_6bf4cce8dc0611 99-116
+  s_1cea218fcadc55::t_b4b7a9ef9f55ce 147-151
+  s_1cea218fcadc55::t_8ca5730aa23e1c 432
+  s_1cea218fcadc55::t_12353c522cb249 295
+  s_1cea218fcadc55::t_007fe4f0f84132 350
+  s_1cea218fcadc55::t_54b1890f71c8fc 359
+internal/router/catalog/lookup.go
+  s_1cea218fcadc55::t_db111484b88c16 157-173
+internal/router/cluster/distribution_test.go
+  s_1cea218fcadc55::t_686ce87191fcce 225,227-234,237-242,244-259,261-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "0f99e601f24e2c5c72426d42b5deec7d066b9303",
+  "prompts": {},
+  "sessions": {
+    "s_1cea218fcadc55": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62d001b2-df10-416e-8a67-d9fb382a8585",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

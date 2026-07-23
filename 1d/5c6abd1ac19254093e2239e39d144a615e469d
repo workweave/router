@@ -1,0 +1,30 @@
+internal/router/catalog/family.go
+  s_aec95a8ffbca65::t_d57d851d0f7ec9 16-18
+  s_aec95a8ffbca65::t_bb62d0aa8de6b3 11-13
+  s_aec95a8ffbca65::t_8be58c53f7eb33 8,14,35
+  s_aec95a8ffbca65::t_8eff39c4f0457e 46-47
+  s_aec95a8ffbca65::t_1499e0c334f687 1-7,9-10,15,19-34,36-45,48-100
+internal/router/catalog/family_test.go
+  s_aec95a8ffbca65::t_d1027c15798425 48-49
+  s_aec95a8ffbca65::t_5f5fae3e57ddea 1-47,50-115
+internal/router/cluster/artifacts_test.go
+  s_aec95a8ffbca65::t_1b49bb2dc4d7b5 7
+  s_aec95a8ffbca65::t_c1c2f73eb10c49 227-243
+  s_aec95a8ffbca65::t_a70780a320c7b1 225-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1d5c6abd1ac19254093e2239e39d144a615e469d",
+  "prompts": {},
+  "sessions": {
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,47 @@
+internal/server/middleware/force_effort_override.go
+  s_1f0150b349ee2c::t_003c51f897fb47 39-50
+  s_b87eb07fa936cb::t_cece1d818eb410 1-3
+internal/router/router.go
+  s_1f0150b349ee2c::t_b93e80acc7453c 26
+internal/server/server.go
+  s_1f0150b349ee2c::t_0b97420d408321 212
+  s_1f0150b349ee2c::t_20f8222666ef61 178
+internal/translate/emit_openai.go
+  s_1f0150b349ee2c::t_50b91033653f51 34-36
+  s_1f0150b349ee2c::t_964396da95c276 191
+internal/proxy/force_model.go
+  s_1f0150b349ee2c::t_3142aab1d55a20 109-113,155-156,170-171
+  s_1f0150b349ee2c::t_fef72f6e6527a6 241-256
+  s_1f0150b349ee2c::t_33406b0afdefb3 225-226
+internal/translate/envelope.go
+  s_1f0150b349ee2c::t_276f5c8032f2de 363,366,368-373
+  s_1f0150b349ee2c::t_cd77dc2c02fe80 364
+  s_1f0150b349ee2c::t_cc90d16b970c34 365
+  s_1f0150b349ee2c::t_c711c023c1eb94 346-362,367
+internal/proxy/service.go
+  s_b87eb07fa936cb::t_efd74c4a3e577f 2339-2340
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3b39dfc7682172cc13b5218783e3efd131e1fe16",
+  "prompts": {},
+  "sessions": {
+    "s_1f0150b349ee2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b525f980-c9fc-4332-bbe9-8a627ee8612e",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_b87eb07fa936cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6cf0-f412-7993-a7ca-b1ea6f6595ca",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

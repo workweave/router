@@ -1,0 +1,23 @@
+internal/router/router.go
+  s_70a5372bf5b979::t_4759fa04e6484e 131
+internal/proxy/usage_bypass_internal_test.go
+  s_70a5372bf5b979::t_4342e8a32ff824 114
+internal/proxy/usage_bypass_test.go
+  s_70a5372bf5b979::t_a41bc19ce479bd 194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d9951760802fc232c50855839b67f4bfc662a3d8",
+  "prompts": {},
+  "sessions": {
+    "s_70a5372bf5b979": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "240ea646-83db-4899-9161-869095231289",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

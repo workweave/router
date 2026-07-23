@@ -1,0 +1,30 @@
+internal/proxy/client_identity_test.go
+  s_572cb267d7f7ab::t_c88b50ffad04d4 165-190
+internal/api/openai/completions.go
+  s_572cb267d7f7ab::t_f03e28809d7c56 91
+internal/api/anthropic/messages.go
+  s_572cb267d7f7ab::t_ea37baac416c8e 138
+internal/api/gemini/generate_content.go
+  s_572cb267d7f7ab::t_163e6d48b96570 149
+install/install.sh
+  s_572cb267d7f7ab::t_3e8a096892ffd9 1306
+  s_572cb267d7f7ab::t_91b8b65ade9fa6 398-401
+internal/proxy/client_identity.go
+  s_572cb267d7f7ab::t_2b385a457a482e 124-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "4479a90d6a4a8c51a72c8de790d8f75811cc6ccf",
+  "prompts": {},
+  "sessions": {
+    "s_572cb267d7f7ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "006d18a6-dcf5-4820-a5c2-ba8e83430141",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

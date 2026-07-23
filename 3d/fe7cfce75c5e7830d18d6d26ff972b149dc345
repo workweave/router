@@ -1,0 +1,23 @@
+internal/router/cluster/CLAUDE.md
+  s_f789c084d984ae::t_5a96a7cf1f5f48 13
+internal/router/cluster/AGENTS.md
+  s_f789c084d984ae::t_0f429e171087d7 13
+internal/router/cluster/scorer.go
+  s_f789c084d984ae::t_f15ba7ff890002 39-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3dfe7cfce75c5e7830d18d6d26ff972b149dc345",
+  "prompts": {},
+  "sessions": {
+    "s_f789c084d984ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff5468d1-d94c-44d7-bae7-d296e69fc3c5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

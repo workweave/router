@@ -1,0 +1,37 @@
+internal/proxy/handover.go
+  s_36d21b9aa6b9e5::t_6967bf2ed97b33 255-306
+internal/proxy/no_progress_internal_test.go
+  s_36d21b9aa6b9e5::t_6cf459a0599f62 141,174,196,215,233,258
+  s_36d21b9aa6b9e5::t_dbfde6ae54ef70 49-53,56,96-111,113-126,128-135
+  s_36d21b9aa6b9e5::t_6105d9a2d7341d 249,284
+  s_36d21b9aa6b9e5::t_c9663549cfc61d 9
+  s_36d21b9aa6b9e5::t_1ba6da0a8f2be2 112
+  s_36d21b9aa6b9e5::t_6f9c31a5786d2d 163
+  s_36d21b9aa6b9e5::t_35156ec8acc93d 127
+  s_36d21b9aa6b9e5::t_4169d80e242294 24-25,32-33,44-45,54-55,57-95
+internal/proxy/service.go
+  s_36d21b9aa6b9e5::t_8aee3832cc4c43 292
+  s_36d21b9aa6b9e5::t_01f936f874d648 48-51
+  s_36d21b9aa6b9e5::t_dbfde6ae54ef70 142-161,169,815,967-971,1003,1016,1033-1035,1046,1054,1071-1073,1206,1781,1896
+  s_36d21b9aa6b9e5::t_bb7be91e3e4bc7 825-837,844-859
+internal/proxy/no_progress.go
+  s_36d21b9aa6b9e5::t_dbfde6ae54ef70 8,46,55,58,64
+  s_36d21b9aa6b9e5::t_c4b7487cfbd5ee 49-54,56-57,59-63,65-72,77-101
+  s_36d21b9aa6b9e5::t_ef226500dd445f 143-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "da6132e786fccebd3089016793d2fcf406582e8c",
+  "prompts": {},
+  "sessions": {
+    "s_36d21b9aa6b9e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "97d865a7-211f-44b6-8036-1768b14b4bac",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

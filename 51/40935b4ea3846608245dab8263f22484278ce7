@@ -1,0 +1,24 @@
+internal/proxy/turn_logs.go
+  s_d0bb2d20c76140::t_c332a96021c59c 113-141
+internal/proxy/service.go
+  s_d0bb2d20c76140::t_f7716fad6a672a 2669-2683
+  s_d0bb2d20c76140::t_532ec631862af1 2754-2757,2771,2774-2776
+internal/proxy/turn_logs_internal_test.go
+  s_d0bb2d20c76140::t_30752779144d59 193-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5140935b4ea3846608245dab8263f22484278ce7",
+  "prompts": {},
+  "sessions": {
+    "s_d0bb2d20c76140": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "296a5c75-453b-41e5-8632-6487b3c94b7c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

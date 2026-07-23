@@ -1,0 +1,37 @@
+internal/translate/strict_decode_emit_test.go
+  s_0e13f37f08363d::t_41aa3e1eca2d64 186-257
+internal/proxy/service.go
+  s_0e13f37f08363d::t_3b56ed50055b3f 1721-1728,1769-1770,1772-1774,1794
+  s_0e13f37f08363d::t_8812a47311d1ac 1729-1735,1755-1766,1768,1771,1775-1793,1795
+  s_0e13f37f08363d::t_bf18b567da1497 3078,3089-3097,3100-3115,3117
+  s_0e13f37f08363d::t_09f536f3807da3 3074-3077,3098-3099
+internal/providers/provider.go
+  s_0e13f37f08363d::t_72fbf1da29d009 284,294-300
+internal/proxy/failover_integration_test.go
+  s_0e13f37f08363d::t_21c2762c2a1f51 282-386
+internal/translate/emit_gemini.go
+  s_0e13f37f08363d::t_919c41cae570ed 50-51,68-69
+  s_0e13f37f08363d::t_896a32f1c721ef 296
+  s_0e13f37f08363d::t_b8e212d3f1aa44 733
+  s_0e13f37f08363d::t_2c5c432bca6704 1107,1119
+  s_0e13f37f08363d::t_9fe34e82a12b93 833-872
+  s_0e13f37f08363d::t_32f7c85b502c7e 486,498
+internal/translate/envelope.go
+  s_0e13f37f08363d::t_89f784946eb4c2 80-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d06d29828672d556ae72211c7065ec9408c42d40",
+  "prompts": {},
+  "sessions": {
+    "s_0e13f37f08363d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1618719-0b8d-4262-bcad-b46dcadfee02",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

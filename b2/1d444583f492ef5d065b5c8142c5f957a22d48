@@ -1,0 +1,37 @@
+internal/proxy/router_feedback.go
+  s_822a04e3969173::t_fb4c76cc812c20 47-50,54-56,59-63
+  s_822a04e3969173::t_0f8dd747536d84 121,123,139,147,159,189-190,204-207
+  s_822a04e3969173::t_90d962fd5da236 64
+internal/sqlc/router_feedback.sql.go
+  s_822a04e3969173::t_6e56aed407d988 25-28,38-41,55-57,74-77,87-90,103-105
+db/migrations/0040_auto-feedback-columns.up.sql
+  s_822a04e3969173::t_02bafc08c6bbf8 1-12
+db/migrations/0040_auto-feedback-columns.down.sql
+  s_822a04e3969173::t_c08b6001748d9a 1-8
+internal/translate/router_feedback.go
+  s_822a04e3969173::t_2edb66fc5b9951 15-19,21,33-41,138-142,262-307
+internal/postgres/telemetry.go
+  s_822a04e3969173::t_d503c59b4b829d 195-196,198
+internal/translate/router_feedback_test.go
+  s_822a04e3969173::t_3a586174b6d583 15-21,154-201,215
+db/queries/router_feedback.sql
+  s_822a04e3969173::t_dbf44c5a0e8384 15-18,28-31
+internal/sqlc/models.go
+  s_822a04e3969173::t_6e56aed407d988 386-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b21d444583f492ef5d065b5c8142c5f957a22d48",
+  "prompts": {},
+  "sessions": {
+    "s_822a04e3969173": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8af687f-7198-40ff-8f1e-d272ebf132eb",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

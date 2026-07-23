@@ -1,0 +1,72 @@
+internal/translate/responses.go
+  s_14149f8f972376::t_d832d9af078f81 430-432,461-463,531,742-753
+  s_14149f8f972376::t_7da2899bef2d08 484-485,555-561
+  s_14149f8f972376::t_f38fde962bee7f 290-291,338-339,487-491,493,495,527-530,574-576,620-626,647-649,669,677-678,686-689,692
+  s_14149f8f972376::t_c2e3fb3e70a239 562-563,754-755
+internal/translate/responses_to_anthropic_writer.go
+  s_14149f8f972376::t_fc6137afc71607 233,397,1014-1018
+  s_14149f8f972376::t_4b41632138de9e 94-95,116-117,206-208,226-232,334-336,353,369,372-374,376,384-386,395-396
+  s_14149f8f972376::t_7da2899bef2d08 223-225,266-275
+  s_14149f8f972376::t_edcce9f99ca85d 330-333
+  s_14149f8f972376::t_c973ae3aa59d9c 276-277
+internal/translate/stream_lifecycle_test.go
+  s_14149f8f972376::t_1a267e9bcf4ae8 1-42
+internal/translate/stream_lifecycle.go
+  s_14149f8f972376::t_c2eb1f8aec49ef 1-114
+internal/proxy/testdata/conformance/responses/invalid_toolcall.golden
+  s_14149f8f972376::t_d5fe8f6432486d 61-62
+internal/proxy/gemini.go
+  s_14149f8f972376::t_2c0625ff5ad863 193-205,207-220,222-229
+internal/proxy/gemini_test.go
+  s_14149f8f972376::t_1a267e9bcf4ae8 81-104
+  s_14149f8f972376::t_142edd44456459 105-125
+internal/translate/tool_call_ledger.go
+  s_14149f8f972376::t_ef8881e4a6d3d0 27-29,34,46-48,64-66
+  s_14149f8f972376::t_c2eb1f8aec49ef 1-26,30-33,35-45,49-63,67-104
+internal/translate/gemini_stream.go
+  s_14149f8f972376::t_3287f4011df6de 35,59,117-118,127-131,133,135,193,288-293,308-313,332-337,393-397,401-403,408-414,417
+  s_14149f8f972376::t_8a4cba31ee50e5 284,398-400,404-407,416
+  s_14149f8f972376::t_7da2899bef2d08 124-126,186-192
+  s_14149f8f972376::t_afe5167ea5c6ea 28-34,194,415,418
+internal/providers/google/native_client.go
+  s_14149f8f972376::t_c2eb1f8aec49ef 118,121-137,140-141
+  s_14149f8f972376::t_dab7b807f3190d 142
+internal/translate/stream.go
+  s_14149f8f972376::t_72a5a0a2a0b957 55,104-111,196-198,205-210,254-256,278-280,290-292,323-325,366-370
+  s_14149f8f972376::t_7da2899bef2d08 101-103,164-170,779-781,851-857
+  s_14149f8f972376::t_f3d99f32914332 42
+  s_14149f8f972376::t_8a4cba31ee50e5 191-195
+  s_14149f8f972376::t_3171a08184e0d7 371,520-521,542-543,723-725,782-787,790-798,866-870,877,906-908,927-929,1022-1024,1034-1036,1073-1076,1084-1086,1378-1384
+  s_14149f8f972376::t_d2854a2838c65c 871-876
+  s_14149f8f972376::t_7c1837f2b2f9c0 171-172,372-373,858-859,1385-1386
+internal/proxy/fallback.go
+  s_14149f8f972376::t_85b5e7cf37c543 72-74
+  s_14149f8f972376::t_2c0625ff5ad863 491-500
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_14149f8f972376::t_e1122a86c6e5b5 365,369-370,387,391-392,395-396,413,416-418
+internal/translate/tool_call_ledger_test.go
+  s_14149f8f972376::t_1a267e9bcf4ae8 1-38
+internal/providers/google/native_client_test.go
+  s_14149f8f972376::t_1a267e9bcf4ae8 6,126-151
+  s_14149f8f972376::t_5dc82fdb6bdb8a 152
+internal/translate/stream_incomplete_test.go
+  s_14149f8f972376::t_9b8595a586ccd5 1-48
+internal/translate/gemini_marker.go
+  s_14149f8f972376::t_85b5e7cf37c543 42-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a25c400be2822bb021276b7a7a2f66072f450fbe",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

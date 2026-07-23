@@ -1,0 +1,34 @@
+internal/observability/otel/usage_test.go
+  s_e9ab5648101d30::t_78ef82fa9835b7 110-206
+internal/translate/cache_usage_test.go
+  s_e9ab5648101d30::t_8f389846fc16bf 1-81
+internal/proxy/service.go
+  s_e9ab5648101d30::t_435e3a97880802 988-989,1000-1001
+  s_e9ab5648101d30::t_307e38a83d8243 553-554,565-566
+internal/translate/stream.go
+  s_e9ab5648101d30::t_43f869c1d948be 202-205
+  s_e9ab5648101d30::t_bc648e8e2636f1 555,561
+  s_e9ab5648101d30::t_b7fba95ce87c98 464-467
+  s_e9ab5648101d30::t_176246dfe9104e 119-122
+internal/observability/otel/usage.go
+  s_e9ab5648101d30::t_28c6ce187f7881 22-24,27
+  s_e9ab5648101d30::t_97d59c38f0f074 99-112,122-129
+  s_e9ab5648101d30::t_49a1002b54dbf9 44-47
+  s_e9ab5648101d30::t_4930e0dfb0e5f6 167,173,178-187,201,208-213,221,232-237,241-244,250,257-258,262,264,267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "0fb138baf3b50c6e70f6fece9bde69aa8af80262",
+  "prompts": {},
+  "sessions": {
+    "s_e9ab5648101d30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "231a77f4-53c3-477f-adcb-a32e64d7afce",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Drew Bailey <drew@workweave.ai>"
+    }
+  }
+}

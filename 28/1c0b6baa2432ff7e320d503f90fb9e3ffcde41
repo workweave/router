@@ -1,0 +1,33 @@
+internal/api/feedback/feedback_test.go
+  s_6497efcbf5fbe7::t_3c8f8ea2fdcdcc 194
+internal/api/feedback/rate_page_test.go
+  s_6497efcbf5fbe7::t_c6966a323e1d7f 27-39
+internal/api/feedback/rate_page.go
+  s_6497efcbf5fbe7::t_e5228cf0a09e82 11,19,25-34,36,40,83,106
+  h_66ba6bc4d87222 16
+internal/api/feedback/static/weave.svg
+  s_6497efcbf5fbe7::t_e16052d1e8bc40 1-8
+internal/server/server.go
+  s_6497efcbf5fbe7::t_fed1ce3fb166a6 209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "281c0b6baa2432ff7e320d503f90fb9e3ffcde41",
+  "prompts": {},
+  "humans": {
+    "h_66ba6bc4d87222": {
+      "author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_6497efcbf5fbe7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e6c8c31-340d-4213-89f1-db9abfc036e8",
+        "model": "composer-2.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
