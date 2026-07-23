@@ -1,0 +1,128 @@
+internal/proxy/gemini.go
+  s_8bc73f48bfb37e::t_ccc6d65d67a29f 109
+internal/router/policy/sidecar_router_test.go
+  s_8bc73f48bfb37e::t_45f59a284275b5 427-429,434,450-492
+  s_8bc73f48bfb37e::t_d71d490cf8e0ad 402-426,430-433,435-449,493-527
+internal/proxy/service.go
+  s_8bc73f48bfb37e::t_279397a0eb136e 661-669
+  s_8bc73f48bfb37e::t_f15de4e8327302 333,335-336
+  s_8bc73f48bfb37e::t_39f126211cbbe6 334
+  s_8bc73f48bfb37e::t_47405835780408 2202
+  s_8bc73f48bfb37e::t_cb89bf3f8a59e9 659-660
+  s_8bc73f48bfb37e::t_1f62f05cefa10e 4309
+internal/postgres/cluster_model_list_repo.go
+  s_8bc73f48bfb37e::t_e84929af95a5dc 1-44
+internal/policyclient/client.go
+  s_8bc73f48bfb37e::t_35327403cee1d7 381
+  s_8bc73f48bfb37e::t_87a0077a251529 110-137
+  s_8bc73f48bfb37e::t_97d88c92f86341 302
+  s_8bc73f48bfb37e::t_f74195c80c09fd 885
+sidecars/hmm/hmm_sidecar/api.py
+  s_8bc73f48bfb37e::t_91eeb8f912b1aa 114
+  s_8bc73f48bfb37e::t_ee355e15791c73 125-131
+  s_8bc73f48bfb37e::t_e7f37298e4213b 132-133
+  s_8bc73f48bfb37e::t_a3db2f1f927bbe 93
+  s_8bc73f48bfb37e::t_bf885b53220536 115-124
+internal/auth/cluster_model_list.go
+  s_8bc73f48bfb37e::t_8ed5dd55e4e7e2 1-5,8-13,18-21
+  s_8bc73f48bfb37e::t_43ebcc030ba974 6-7
+  s_8bc73f48bfb37e::t_1b89457bb827fb 14-17
+db/migrations/0042_cluster-model-lists.up.sql
+  s_8bc73f48bfb37e::t_6f6abc255ccaa8 1-17
+cmd/router/main.go
+  s_8bc73f48bfb37e::t_83c31f1da42f4c 857
+  s_8bc73f48bfb37e::t_277fc28869fe96 611,621
+  s_8bc73f48bfb37e::t_bfaead64bf5308 364-365
+internal/auth/service.go
+  s_8bc73f48bfb37e::t_50d4941dc43c85 313-316,318,325,329,338,340,352-362,364
+  s_8bc73f48bfb37e::t_d6d176d1a0718b 38-47
+  s_8bc73f48bfb37e::t_23b9bda2d0d28e 88-95
+internal/sqlc/models.go
+  s_8bc73f48bfb37e::t_eb969f947d65ba 12-21
+internal/router/hmm/mapping.go
+  s_8bc73f48bfb37e::t_5cf4a3afb298ef 36-41,43-48
+  s_8bc73f48bfb37e::t_66b50f1ba17d51 42
+internal/auth/apikey_cache.go
+  s_8bc73f48bfb37e::t_c6a8a073af52b5 12-16
+sidecars/hmm/hmm_sidecar/policy.py
+  s_8bc73f48bfb37e::t_0c9569697ea475 214
+  s_8bc73f48bfb37e::t_ee355e15791c73 169-173
+  s_8bc73f48bfb37e::t_9d34e8d3c701ac 195
+  s_8bc73f48bfb37e::t_11b9895f69bb33 161,167-168,174
+internal/server/server.go
+  s_8bc73f48bfb37e::t_a027f01c387c99 64-68
+  s_8bc73f48bfb37e::t_ddd42f756d7eea 20
+  s_8bc73f48bfb37e::t_ad8acbf5d954f7 109-115
+internal/router/policy/sidecar_router.go
+  s_8bc73f48bfb37e::t_a4fd8a3cce2698 313,321-324,342-346,348,350
+  s_8bc73f48bfb37e::t_8184bf5f6d572a 314-320,325-341
+  s_8bc73f48bfb37e::t_beaef1f8d7c8ba 403
+  s_8bc73f48bfb37e::t_721c1aee9c6f76 372,380-381
+internal/sqlc/cluster_model_lists.sql.go
+  s_8bc73f48bfb37e::t_1877a98e75a2a8 21-23
+  s_8bc73f48bfb37e::t_eb969f947d65ba 1-20,24-55
+internal/api/admin/hmm_roster.go
+  s_8bc73f48bfb37e::t_a0d694cc00e6f1 1-51
+internal/router/policy/contract.go
+  s_8bc73f48bfb37e::t_26de80aa70a250 33
+  s_8bc73f48bfb37e::t_d5069ddb30998a 109,112
+  s_8bc73f48bfb37e::t_a3280ed1cff741 110-111
+  s_8bc73f48bfb37e::t_e266baea200bdc 32,34
+  s_8bc73f48bfb37e::t_754a70c6e421e1 144-151,153-156
+  s_8bc73f48bfb37e::t_2230b3a9de3e92 152
+internal/server/middleware/auth.go
+  s_8bc73f48bfb37e::t_b67fae1a5a9d39 92
+  s_8bc73f48bfb37e::t_375eb7d50eb4ff 154-165
+internal/router/policy/cluster_override_test.go
+  s_8bc73f48bfb37e::t_cb4c000b5325ef 1-120
+internal/auth/service_test.go
+  s_8bc73f48bfb37e::t_84580226b2534a 324,335,344,355,388,440,492,514,531,555,573,622,648,696,701
+sidecars/hmm/tests/test_policy.py
+  s_8bc73f48bfb37e::t_5f3b27e2793815 123-126
+sidecars/hmm/tests/test_api.py
+  s_8bc73f48bfb37e::t_544e0610cb5159 73,77-94
+  s_8bc73f48bfb37e::t_1e99b8f80e4667 47-54
+  s_48a9b9284e7ee8::t_7ce64f4e3121b1 95-96
+internal/router/policy/cluster_override.go
+  s_8bc73f48bfb37e::t_3846428a9d2f7a 19-22
+  s_8bc73f48bfb37e::t_3e2d37d9393f1e 75-78,86
+  s_8bc73f48bfb37e::t_119eb97e9838a1 1-18,23-74,79-85,87-96
+internal/router/router.go
+  s_8bc73f48bfb37e::t_40320e5122f800 173
+  s_8bc73f48bfb37e::t_45190a592d30d4 170-172
+internal/server/server_test.go
+  s_8bc73f48bfb37e::t_e4fadba69b80ab 81,96,108,120
+sidecars/hmm/hmm_sidecar/schemas.py
+  s_8bc73f48bfb37e::t_fe0be4d0caf0c0 100
+db/migrations/0042_cluster-model-lists.down.sql
+  s_8bc73f48bfb37e::t_57fe7ca3900c70 1-5
+db/queries/cluster_model_lists.sql
+  s_8bc73f48bfb37e::t_2c11fee7935ec0 4-8
+  s_8bc73f48bfb37e::t_fbaf53b1e13c59 1-3
+internal/postgres/repository.go
+  s_8bc73f48bfb37e::t_6723a1bf8fef8f 15-21,27-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cf8daf903d6867d0804029cda0e9a359800f5de9",
+  "prompts": {},
+  "sessions": {
+    "s_48a9b9284e7ee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e725a638-f702-473e-bee1-926b82a768b4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_8bc73f48bfb37e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a15b6da-b85d-4dff-a3ea-cd8232885276",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
