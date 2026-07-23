@@ -1,0 +1,21 @@
+install/npm/bin.js
+  s_1ada5d20f5c39b::t_9d82106bb1fd50 15-16,20
+install/npm/.gitignore
+  s_1ada5d20f5c39b::t_a42714ca7370a2 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "bdf8dae23064f9e7a9eb3b423a18ad5b3411b2e6",
+  "prompts": {},
+  "sessions": {
+    "s_1ada5d20f5c39b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2428335b-ad97-4311-937d-8c153b11f614",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

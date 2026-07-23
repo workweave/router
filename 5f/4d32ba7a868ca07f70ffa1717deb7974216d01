@@ -1,0 +1,32 @@
+internal/proxy/service.go
+  s_9918426a29c6b9::t_5a2f3f10f8420e 950
+  s_9918426a29c6b9::t_cbf1c9ca5f2d01 907
+  s_9918426a29c6b9::t_7743c5052aded4 909,1582
+  s_9918426a29c6b9::t_f694bfa6ae14a2 952,1626
+  s_9918426a29c6b9::t_f18e55b399d969 1059-1072
+internal/translate/translate.go
+  s_9918426a29c6b9::t_ecdbb3cadae3d2 257,261-266
+internal/translate/stream.go
+  s_9918426a29c6b9::t_eba9a4cf448e63 360-361
+  s_9918426a29c6b9::t_a1dc164fe11332 790-797
+  s_9918426a29c6b9::t_ac02053acb2841 357-359,362-364
+  s_9918426a29c6b9::t_8e3c785af57c0d 574
+internal/proxy/gemini.go
+  s_9918426a29c6b9::t_a3c9595a712038 169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5f4d32ba7a868ca07f70ffa1717deb7974216d01",
+  "prompts": {},
+  "sessions": {
+    "s_9918426a29c6b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "488e8a35-f3d2-42cb-b713-44a7d3f9686e",
+        "model": "deepseek/deepseek-v4-pro-20260423"
+      },
+      "human_author": null
+    }
+  }
+}

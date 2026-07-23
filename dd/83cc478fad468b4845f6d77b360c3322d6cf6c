@@ -1,0 +1,52 @@
+internal/translate/stream.go
+  s_e774f572d3f82d::t_50cdd4b9617065 1384
+  s_e774f572d3f82d::t_acc4ada3e91d8b 1375,1382-1383,1385,1387-1388
+  s_e774f572d3f82d::t_f51c8782f78cfc 1368
+  s_e774f572d3f82d::t_4a95883b434e1c 459-469
+  s_e774f572d3f82d::t_6acd7aa7ed3b36 1376-1381,1386
+internal/proxy/testdata/conformance/openai_chat/invalid_toolcall_args.golden
+  s_e774f572d3f82d::t_550544f20c6405 25
+internal/translate/crossformat_response_test.go
+  s_e774f572d3f82d::t_966cb52e5c65ed 353-357
+  s_e774f572d3f82d::t_309a97df6c6ca8 399-400
+internal/translate/emit_anthropic.go
+  s_e774f572d3f82d::t_6002c502f2dd9d 815-838
+internal/proxy/no_progress.go
+  s_e774f572d3f82d::t_c0303406eb0404 66-68,74-87,93-97
+internal/translate/translate.go
+  s_e774f572d3f82d::t_24f834c2133209 221
+  s_e774f572d3f82d::t_42bc493644e8c5 185-189
+  s_e774f572d3f82d::t_4ae554e6b5e717 241
+  s_e774f572d3f82d::t_6f2b59f9e14c44 308
+internal/proxy/testdata/conformance/openai_chat/toolcall.golden
+  s_e774f572d3f82d::t_550544f20c6405 25
+internal/translate/stream_tool_use_id_test.go
+  s_e774f572d3f82d::t_500615e901324b 52-122
+internal/proxy/conformance_golden_test.go
+  s_e774f572d3f82d::t_fd5df97ad23286 155-162,164-171
+  s_e774f572d3f82d::t_6edea72fd6632a 163
+  s_e774f572d3f82d::t_d4c98e7d212a04 132-137,172-173
+internal/translate/translate_test.go
+  s_e774f572d3f82d::t_e898684cca6ca8 681-684
+  s_e774f572d3f82d::t_80228e2ec67bc2 551-554
+internal/proxy/no_progress_internal_test.go
+  s_e774f572d3f82d::t_6df52cc2003223 67-112
+internal/proxy/testdata/conformance/openai_chat/toolcall_repaired_args.golden
+  s_e774f572d3f82d::t_550544f20c6405 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dd83cc478fad468b4845f6d77b360c3322d6cf6c",
+  "prompts": {},
+  "sessions": {
+    "s_e774f572d3f82d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "779ea5bb-493f-4c38-95b1-8d6a685c79fd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

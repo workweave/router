@@ -1,0 +1,19 @@
+internal/translate/envelope.go
+  s_dc1721788803f6::t_e87d33eba24c3e 1057-1059
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e87159cf2d0cc82fd0d1d92ab77077fde8e8bd69",
+  "prompts": {},
+  "sessions": {
+    "s_dc1721788803f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "509768f5-6d84-4526-8d9a-1128fa1aeda7",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

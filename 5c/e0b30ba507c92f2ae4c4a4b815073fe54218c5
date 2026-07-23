@@ -1,0 +1,20 @@
+internal/proxy/service_session_pin_test.go
+  s_c0addbe458ea9f::t_bf29468831a4f8 684-687
+  s_c0addbe458ea9f::t_9e1e7f03ccd19f 706,713
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5ce0b30ba507c92f2ae4c4a4b815073fe54218c5",
+  "prompts": {},
+  "sessions": {
+    "s_c0addbe458ea9f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2afb8e99-acfb-4cdc-a0fc-a0991e813a5d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

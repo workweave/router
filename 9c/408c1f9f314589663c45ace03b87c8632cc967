@@ -1,0 +1,19 @@
+internal/router/policy/resolver.go
+  s_1b793eb69b75c8::t_393bf20dfa53ad 22-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "9c408c1f9f314589663c45ace03b87c8632cc967",
+  "prompts": {},
+  "sessions": {
+    "s_1b793eb69b75c8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d13-167f-7f01-8be9-0d49e83a4a26",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

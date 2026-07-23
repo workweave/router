@@ -1,0 +1,46 @@
+internal/proxy/marker_internal_test.go
+  s_56ee74e40f065b::t_cd48ca916ed271 187
+install/cc-statusline.sh
+  s_56ee74e40f065b::t_11f0514841b913 248-252
+  s_56ee74e40f065b::t_5e98c8a06346cf 168-175,177-180
+  s_56ee74e40f065b::t_cc5375a7e5c404 4-5,7-11
+  s_56ee74e40f065b::t_6da6f5925012f2 137-148
+  s_56ee74e40f065b::t_c575cadf3018ee 182,192,194-196,198-202
+install/install.sh
+  s_56ee74e40f065b::t_4ae966f6588d6c 278-279,281-285,411-422,456,466,468-470,472-476,522-526
+  s_56ee74e40f065b::t_f5bf714ca46d1f 442-449,451-454
+internal/translate/provider_hint.go
+  s_dd0ba656e89940::t_34396f7c1f98a4 34-50
+internal/translate/emit_openai.go
+  s_dd0ba656e89940::t_3b50efdc7b7389 98-100
+  s_dd0ba656e89940::t_09a12db8dc6f6e 46-51
+.claude/settings.json
+  s_56ee74e40f065b::t_a9d2dec262c70a 4
+  s_56ee74e40f065b::t_9baa0d1bc7b7e8 1-3,5-10
+internal/translate/provider_hint_test.go
+  s_dd0ba656e89940::t_010b1612a1f109 92-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "0e3fb0da4ef11dceeb637e3c8ef01f7473e4a63c",
+  "prompts": {},
+  "sessions": {
+    "s_56ee74e40f065b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfefa320-cb6e-46b0-94dd-eb20e8f805d9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    },
+    "s_dd0ba656e89940": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "523b709e-685e-41ef-8f00-f065d11a7f62",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

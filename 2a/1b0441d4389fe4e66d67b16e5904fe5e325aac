@@ -1,0 +1,23 @@
+internal/postgres/telemetry.go
+  s_b6ea7217b3c1e9::t_554299028983d3 757-758
+internal/translate/router_feedback.go
+  s_b6ea7217b3c1e9::t_2735941b5826ed 315-316
+internal/postgres/pgx_chain_test.go
+  s_b6ea7217b3c1e9::t_a112af5aeb80f3 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2a1b0441d4389fe4e66d67b16e5904fe5e325aac",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
