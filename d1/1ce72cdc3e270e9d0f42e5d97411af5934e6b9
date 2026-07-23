@@ -1,0 +1,24 @@
+frontend/package-lock.json
+  ai_agent 21,740-742,756-758,772-774,788-790,804-806,820-822,836-838,852-854,868-870,5319-5321,5324
+frontend/package.json
+  s_eec8a919641d26::t_e865716f228b7f 22
+go.mod
+  s_eec8a919641d26::t_ed2631a75846ef 11
+  s_eec8a919641d26::t_500a944f2d3d8d 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "d11ce72cdc3e270e9d0f42e5d97411af5934e6b9",
+  "prompts": {},
+  "sessions": {
+    "s_eec8a919641d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42baac02-05a0-44fb-bc29-631420bb6f84",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,35 @@
+internal/policyclient/client.go
+  s_0cb555d8dc2e1e::t_f84e36028ce6ed 380
+internal/policyclient/client_test.go
+  s_0cb555d8dc2e1e::t_9971e905b727bf 243-253,257-263
+  s_0cb555d8dc2e1e::t_81528e640f7476 254-256
+internal/router/policy/sidecar_router_test.go
+  s_0cb555d8dc2e1e::t_bac61855fb746f 233,242-278
+  s_2068c10c824082::t_653e6c54db65d1 279-280
+internal/router/policy/sidecar_router.go
+  s_0cb555d8dc2e1e::t_c8d7c38a90eff1 112,145,149-152,159,174-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "96e55391848c571e1be5be0ab7300f469f4cbd4c",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_2068c10c824082": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "10176d9e-1b7d-413e-9119-05284d8d54cb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

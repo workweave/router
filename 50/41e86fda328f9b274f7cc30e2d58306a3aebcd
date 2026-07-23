@@ -1,0 +1,19 @@
+internal/auth/user_test.go
+  s_b2431dea8a2bea::t_043df34844500c 17-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "5041e86fda328f9b274f7cc30e2d58306a3aebcd",
+  "prompts": {},
+  "sessions": {
+    "s_b2431dea8a2bea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d9c1a88-0b75-4a06-9ba0-d6b1e87adc5e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

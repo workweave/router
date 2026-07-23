@@ -1,0 +1,39 @@
+internal/policyclient/client.go
+  s_774feafe3e7f4c::t_2d562b399c538e 53-70
+internal/policyclient/client_test.go
+  s_774feafe3e7f4c::t_9dc3df58a6673b 237-262
+internal/api/admin/health_test.go
+  s_774feafe3e7f4c::t_9dc3df58a6673b 1,5,7-8,11-13,16-19,22-31,34-62,64-76
+internal/api/admin/health.go
+  s_774feafe3e7f4c::t_2d562b399c538e 7-8,12,17-23,27-28
+internal/observability/apm/apm.go
+  s_774feafe3e7f4c::t_2d562b399c538e 145,152
+internal/policyclient/auth_test.go
+  s_774feafe3e7f4c::t_9dc3df58a6673b 25,50,60
+internal/server/server.go
+  s_774feafe3e7f4c::t_2d562b399c538e 26-28,61-63,68-69
+internal/server/server_test.go
+  s_774feafe3e7f4c::t_9dc3df58a6673b 4-7,23-28,44,80,95,107,112-134
+README.md
+  s_774feafe3e7f4c::t_f49a0306b1b42b 176-177
+  s_774feafe3e7f4c::t_2d562b399c538e 174
+  s_774feafe3e7f4c::t_f526fe495a04cc 175
+cmd/router/main.go
+  s_774feafe3e7f4c::t_2d562b399c538e 21,577,586,800
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "eafc2fd42dff491733bc00172fc7993d5098f450",
+  "prompts": {},
+  "sessions": {
+    "s_774feafe3e7f4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5e41-1d85-71e1-b0f7-5ef02d12c100",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

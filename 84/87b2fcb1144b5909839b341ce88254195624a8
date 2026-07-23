@@ -1,0 +1,21 @@
+frontend/package.json
+  s_eec8a919641d26::t_cb734c652a5225 22
+frontend/package-lock.json
+  ai_agent 21,740-742,5319-5321,5324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "8487b2fcb1144b5909839b341ce88254195624a8",
+  "prompts": {},
+  "sessions": {
+    "s_eec8a919641d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42baac02-05a0-44fb-bc29-631420bb6f84",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

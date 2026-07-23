@@ -1,0 +1,29 @@
+internal/proxy/text_repetition.go
+  s_6d259d23791b23::t_60f8428389b08e 20-23,26-30
+  s_6d259d23791b23::t_9ba1d59092479a 44-45
+  s_6d259d23791b23::t_ad708482902c53 52-54,56
+internal/proxy/text_repetition_internal_test.go
+  s_6d259d23791b23::t_bc10d664f1e9eb 64-81
+internal/translate/text_repetition_test.go
+  s_6d259d23791b23::t_cfad77479631fe 12,22,42,45-66,78,81,91
+internal/translate/text_repetition.go
+  s_6d259d23791b23::t_61601d52cb3624 9-15,23-35,38-59,63,65,68
+internal/proxy/service.go
+  s_6d259d23791b23::t_71077f06979beb 2021-2023
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c78efc028b2571e471dfc3fadb95444bbbd25bf6",
+  "prompts": {},
+  "sessions": {
+    "s_6d259d23791b23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52423c3-9d52-4a6a-bb28-ac4c96a85b4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

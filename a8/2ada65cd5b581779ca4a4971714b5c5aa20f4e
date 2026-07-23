@@ -1,0 +1,42 @@
+cmd/router/main.go
+  s_18e3f40203cbfc::t_c7030b6d1059fe 563-594
+  s_18e3f40203cbfc::t_323812f21e8a49 196,198,200,202
+  s_18e3f40203cbfc::t_b93fa8e4748672 11
+internal/router/cluster/artifacts_test.go
+  s_18e3f40203cbfc::t_e3a517e248d779 206-255
+internal/proxy/service.go
+  s_18e3f40203cbfc::t_067f320fb03d3d 314-315
+  s_18e3f40203cbfc::t_e41a26441cc156 124-125
+  s_18e3f40203cbfc::t_61b2f8f22a97e3 101
+  s_18e3f40203cbfc::t_7987d03ef13477 54,58-63
+internal/router/cluster/artifacts.go
+  s_18e3f40203cbfc::t_5c210ea2ef1cee 373-396
+internal/proxy/service_test.go
+  s_18e3f40203cbfc::t_7408efe5e9f939 246
+  s_18e3f40203cbfc::t_045a63cf12da82 56
+  s_18e3f40203cbfc::t_b5eb48c0676507 133
+  s_18e3f40203cbfc::t_089c11e2de968a 107
+  s_18e3f40203cbfc::t_f9f6d96b2981bb 199
+internal/proxy/service_cache_test.go
+  s_18e3f40203cbfc::t_657ba59234804d 92,123,147,170
+  s_18e3f40203cbfc::t_4b627de86bf2cf 195
+internal/proxy/service_session_pin_test.go
+  s_18e3f40203cbfc::t_8a76b47ffcde8a 257-259
+  s_18e3f40203cbfc::t_4326eef275314e 79-83,85-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "a82ada65cd5b581779ca4a4971714b5c5aa20f4e",
+  "prompts": {},
+  "sessions": {
+    "s_18e3f40203cbfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ef3e74f-d410-4e73-87e1-e5c37122a3e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

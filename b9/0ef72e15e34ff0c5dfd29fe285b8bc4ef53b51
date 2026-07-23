@@ -1,0 +1,22 @@
+internal/proxy/router_feedback_proxy_test.go
+  s_b6ea7217b3c1e9::t_b080b2fb96922c 748-790
+internal/proxy/router_feedback.go
+  s_b6ea7217b3c1e9::t_e532282fd189ea 190-196
+  s_b6ea7217b3c1e9::t_7afaea4c18365f 189,198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b90ef72e15e34ff0c5dfd29fe285b8bc4ef53b51",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

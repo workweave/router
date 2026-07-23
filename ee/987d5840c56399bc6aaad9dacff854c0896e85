@@ -1,0 +1,81 @@
+internal/server/middleware/router_strategy_override.go
+  s_bb0b6581fb6ab1::t_b0f5c12d00fffc 15-17,20-28,36-43,45,50-62,66-89
+internal/auth/errors.go
+  s_bb0b6581fb6ab1::t_0d68b526b13e40 20-26
+internal/api/admin/keys.go
+  s_bb0b6581fb6ab1::t_d4de5483e86ad6 16-22,27-31,39-42,45-50
+  s_bb0b6581fb6ab1::t_4587189a64e3ba 104,106
+  s_bb0b6581fb6ab1::t_53e4678f4ece30 51-53
+internal/auth/service_test.go
+  s_bb0b6581fb6ab1::t_3e1d021a1a9cfb 79-82
+  s_bb0b6581fb6ab1::t_5cdb8e148c9d93 8
+  s_bb0b6581fb6ab1::t_2265f8878111d4 917-998
+  s_bb0b6581fb6ab1::t_1b7065f0c0aeaa 83-154
+internal/api/admin/keys_test.go
+  s_bb0b6581fb6ab1::t_a6e939bf384455 82-93
+  s_bb0b6581fb6ab1::t_65c42515df77c3 130,133
+  s_bb0b6581fb6ab1::t_5088a9da4e80e7 225-282,284-292,294,298-329
+  s_bb0b6581fb6ab1::t_e5355481f3fd43 36-45
+  s_bb0b6581fb6ab1::t_54643f00aeebf8 187
+  s_bb0b6581fb6ab1::t_185d12e2f31a08 283,293,295-297
+  s_bb0b6581fb6ab1::t_119e45377c570d 118
+  s_bb0b6581fb6ab1::t_50b0402289c791 212
+internal/postgres/converters_test.go
+  s_bb0b6581fb6ab1::t_524e8c5a365354 33-55
+internal/sqlc/models.go
+  s_bb0b6581fb6ab1::t_212f015f499d8f 47
+db/queries/model_router_api_keys.sql
+  s_bb0b6581fb6ab1::t_17ee2f9d016e7f 9,19
+  s_bb0b6581fb6ab1::t_8f451c12532942 71-82
+internal/server/server.go
+  s_bb0b6581fb6ab1::t_b47ba758daf048 111
+internal/sqlc/model_router_api_keys.sql.go
+  s_bb0b6581fb6ab1::t_212f015f499d8f 22,32-33,35,39-46,58,68-69,71,80,98,104,123,146,195,204,232,287-319
+internal/server/middleware/router_strategy_override_test.go
+  s_bb0b6581fb6ab1::t_d3fe8d45cca125 19-24,32-34,88-117
+  s_16630324d49392::t_c1e90b3ec11997 18
+internal/auth/api_key.go
+  s_bb0b6581fb6ab1::t_d920effc64b300 20-25,29-36,45-49
+internal/postgres/repository.go
+  s_bb0b6581fb6ab1::t_ea5fa1cab16caf 276-299
+  s_bb0b6581fb6ab1::t_23e997e08d7dff 211-218
+internal/server/middleware/auth_test.go
+  s_bb0b6581fb6ab1::t_44ed6b7a67ad9c 84-87
+install/README.md
+  s_bb0b6581fb6ab1::t_f26646aa4a281a 214-221
+internal/auth/service.go
+  s_bb0b6581fb6ab1::t_950cbacf014cbd 12
+  s_bb0b6581fb6ab1::t_fde633b11e75ab 108-120,122-128,133-140,202
+  s_bb0b6581fb6ab1::t_2559fb1b1d3ce1 154-158,177,185-201
+  s_bb0b6581fb6ab1::t_54146fc2062f72 203
+internal/postgres/converters.go
+  s_bb0b6581fb6ab1::t_7bfa21b979382a 45-48,50-61
+db/migrations/0034_api-key-default-strategy.down.sql
+  s_bb0b6581fb6ab1::t_223c3269c63331 1-6
+db/migrations/0034_api-key-default-strategy.up.sql
+  s_bb0b6581fb6ab1::t_788bbab82b9103 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ee987d5840c56399bc6aaad9dacff854c0896e85",
+  "prompts": {},
+  "sessions": {
+    "s_16630324d49392": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7744199e-9de2-4668-978a-4fb5ccf549f4",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_bb0b6581fb6ab1": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "546700d9-9189-4caf-b295-d8898fa93f31",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

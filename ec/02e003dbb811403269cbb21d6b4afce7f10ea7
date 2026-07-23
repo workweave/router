@@ -1,0 +1,25 @@
+internal/proxy/turnloop.go
+  s_2d837cadf754e2::t_4633d255b89089 53-54
+internal/translate/stream.go
+  s_2d837cadf754e2::t_4633d255b89089 342
+internal/router/cluster/artifacts.go
+  s_2d837cadf754e2::t_4633d255b89089 125-126
+internal/translate/envelope.go
+  s_2d837cadf754e2::t_4633d255b89089 206-208,212-215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "ec02e003dbb811403269cbb21d6b4afce7f10ea7",
+  "prompts": {},
+  "sessions": {
+    "s_2d837cadf754e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10569733-a047-49c0-bd13-61a08a2839f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
