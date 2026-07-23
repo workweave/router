@@ -40,6 +40,28 @@ func parseAndEmit(t *testing.T, body []byte, format string, opts translate.EmitO
 	}
 }
 
+func TestAnthropicSameFormat_AddsTailCacheBreakpointWhenSystemAlreadyCached(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"system":[{"type":"text","text":"cached rules","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"continue"}]}`)
+	out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+
+	system := out["system"].([]any)
+	require.Len(t, system, 1)
+	assert.Equal(t, map[string]any{"type": "ephemeral", "ttl": "1h"}, system[0].(map[string]any)["cache_control"])
+
+	messages := out["messages"].([]any)
+	require.Len(t, messages, 3)
+	first := messages[0].(map[string]any)
+	assert.Equal(t, "first", first["content"])
+
+	last := messages[2].(map[string]any)
+	blocks := last["content"].([]any)
+	require.Len(t, blocks, 1)
+	lastBlock := blocks[0].(map[string]any)
+	assert.Equal(t, "text", lastBlock["type"])
+	assert.Equal(t, "continue", lastBlock["text"])
+	assert.Equal(t, map[string]any{"type": "ephemeral"}, lastBlock["cache_control"])
+}
+
 func TestOpenAISameFormat_ModelRewrite(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	opts := translate.EmitOptions{

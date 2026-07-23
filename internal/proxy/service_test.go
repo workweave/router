@@ -397,7 +397,16 @@ func TestService_ProxyMessages_StripsRoutingMarkerFromInboundHistory(t *testing.
 	upstream := string(provider.proxyBodies[0])
 	assert.NotContains(t, upstream, markerSentinel, "routing marker must not reach upstream")
 	assert.Contains(t, upstream, "real assistant reply", "non-marker assistant content must survive")
-	assert.Contains(t, upstream, "</result>", "wrapper text around an embedded marker must survive")
+
+	// The last user message's content is promoted to an array with a cache_control
+	// marker; unmarshal to verify the wrapper text survived.
+	var upstreamJSON map[string]any
+	require.NoError(t, json.Unmarshal(provider.proxyBodies[0], &upstreamJSON))
+	msgs, _ := upstreamJSON["messages"].([]any)
+	lastMsg, _ := msgs[len(msgs)-1].(map[string]any)
+	blocks, _ := lastMsg["content"].([]any)
+	lastBlock, _ := blocks[len(blocks)-1].(map[string]any)
+	assert.Contains(t, lastBlock["text"], "</result>", "wrapper text around an embedded marker must survive")
 }
 
 func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {

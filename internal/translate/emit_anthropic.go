@@ -31,11 +31,7 @@ func (e *RequestEnvelope) PrepareAnthropic(in http.Header, opts EmitOptions) (pr
 	default:
 		return providers.PreparedRequest{}, fmt.Errorf("unsupported source format for Anthropic emit: %d", e.format)
 	}
-	if e.format == FormatOpenAI {
-		body, err = applyAnthropicCachePolicy(body, true)
-	} else {
-		body, err = applyAnthropicCachePolicy(body, false)
-	}
+	body, err = applyAnthropicCachePolicy(body, true)
 	if err != nil {
 		return providers.PreparedRequest{}, err
 	}

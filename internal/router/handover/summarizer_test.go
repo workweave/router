@@ -56,9 +56,15 @@ func TestRewriteEnvelope_AnthropicCollapsesToSummaryPlusLastUser(t *testing.T) {
 	assert.True(t, strings.HasPrefix(summaryText, translate.HandoverSummaryTag), "summary must carry the tag prefix; got %q", summaryText)
 	assert.Contains(t, summaryText, "Refactor of pkg/foo")
 
-	// Second entry: the original trailing user message verbatim.
+	// Second entry: the original trailing user message.
+	// Content may be promoted to an array with a cache_control marker.
 	assert.Equal(t, "user", msgs[1].Get("role").String())
-	assert.Equal(t, "Continue with step 2.", msgs[1].Get("content").String())
+	content := msgs[1].Get("content")
+	if content.IsArray() {
+		assert.Equal(t, "Continue with step 2.", content.Get("0.text").String())
+	} else {
+		assert.Equal(t, "Continue with step 2.", content.String())
+	}
 }
 
 func TestRewriteEnvelope_NilEnvelopeReturnsZeroAndDoesNotPanic(t *testing.T) {
@@ -164,8 +170,21 @@ func TestTrimLastN_KeepsLastNMessagesAndSystem(t *testing.T) {
 	msgs := gjson.GetBytes(prep.Body, "messages").Array()
 	require.Len(t, msgs, 3)
 	assert.Equal(t, "m8", msgs[0].Get("content").String())
-	assert.Equal(t, "m9", msgs[1].Get("content").String())
-	assert.Equal(t, "m10", msgs[2].Get("content").String())
+	assert.Equal(t, "user", msgs[1].Get("role").String())
+	// Content may be promoted to an array with a cache_control marker.
+	c1 := msgs[1].Get("content")
+	if c1.IsArray() {
+		assert.Equal(t, "m9", c1.Get("0.text").String())
+	} else {
+		assert.Equal(t, "m9", c1.String())
+	}
+	assert.Equal(t, "assistant", msgs[2].Get("role").String())
+	c2 := msgs[2].Get("content")
+	if c2.IsArray() {
+		assert.Equal(t, "m10", c2.Get("0.text").String())
+	} else {
+		assert.Equal(t, "m10", c2.String())
+	}
 }
 
 func TestTrimLastN_ZeroDefaultsToThree(t *testing.T) {
@@ -231,7 +250,13 @@ func TestTrimLastN_StripsOrphanedAnthropicToolResults(t *testing.T) {
 	assert.Equal(t, "assistant", msgs[0].Get("role").String())
 	assert.Equal(t, "done", msgs[0].Get("content").String())
 	assert.Equal(t, "user", msgs[1].Get("role").String())
-	assert.Equal(t, "next question", msgs[1].Get("content").String())
+	// Content may be promoted to an array with a cache_control marker.
+	c := msgs[1].Get("content")
+	if c.IsArray() {
+		assert.Equal(t, "next question", c.Get("0.text").String())
+	} else {
+		assert.Equal(t, "next question", c.String())
+	}
 }
 
 func TestTrimLastN_PreservesMatchedToolResults(t *testing.T) {
