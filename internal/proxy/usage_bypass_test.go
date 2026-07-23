@@ -332,6 +332,66 @@ func TestSubscriptionExhausted_ServesOnDeploymentKey(t *testing.T) {
 	// falls back to its own deployment key. Either way the spent token is gone.
 }
 
+// TestOpenAI_SubscriptionExhausted_ServesOnDeploymentKey locks that an
+// OpenAI-wire turn routed to Anthropic drops an exhausted Claude OAuth token
+// when a deployment Anthropic key is available, same as ProxyMessages.
+func TestOpenAI_SubscriptionExhausted_ServesOnDeploymentKey(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0).
+		WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAnthropic: {}})
+
+	body := []byte(`{"model":"` + bypassRequestedMdl + `","messages":[{"role":"user","content":"hi"}],"max_tokens":100}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	require.NoError(t, svc.ProxyOpenAIChatCompletion(bypassCtx(0.80), body, rec, req))
+
+	require.Len(t, p.proxyCreds, 1, "the turn must be dispatched once")
+	creds := p.proxyCreds[0]
+	if creds != nil {
+		assert.False(t, creds.OAuth,
+			"an exhausted subscription must not be forwarded — the turn serves on the deployment key")
+	}
+}
+
+// TestSubscriptionOnly_OpenAI_ExhaustedSubscription_Refuses402 locks that
+// subscription-only + an observed-exhausted Claude subscription refuses with
+// ErrCreditsExhaustedSubscriptionUnavailable and zero dispatches on the OpenAI
+// surface, matching ProxyMessages.
+func TestSubscriptionOnly_OpenAI_ExhaustedSubscription_Refuses402(t *testing.T) {
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: bypassScorerPickMdl}}
+	p := &fakeProvider{proxyResponse: func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + bypassScorerPickMdl + `","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}}
+	obs := usage.NewObserver([]byte("salt"), 10*time.Minute, time.Now)
+	obs.Record(obs.Key([]byte(bypassSubToken)), usage.Snapshot{
+		Secondary: usage.Window{UsedPercent: 1.0, WindowMinutes: 10080},
+	})
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: p}, nil, false, nil, nil, false, providers.ProviderAnthropic, bypassScorerPickMdl, nil).
+		WithSubscriptionAwareRouting(obs, 0.05, 2.0)
+
+	body := []byte(`{"model":"` + bypassRequestedMdl + `","messages":[{"role":"user","content":"hi"}],"max_tokens":100}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	ctx := billing.WithSubscriptionOnly(bypassCtx(0.80))
+	err := svc.ProxyOpenAIChatCompletion(ctx, body, rec, req)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, proxy.ErrCreditsExhaustedSubscriptionUnavailable),
+		"an exhausted subscription in subscription-only mode must be refused, not paid for")
+	assert.Empty(t, p.proxyBodies, "no paid dispatch may occur when the subscription can't serve the turn")
+}
+
 // TestSubscriptionExhausted_NoDeploymentKey_KeepsSubscription guards the
 // safety rail: with no deployment / BYOK Anthropic key to fall through to,
 // dropping the subscription would leave the turn with no credential (a 400,
