@@ -5,12 +5,8 @@ import (
 	"workweave/router/internal/router/cluster"
 )
 
-// DeployedModelsForRosterIDs maps sidecar roster IDs back to catalog
-// {model, provider} entries, so the deployed-models endpoint can report the
-// HMM strategy's routable roster instead of the cluster artifact's registry.
-// Input order is preserved; unknown roster IDs and duplicate catalog models
-// are dropped so the result mirrors the DeployedEntry shape the cluster source
-// produces.
+// DeployedModelsForRosterIDs maps sidecar roster IDs to catalog {model, provider} entries.
+// Unknown IDs are dropped; first occurrence wins on duplicates.
 func DeployedModelsForRosterIDs(rosterIDs []string) []cluster.DeployedEntry {
 	inverse := make(map[string]catalog.Model, len(catalog.Models))
 	for _, m := range catalog.Models {
