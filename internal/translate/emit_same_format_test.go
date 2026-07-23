@@ -62,6 +62,38 @@ func TestAnthropicSameFormat_AddsTailCacheBreakpointWhenSystemAlreadyCached(t *t
 	assert.Equal(t, map[string]any{"type": "ephemeral"}, lastBlock["cache_control"])
 }
 
+func TestAnthropicSameFormat_ToolCacheControlCountsTowardCapacity(t *testing.T) {
+	// A native client (e.g. Claude Code) pins the last tool and fills the rest
+	// of the 4-breakpoint budget on system blocks. Tool breakpoints count too,
+	// so the router must inject nothing rather than push the total past 4.
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,` +
+		`"tools":[{"name":"a","input_schema":{"type":"object"}},` +
+		`{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
+		`"system":[{"type":"text","text":"one","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"two","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"three","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out := parseAndEmit(t, body, "anthropic", translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+
+	lastMessage := out["messages"].([]any)[0].(map[string]any)
+	assert.Equal(t, "hi", lastMessage["content"], "capacity is full (1 tool + 3 system = 4), so the router injects no tail breakpoint")
+}
+
+func TestAnthropicSameFormat_ToolCacheControlOverflowRejected(t *testing.T) {
+	// Five tool breakpoints alone exceed the 4-breakpoint capacity; the count
+	// must include tools or this overflow slips through as a silent upstream 400.
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}],"tools":[` +
+		`{"name":"a","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"b","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"c","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"d","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}},` +
+		`{"name":"e","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]}`)
+	env, err := translate.ParseAnthropic(body)
+	require.NoError(t, err)
+	_, err = env.PrepareAnthropic(http.Header{}, translate.EmitOptions{TargetModel: "claude-opus-4-8", Capabilities: router.Lookup("claude-opus-4-8")})
+	require.ErrorIs(t, err, translate.ErrAnthropicCacheControlOverflow)
+}
+
 func TestOpenAISameFormat_ModelRewrite(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	opts := translate.EmitOptions{
