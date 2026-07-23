@@ -19,10 +19,8 @@ type rosterFetcher interface {
 	Roster(ctx context.Context) ([]string, error)
 }
 
-// hmmRosterSource adapts the HMM sidecar's roster arms into the deployed-models
-// shape the control plane reads. It caches per hmmRosterTTL and, on a fetch
-// failure with a prior snapshot, serves the stale list rather than blanking the
-// settings roster — the same stale-on-failure contract as the cluster catalog.
+// hmmRosterSource adapts HMM sidecar roster arms to deployed-model entries.
+// On fetch failure it serves the prior snapshot rather than blanking the roster.
 type hmmRosterSource struct {
 	fetch rosterFetcher
 
