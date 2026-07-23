@@ -206,11 +206,8 @@ func makeNullable(node map[string]any) map[string]any {
 		node["anyOf"] = append(branches, map[string]any{"type": "null"})
 		return node
 	}
-	// No type and no anyOf (e.g. bare {} or bare enum). Wrap in an
-	// anyOf whose first branch carries an explicit value-type union
-	// so OpenAI strict mode doesn't 400 on a typeless branch.
-	// Preserve any inline constraints (description, etc.) on the
-	// original node.
+	// No type and no anyOf: give the synthetic branch an explicit value-type union
+	// so OpenAI strict mode accepts it; preserve any inline constraints on the original node.
 	branch := map[string]any{"type": []any{"string", "number", "boolean", "object", "array", "null"}}
 	for k, v := range node {
 		branch[k] = v
