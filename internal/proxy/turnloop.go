@@ -71,8 +71,8 @@ type turnLoopResult struct {
 	// whose active policy declared model-authoritative dispatch.
 	AuthoritativePerTurn bool
 	// UsageBypass is true when the caller's own subscription has headroom:
-	// ProxyMessages must serve the requested model straight through with no
-	// billing debit, bypassing Decision's normal dispatch.
+	// ProxyMessages / ProxyOpenAIChatCompletion must serve the requested model
+	// straight through with no billing debit, bypassing Decision's normal dispatch.
 	UsageBypass bool
 	PinTier     string
 	PinAgeSec   int64
