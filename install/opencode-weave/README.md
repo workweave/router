@@ -3,7 +3,7 @@
 Lets a caller's own **AI subscriptions** pay for their **opencode** turns, routed
 through the Weave Router. A subscription is a **credential scoped to the model
 family it can pay for**, not a provider you pick: you connect your ChatGPT
-(Codex) and/or Claude (Pro/Max) plan once, the router routes every turn to the
+(Codex) and/or Claude (Pro/Max) plan once, the router routes every request to the
 best model, and bills the plan that matches the model it served — ChatGPT pays
 for GPT/Codex turns, Claude pays for Claude turns, your Weave key pays for
 everything else.
@@ -34,9 +34,9 @@ router's dedicated headers:
 | `X-Weave-Anthropic-Subscription: <sk-ant-oat token>` | pays Claude turns, refreshed on expiry |
 | `X-Weave-Router-Key: rk_…` | from `opencode.json` `options.headers` — the router authenticates off this |
 
-The router routes the turn across every model the caller's subs + key can pay
+The router routes each request across every model the caller's subs + key can pay
 for and resolves the subscription matching the chosen provider, so a sub is
-never billed for a turn outside its family.
+never billed for a request outside its family.
 
 ## Two storage slots, one request provider
 

@@ -9,14 +9,14 @@ Inbound turn-type classifier. Read [root CLAUDE.md](../../../CLAUDE.md) first.
 Classifies inbound requests into:
 
 - `MainLoop`
-- `ToolResult` — proxy short-circuits to the session pin (these turns' embeddings are mostly noise)
+- `ToolResult` — proxy short-circuits to the session pin (these actions' embeddings are mostly noise)
 - `SubAgentDispatch`
 - `Compaction` — proxy forces Haiku
 - `Probe` — proxy bypasses routing entirely
 - `TitleGen` — Claude Code sidebar-title generation; hard-pinned AND skips session-pin creation (an anchored pin here would leak the cheap-model decision into the real conversation that follows ~25ms later)
 - `Classifier` — short-form classification call (e.g. Claude Code's security monitor); hard-pinned AND skips session-pin creation
 
-Used by [`../../proxy`](../../proxy) to keep the turn loop cheap + correct.
+Used by [`../../proxy`](../../proxy) to keep the action loop cheap + correct.
 
 ## Invariants
 

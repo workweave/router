@@ -2,7 +2,7 @@
 
 > **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
 
-Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry` value types. Plus subpackages for cache-aware turn-routing primitives. Read [root CLAUDE.md](../../CLAUDE.md) first.
+Inner-ring `Router` interface + `Request`/`Decision`/`ModelSpec`/`ModelRegistry` value types. Plus subpackages for cache-aware action-routing primitives. Read [root CLAUDE.md](../../CLAUDE.md) first.
 
 ## Subpackages
 
