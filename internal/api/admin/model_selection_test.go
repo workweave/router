@@ -167,3 +167,19 @@ func TestGetModelsHandler_ReturnsEnabledState(t *testing.T) {
 		{Model: "gpt-5.5", Provider: "openai", Enabled: false},
 	}, response)
 }
+
+func TestUpdateKnownListItemDropsStaleValues(t *testing.T) {
+	allowed := map[string]struct{}{
+		"claude-opus-4-7": {},
+		"gpt-5.5":         {},
+	}
+
+	assert.Equal(t,
+		[]string{"claude-opus-4-7", "gpt-5.5"},
+		updateKnownListItem([]string{"removed-model", "claude-opus-4-7"}, "gpt-5.5", true, allowed),
+	)
+	assert.Equal(t,
+		[]string{"gpt-5.5"},
+		updateKnownListItem([]string{"removed-model", "claude-opus-4-7", "gpt-5.5"}, "claude-opus-4-7", false, allowed),
+	)
+}

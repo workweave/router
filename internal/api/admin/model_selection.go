@@ -156,13 +156,14 @@ func updateExcludedModelItemHandler(authSvc *auth.Service, models DeployedModels
 			return
 		}
 
-		next := updateListItem(installation.ExcludedModels, req.Model, add)
+		allowed := deployedModelSet(models)
+		next := updateKnownListItem(installation.ExcludedModels, req.Model, add, allowed)
 		stored, err := authSvc.SetInstallationExcludedModels(
 			c.Request.Context(),
 			installation.ExternalID,
 			installation.ID,
 			next,
-			deployedModelSet(models),
+			allowed,
 		)
 		if !respondModelSelectionError(c, err, "Failed to update excluded models.") {
 			return
@@ -198,12 +199,13 @@ func updatePreferredModelItemHandler(authSvc *auth.Service, models DeployedModel
 			return
 		}
 
+		allowed := deployedModelSet(models)
 		stored, err := authSvc.SetInstallationPreferredModels(
 			c.Request.Context(),
 			installation.ExternalID,
 			installation.ID,
-			updateListItem(installation.PreferredModels, req.Model, add),
-			deployedModelSet(models),
+			updateKnownListItem(installation.PreferredModels, req.Model, add, allowed),
+			allowed,
 		)
 		if !respondModelSelectionError(c, err, "Failed to update preferred models.") {
 			return
@@ -239,12 +241,13 @@ func updateExcludedProviderItemHandler(authSvc *auth.Service, models DeployedMod
 		}
 
 		available := deployedProvidersDTO(models)
+		allowed := stringsSet(available)
 		stored, err := authSvc.SetInstallationExcludedProviders(
 			c.Request.Context(),
 			installation.ExternalID,
 			installation.ID,
-			updateListItem(installation.ExcludedProviders, req.Provider, add),
-			stringsSet(available),
+			updateKnownListItem(installation.ExcludedProviders, req.Provider, add, allowed),
+			allowed,
 		)
 		if !respondProviderSelectionError(c, err) {
 			return
@@ -313,6 +316,16 @@ func updateListItem(values []string, value string, add bool) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func updateKnownListItem(values []string, value string, add bool, allowed map[string]struct{}) []string {
+	known := make([]string, 0, len(values))
+	for _, existing := range values {
+		if _, ok := allowed[existing]; ok {
+			known = append(known, existing)
+		}
+	}
+	return updateListItem(known, value, add)
 }
 
 func respondModelSelectionError(c *gin.Context, err error, failureMessage string) bool {
