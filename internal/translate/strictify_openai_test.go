@@ -265,9 +265,7 @@ func TestStrictify_TypelessOptionalGetsExplicitValueType(t *testing.T) {
 	assert.Equal(t, []any{}, valueBranch["required"],
 		"an object-capable branch needs a required list, even if empty")
 
-	// A type union including "array" needs an items sub-schema; OpenAI strict mode
-	// 400s otherwise ("array schema missing items", index 4 = the "array" entry).
-	// items bottoms out at primitives — deliberate, since this branch means "no type info".
+	// Array-capable union needs an items sub-schema (OpenAI strict-mode 400); primitives only, no recursion.
 	items, hasItems := valueBranch["items"].(map[string]any)
 	require.True(t, hasItems, "a type union including \"array\" needs an items sub-schema or OpenAI 400s")
 	assert.Equal(t, []any{"string", "number", "boolean", "null"}, items["type"],
