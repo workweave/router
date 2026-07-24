@@ -20,31 +20,46 @@ import (
 // only on Anthropic→non-Anthropic emit paths (buildOpenAIFromAnthropic and
 // the Anthropic case of PrepareGemini). The Anthropic→Anthropic passthrough
 // preserves them.
+//
+// Scheduling / wake-up tools (ScheduleWakeup, CronCreate/Delete/List, Monitor)
+// and shell-session tools (BashOutput, KillShell) are client-executed like
+// Read/Bash; stripping them broke /loop and background-shell control on
+// non-Anthropic routes. NotebookEdit is a coding tool (same family as Edit),
+// not a CC-internal control-plane tool.
 var claudeCodeOnlyToolNames = map[string]struct{}{
-	"Task":                 {},
-	"TaskCreate":           {},
-	"TaskUpdate":           {},
-	"TaskGet":              {},
-	"TaskList":             {},
-	"TaskOutput":           {},
-	"TaskStop":             {},
-	"EnterPlanMode":        {},
-	"ExitPlanMode":         {},
-	"Skill":                {},
-	"Workflow":             {},
-	"AskUserQuestion":      {},
-	"CronCreate":           {},
-	"CronDelete":           {},
-	"CronList":             {},
-	"Monitor":              {},
-	"PushNotification":     {},
-	"RemoteTrigger":        {},
-	"EnterWorktree":        {},
-	"ExitWorktree":         {},
-	"LSP":                  {},
-	"ListMcpResourcesTool": {},
-	"ReadMcpResourceTool":  {},
-	"NotebookEdit":         {},
+	// Subagent dispatch. Task = pre-2.1 name; Agent = current CC name.
+	"Task":       {},
+	"Agent":      {},
+	"TaskCreate": {},
+	"TaskUpdate": {},
+	"TaskGet":    {},
+	"TaskList":   {},
+	"TaskOutput": {},
+	"TaskStop":   {},
+	// Plan mode / skills / workflows.
+	"EnterPlanMode":   {},
+	"ExitPlanMode":    {},
+	"UpdatePlan":      {},
+	"Skill":           {},
+	"Workflow":        {},
+	"AskUserQuestion": {},
+	// Tool registry / deferred-loading discovery (Anthropic-native protocol;
+	// non-Anthropic emit drops defer_loading anyway, so ToolSearch is noise).
+	"ToolSearch": {},
+	// Todo bookkeeping that non-Anthropic models invent.
+	"TodoWrite": {},
+	// Notifications / remote triggers / worktrees / LSP.
+	"PushNotification": {},
+	"RemoteTrigger":    {},
+	"EnterWorktree":    {},
+	"ExitWorktree":     {},
+	"LSP":              {},
+	// MCP resource listing — both historic *Tool suffix and current names.
+	"ListMcpResourcesTool":     {},
+	"ReadMcpResourceTool":      {},
+	"ListMcpResources":         {},
+	"ListMcpResourceTemplates": {},
+	"ReadMcpResource":          {},
 }
 
 // isClaudeCodeOnlyTool reports whether name is one of the tools Claude Code
@@ -61,6 +76,7 @@ func isClaudeCodeOnlyTool(name string) bool {
 // claudeCodeOnlyToolNames — see TestOrchestrationToolsAreSubsetOfCCOnly.
 var claudeCodeOrchestrationToolNames = map[string]struct{}{
 	"Task":          {},
+	"Agent":         {},
 	"TaskCreate":    {},
 	"TaskUpdate":    {},
 	"TaskGet":       {},
@@ -71,6 +87,7 @@ var claudeCodeOrchestrationToolNames = map[string]struct{}{
 	"Skill":         {},
 	"EnterPlanMode": {},
 	"ExitPlanMode":  {},
+	"UpdatePlan":    {},
 }
 
 // isCrossVendorOrchestrationTool reports whether name is a Claude Code
