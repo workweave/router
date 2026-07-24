@@ -1,24 +1,11 @@
 // Command mitmproxy is a record/replay MITM forward proxy for the router smoke
-// suite. The router's HTTP transport already honors http.ProxyFromEnvironment,
-// so pointing the server container at this proxy via HTTPS_PROXY — and trusting
-// its CA via SSL_CERT_DIR — lets us intercept the router→Anthropic TLS calls
-// with zero router code changes.
+// suite. Points the server container at this proxy via HTTPS_PROXY and trusts
+// its CA via SSL_CERT_DIR, intercepting router→Anthropic TLS with zero router changes.
 //
-// Modes (SMOKE_PROXY_MODE):
-//
-//	replay-only       serve from the cassette cache; a cache miss is a hard
-//	                  error (PR CI: no API key needed, fully deterministic).
-//	record            always go live and (re)write cassettes (nightly refresh;
-//	                  needs a real upstream key on the server side).
-//	replay-or-record  serve from cache, else go live and record (local default).
-//
-// The cache key is sha256(method + path + body). The smoke fixtures are
-// byte-deterministic, so identical scenarios hash identically across runs.
-//
-// Security: the CA is minted fresh in memory on every start; only its public
-// certificate is written to disk (CERT_DIR). No private key and no upstream
-// credential is ever persisted — Authorization / x-api-key are stripped before
-// a response is written to a cassette.
+// SMOKE_PROXY_MODE: replay-only (PR CI default, no key needed) | record (nightly
+// refresh) | replay-or-record (local default). Cache key: sha256(method+path+body).
+// CA is ephemeral (in-memory); only the public cert touches disk — no key material
+// or upstream credential is ever persisted to a cassette.
 package main
 
 import (

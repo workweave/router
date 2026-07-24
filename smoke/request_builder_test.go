@@ -7,11 +7,9 @@ import (
 	"testing"
 )
 
-// requestBuilder constructs Claude-Code-shaped Anthropic Messages request
-// bodies for the scenarios. It defaults to a realistic shape: the large stable
-// system prefix as a block array, a realistic tool registry, and a MainLoop-
-// sized max_tokens so turn classification doesn't hard-pin the request onto a
-// cheap probe path.
+// requestBuilder constructs Claude-Code-shaped Anthropic Messages request bodies.
+// Defaults to a realistic shape with the large stable system prefix, a tool registry,
+// and a high max_tokens so turn classification doesn't pin onto a cheap probe path.
 type requestBuilder struct {
 	userID      string
 	stream      bool
