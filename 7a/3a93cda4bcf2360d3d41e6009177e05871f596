@@ -1,0 +1,21 @@
+db/queries/model_router_installations.sql
+  s_757dddc40babb4::t_17aa76842afe72 59-60
+internal/sqlc/model_router_installations.sql.go
+  s_757dddc40babb4::t_ae488d3f05adc1 288-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "7a3a93cda4bcf2360d3d41e6009177e05871f596",
+  "prompts": {},
+  "sessions": {
+    "s_757dddc40babb4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a1b67b99-82bf-420f-b92a-49a47afd282f",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

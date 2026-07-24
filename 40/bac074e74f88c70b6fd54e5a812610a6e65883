@@ -1,0 +1,23 @@
+internal/api/admin/model_selection_test.go
+  s_757dddc40babb4::t_7bbd7cfba10dc3 170-185
+internal/api/admin/model_selection.go
+  s_757dddc40babb4::t_5ee34df6387b42 159-160,166,244,249-250,321-328
+  s_757dddc40babb4::t_be7ab9cf787dc3 202,207-208
+  s_757dddc40babb4::t_7041cb8f07aa45 329-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "40bac074e74f88c70b6fd54e5a812610a6e65883",
+  "prompts": {},
+  "sessions": {
+    "s_757dddc40babb4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a1b67b99-82bf-420f-b92a-49a47afd282f",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
