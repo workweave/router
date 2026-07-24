@@ -1,0 +1,102 @@
+internal/proxy/subscription_internal_test.go
+  s_571afbd3448707::t_4890cd0117b223 53,71,86,98,111,125,142,161,178,192,207
+internal/api/subscriptions/handler.go
+  s_571afbd3448707::t_aac295218c54a7 1-7,9-221
+  s_571afbd3448707::t_ec3c457b5728d7 8
+internal/proxy/subsidy.go
+  s_571afbd3448707::t_d2b34738404fe2 128-130,145-159
+  s_571afbd3448707::t_f820c823ff4d33 160-161
+internal/proxy/credentials.go
+  s_571afbd3448707::t_f03ddaf10a57ab 25-30,36,44-48
+internal/proxy/subscription_suppression_credential_internal_test.go
+  s_571afbd3448707::t_4890cd0117b223 42,54,71,89,102,130
+internal/proxy/gemini.go
+  s_571afbd3448707::t_1eb994c7d17f47 179
+cmd/router/main.go
+  s_571afbd3448707::t_2e6398278fd843 805-817
+  s_571afbd3448707::t_8f9ce2b2b5d771 835
+  s_571afbd3448707::t_d4283e50c6d860 53
+  s_571afbd3448707::t_0af20b458e9611 22
+internal/subscriptions/refresh_test.go
+  s_571afbd3448707::t_06b9bf6a67c135 1-138
+internal/subscriptions/cache.go
+  s_571afbd3448707::t_e1f70339961390 1-43
+internal/proxy/service.go
+  s_571afbd3448707::t_ddc457b364369a 3571,3577-3596,3598-3602,3605-3620,3622-3623
+  s_571afbd3448707::t_21885cc72bfe4a 2674-2678
+  s_571afbd3448707::t_a2851710e5d6e8 233-236
+  s_571afbd3448707::t_1eb994c7d17f47 2334,2635,2680,2744,4213,4453
+  s_571afbd3448707::t_87707ab09acee2 3507-3518
+internal/subscriptions/refresh.go
+  s_571afbd3448707::t_d69b2a692cf165 1-165
+install/npm/package.json
+  s_571afbd3448707::t_9e209b17eadbc2 15
+internal/subscriptions/pool_test.go
+  s_571afbd3448707::t_9b75228f05215d 1-172
+internal/sqlc/subscription_credentials.sql.go
+  s_571afbd3448707::t_dcb4c4f5d2d8c0 1-401
+internal/proxy/usage_bypass_internal_test.go
+  s_571afbd3448707::t_4890cd0117b223 200,220
+internal/proxy/subscription_pool_internal_test.go
+  s_571afbd3448707::t_88291631027127 182-207
+  s_571afbd3448707::t_255e2209c868c7 1-181,208-212
+internal/proxy/subscription_pool.go
+  s_571afbd3448707::t_d911f95074b5e2 7-8
+  s_571afbd3448707::t_e946b866667294 102-120
+  s_571afbd3448707::t_95c0e66740ee7b 1-6,9-42,44-85,87-101,121-137
+  s_571afbd3448707::t_3f14bae805cd49 43
+  s_571afbd3448707::t_81bae4d0e40b22 86
+internal/postgres/repository.go
+  s_571afbd3448707::t_7d5d3d60f0dfe0 15-21,27-33
+internal/server/server.go
+  s_571afbd3448707::t_3026ec5f696aab 16
+  s_571afbd3448707::t_44e923d1e30fe9 64
+  s_571afbd3448707::t_5229f356b4f4a0 109-120
+db/queries/subscription_credentials.sql
+  s_571afbd3448707::t_387ea992e59bfc 1-103
+internal/postgres/subscription_credential_repo.go
+  s_571afbd3448707::t_b1e3c6afde1bc4 1-226
+internal/api/subscriptions/handler_test.go
+  s_571afbd3448707::t_64d12222bf0422 43-47,53
+  s_571afbd3448707::t_4b36018aa3b11c 127-137,142,150
+  s_571afbd3448707::t_2d548952c1fd5f 1-42,48-52,54-126,138-141,143-149,151-153
+db/migrations/0037_subscription-credentials.up.sql
+  s_571afbd3448707::t_cfa477022e4150 1-35
+install/npm/login.test.js
+  s_571afbd3448707::t_719d47539ae5a3 1-41
+internal/proxy/fallback.go
+  s_571afbd3448707::t_1eb994c7d17f47 188
+internal/subscriptions/pool.go
+  s_571afbd3448707::t_0df8859597fadd 1-332
+internal/server/server_test.go
+  s_571afbd3448707::t_880549f406b20f 80,95,107,119
+install/npm/login.js
+  s_571afbd3448707::t_c9369e1ca0c955 1-438
+internal/proxy/usage_bypass.go
+  s_571afbd3448707::t_1eb994c7d17f47 211
+  s_571afbd3448707::t_7deb2c4294b9f1 123-125,130-132
+internal/sqlc/models.go
+  s_571afbd3448707::t_dcb4c4f5d2d8c0 400-421
+db/migrations/0037_subscription-credentials.down.sql
+  s_571afbd3448707::t_98dfd9691cc1ba 1-5
+install/npm/bin.js
+  s_571afbd3448707::t_d29a9253a28b2d 11-24
+internal/proxy/subscription_exhaustion_internal_test.go
+  s_571afbd3448707::t_4890cd0117b223 43,60,74,86,102,115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d461b36be33d6d453f280d5e257d2f14f5f88208",
+  "prompts": {},
+  "sessions": {
+    "s_571afbd3448707": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a58754c-9428-4e39-afa0-1397729ca736",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

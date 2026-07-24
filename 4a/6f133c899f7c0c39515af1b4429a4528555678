@@ -1,0 +1,46 @@
+internal/proxy/usage_accounting.go
+  s_14149f8f972376::t_cea8c86bcc6a78 9
+internal/proxy/gemini.go
+  s_14149f8f972376::t_fc99c02dd6eb3b 262-263,277-339
+  s_14149f8f972376::t_fadd534082014b 206
+internal/translate/responses_to_anthropic_writer.go
+  s_14149f8f972376::t_cea8c86bcc6a78 579-582,698-701
+internal/observability/otel/usage_test.go
+  s_14149f8f972376::t_a92b69af901f69 46-60
+internal/proxy/telemetry.go
+  s_14149f8f972376::t_cea8c86bcc6a78 24-25
+internal/translate/gemini_stream.go
+  s_14149f8f972376::t_cea8c86bcc6a78 149-152,381-390
+internal/translate/usage_sink.go
+  s_14149f8f972376::t_3e77ab07a48b3e 11
+internal/providers/provider.go
+  s_14149f8f972376::t_cea8c86bcc6a78 106-107
+internal/proxy/gemini_test.go
+  s_14149f8f972376::t_a92b69af901f69 151-168
+  s_14149f8f972376::t_375fe986761c6c 4
+internal/translate/stream.go
+  s_14149f8f972376::t_cea8c86bcc6a78 126-129,812-815,952-955
+  s_14149f8f972376::t_8f01f215f6a869 1612-1619
+internal/translate/cache_usage_test.go
+  s_14149f8f972376::t_3e77ab07a48b3e 28-36
+internal/observability/otel/usage.go
+  s_14149f8f972376::t_cea8c86bcc6a78 103-108
+  s_14149f8f972376::t_3e77ab07a48b3e 16
+  s_14149f8f972376::t_e49210dccb9b0c 109-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4a6f133c899f7c0c39515af1b4429a4528555678",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

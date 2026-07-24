@@ -1,0 +1,29 @@
+internal/router/cluster/hierarchical_scorer.go
+  s_6b24562fe92814::t_f07756b873f7ba 1-234
+internal/router/cluster/hierarchical_scorer_test.go
+  s_6b24562fe92814::t_a70d40435ef549 1-160
+docs/MHLC_TWO_BAND_ROUTER_PLAN.md
+  s_6b24562fe92814::t_2b3307b19f3136 167-171,173
+internal/router/cluster/scorer.go
+  s_6b24562fe92814::t_d2a7d2962d6160 63,221,226
+  s_6b24562fe92814::t_2b64151f859290 616-628
+internal/router/router.go
+  s_6b24562fe92814::t_8245ad405ed259 246-247,253
+  s_6b24562fe92814::t_af933c6af578f0 248-252,254-255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c7c55c6151b6f4ff468e80eccc0a0169d5d4bc74",
+  "prompts": {},
+  "sessions": {
+    "s_6b24562fe92814": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "00e5bd50-9aaf-4c4a-8cd5-f50a7ce7bcc8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+internal/router/cluster/artifacts/v0.75/metadata.yaml
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-194
+install/cc-statusline.sh
+  s_9c42d5feb92c70::t_8b8901f09c9f5f 140,208
+internal/proxy/force_model_tier_fallback_internal_test.go
+  s_9c42d5feb92c70::t_e75bc8108e4334 233
+  s_9c42d5feb92c70::t_c0864727e68f16 258,267
+  s_9c42d5feb92c70::t_4a53ddf979764e 108,112,126,138,148
+internal/router/cluster/artifacts/latest
+  s_9c42d5feb92c70::t_5e8108ea023312 1
+internal/proxy/loop_detection.go
+  s_9c42d5feb92c70::t_e297dc39046259 19
+internal/router/cluster/artifacts/v0.75/model_axes.json
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-206
+internal/router/catalog/catalog.go
+  s_9c42d5feb92c70::t_9660401d13aa85 204-214
+internal/router/cluster/artifacts/v0.75/model_registry.json
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-180
+internal/observability/otel/pricing_test.go
+  s_9c42d5feb92c70::t_f6eec4ea6721dd 20
+internal/proxy/service_session_pin_test.go
+  s_9c42d5feb92c70::t_b3b86abc2274b7 1169,1172
+internal/proxy/force_model.go
+  s_9c42d5feb92c70::t_2e5d8aa839ee97 31-38
+  s_9c42d5feb92c70::t_a6a656f2c18b71 39-40
+  s_9c42d5feb92c70::t_41228c2f8dbebc 332,334
+internal/router/model.go
+  s_9c42d5feb92c70::t_41264f10a525ef 139
+internal/router/cluster/artifacts/v0.75/quality_means.json
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-406
+internal/router/cluster/artifacts/v0.75/rankings.json
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-405
+internal/proxy/force_model_internal_test.go
+  s_9c42d5feb92c70::t_178544824b5177 67,74
+internal/router/cluster/artifacts/v0.75/model_features.json
+  s_9c42d5feb92c70::t_2b0013e03a20ca 1-497
+install/install.sh
+  s_9c42d5feb92c70::t_65c41222d4157e 769
+  s_9c42d5feb92c70::t_8b8901f09c9f5f 2103,2171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d8aeee48cddbc5e6328e3cbfaa39faa173549551",
+  "prompts": {},
+  "sessions": {
+    "s_9c42d5feb92c70": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b2bbf49-4c4c-47d2-b855-60d6d32013b8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

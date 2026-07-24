@@ -1,0 +1,50 @@
+db/queries/model_router_request_telemetry.sql
+  s_78d861ce362aaa::t_673230690495d7 23-26
+  s_78d861ce362aaa::t_099700ae1924ff 93-94
+  s_78d861ce362aaa::t_53aed2707352ce 160-161
+internal/proxy/usage/raw_headers_test.go
+  s_78d861ce362aaa::t_6c6473eea0c36c 1-35
+internal/sqlc/model_router_request_telemetry.sql.go
+  s_78d861ce362aaa::t_d63a445d2e5af7 1300-1301,1367-1368,1439,1464-1467,1534-1535,1601-1602,1672
+db/migrations/0039_unified-limit-headers.up.sql
+  s_78d861ce362aaa::t_32df8166f6c3ce 1-17
+internal/proxy/service.go
+  s_78d861ce362aaa::t_10a5d02b007fe7 3003-3006
+internal/proxy/subsidy.go
+  s_78d861ce362aaa::t_da821237354215 174
+  s_78d861ce362aaa::t_ca981b5ffee4d8 7
+  s_78d861ce362aaa::t_47427bbf80075b 157-168,171,176-187
+db/migrations/0039_unified-limit-headers.down.sql
+  s_78d861ce362aaa::t_32df8166f6c3ce 1-6
+internal/proxy/telemetry.go
+  s_78d861ce362aaa::t_8e984b78180d68 124-131
+internal/proxy/unified_limit_capture.go
+  s_78d861ce362aaa::t_9533751a721207 27-33,42-43,54,57-67,72-73,81
+  s_78d861ce362aaa::t_8d4a7a11dcce3c 1-26,34-41,44-53,55-56,68-71,74-80,82-85
+internal/sqlc/models.go
+  s_78d861ce362aaa::t_d63a445d2e5af7 173
+internal/proxy/usage/raw_headers.go
+  s_78d861ce362aaa::t_74feaeca48a175 1-42
+internal/postgres/telemetry.go
+  s_78d861ce362aaa::t_913698db298501 143
+internal/proxy/unified_limit_capture_test.go
+  s_78d861ce362aaa::t_d0e7c2fd5ff00d 1-10,13-126,128-146
+  s_78d861ce362aaa::t_d1c4becfb1c4d6 11-12
+  s_78d861ce362aaa::t_61954db539f7bf 127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d36892608e5ad4d647c9b5462603e593bad004bd",
+  "prompts": {},
+  "sessions": {
+    "s_78d861ce362aaa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d83bc4f-4a28-42de-bca5-de8b8180f5c6",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}

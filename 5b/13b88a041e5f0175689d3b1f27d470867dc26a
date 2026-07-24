@@ -1,0 +1,19 @@
+internal/router/catalog/catalog.go
+  s_9c42d5feb92c70::t_9909e22e0e5b82 204,208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5b13b88a041e5f0175689d3b1f27d470867dc26a",
+  "prompts": {},
+  "sessions": {
+    "s_9c42d5feb92c70": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b2bbf49-4c4c-47d2-b855-60d6d32013b8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,138 @@
+internal/router/planner/AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 5,18
+CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 73,112,130,138,218
+internal/api/admin/catalog_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 4,6,37,63,74-153
+internal/translate/emit_gemini.go
+  s_93097ba71072dc::t_49f3495b69ae93 82
+internal/router/turntype/AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 12,19
+internal/translate/emit_openai_responses.go
+  s_93097ba71072dc::t_49f3495b69ae93 101
+internal/router/hmm/roster.go
+  s_93097ba71072dc::t_49f3495b69ae93 1-36
+internal/proxy/CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 5,16,24,26,28,34,38,52,54,70
+internal/translate/emit_same_format_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 43-118
+internal/policyclient/client_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 437-453,475-496
+  s_93097ba71072dc::t_b3d3de0ac90039 454-474
+internal/server/server.go
+  s_93097ba71072dc::t_49f3495b69ae93 18,37-39,63-65,106
+  s_93097ba71072dc::t_86ef0e9c78d9e9 75
+internal/translate/cache_control.go
+  s_93097ba71072dc::t_49f3495b69ae93 41-46,49-60,69-75,78,88-89,92-97,101-107,129,132,134,139-144,147,150,153,156,160,163,166,169,172,176,179-180,185,187,191,195,198,201-206
+internal/proxy/service_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 400-409
+README.md
+  s_93097ba71072dc::t_49f3495b69ae93 43,45-47,185-186
+internal/translate/emit_anthropic.go
+  s_93097ba71072dc::t_49f3495b69ae93 34
+sidecars/hmm/hmm_sidecar/api.py
+  s_93097ba71072dc::t_848c818dfbdd6c 106
+  s_93097ba71072dc::t_49f3495b69ae93 108-109,117-118
+  s_1acba0bf26c44e::t_eb27d72ce292d6 124-133
+sidecars/hmm/tests/test_api.py
+  s_93097ba71072dc::t_e9083c048ec50d 89
+  s_93097ba71072dc::t_49f3495b69ae93 54-55,143-164
+  s_1acba0bf26c44e::t_c5f26c0a81abbd 56
+internal/translate/claudecode_tool_filter.go
+  s_93097ba71072dc::t_49f3495b69ae93 59-95,101-103,111,118,130
+internal/translate/force_model_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 287-296
+internal/router/hmm/roster_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 1-48
+internal/api/admin/excluded_models.go
+  s_93097ba71072dc::t_49f3495b69ae93 47-52
+internal/server/server_test.go
+  s_93097ba71072dc::t_ce8fadb2a6ec31 81,96,108,120
+.claude/skills/test-claude-locally/SKILL.md
+  s_93097ba71072dc::t_49f3495b69ae93 95
+internal/translate/envelope.go
+  s_93097ba71072dc::t_49f3495b69ae93 64-68
+internal/router/CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 5
+internal/router/turntype/CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 12,19
+internal/router/policy/contract.go
+  s_93097ba71072dc::t_4507a56c177838 154
+internal/api/admin/hmm_roster.go
+  s_93097ba71072dc::t_2d271c47b2e9d6 32
+cmd/router/hmm_roster_source.go
+  s_93097ba71072dc::t_49f3495b69ae93 1-112
+docs/README.md
+  s_93097ba71072dc::t_49f3495b69ae93 1-13
+internal/policyclient/client.go
+  s_93097ba71072dc::t_49f3495b69ae93 110-111,116-120,154-155,158
+  s_93097ba71072dc::t_dacb5f0c06cf65 112-115,121-137,140,144,149,152,156,159,161
+internal/router/AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 5
+internal/router/planner/CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 5,18
+internal/proxy/AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 5,16,24,26,28,34,38,52,54,70
+internal/translate/strictify_openai.go
+  s_93097ba71072dc::t_49f3495b69ae93 209-215
+sidecars/hmm/hmm_sidecar/policy.py
+  s_93097ba71072dc::t_49f3495b69ae93 105-116
+internal/api/admin/catalog.go
+  s_93097ba71072dc::t_49f3495b69ae93 4,6-10,22-31,35,37-51
+internal/router/handover/CLAUDE.md
+  s_93097ba71072dc::t_49f3495b69ae93 9,18
+internal/translate/claudecode_tool_filter_internal_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 1-37
+internal/translate/strictify_openai_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 238-256
+go.mod
+  s_93097ba71072dc::t_49f3495b69ae93 30,34
+internal/translate/claudecode_tool_filter_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 152-235
+docs/SEMANTICS.md
+  s_93097ba71072dc::t_49f3495b69ae93 1-78
+sidecars/hmm/tests/test_policy.py
+  s_93097ba71072dc::t_49f3495b69ae93 25-39
+cmd/router/hmm_roster_source_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 1-182
+AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 73,112,130,138,218
+cmd/router/main.go
+  s_93097ba71072dc::t_49f3495b69ae93 503,613,624,735,754
+  s_93097ba71072dc::t_0974f2a9ad3c68 862
+internal/router/handover/summarizer_test.go
+  s_93097ba71072dc::t_49f3495b69ae93 59-60,62-67,173-187,253-259
+install/opencode-weave/README.md
+  s_93097ba71072dc::t_49f3495b69ae93 6,37,39
+internal/proxy/service.go
+  s_93097ba71072dc::t_49f3495b69ae93 149-152,961,1066-1072,2434-2441
+internal/router/handover/AGENTS.md
+  s_93097ba71072dc::t_49f3495b69ae93 9,18
+internal/translate/emit_openai.go
+  s_93097ba71072dc::t_49f3495b69ae93 247,892-894,901-911
+  s_93097ba71072dc::t_e675f769c651da 912-913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8d55e9a5f0ddfe3de24454ffc7efd83fb6613ce4",
+  "prompts": {},
+  "sessions": {
+    "s_1acba0bf26c44e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cde4eff2-85a0-4c66-8821-b26e5d6de11f",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_93097ba71072dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "871ffeb7-914c-42f7-a49f-3a50ebb91f39",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

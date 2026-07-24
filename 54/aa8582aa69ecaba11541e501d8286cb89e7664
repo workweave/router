@@ -1,0 +1,32 @@
+smoke/cache_test.go
+  s_4e0c6c8f023723::t_2c3425d592f1cc 7-8,10-11
+  s_4e0c6c8f023723::t_d19d795305566b 58
+smoke/harness_test.go
+  s_4e0c6c8f023723::t_1094fdfd224c3a 40-41
+smoke/basic_test.go
+  s_ca69c0af147245::t_b5bdeb6a1b2e00 80-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "54aa8582aa69ecaba11541e501d8286cb89e7664",
+  "prompts": {},
+  "sessions": {
+    "s_4e0c6c8f023723": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4018d120-f74f-40d5-83ed-814edec85067",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_ca69c0af147245": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "488d58bb-777b-4473-ac86-b9abeee5509e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+internal/api/openai/models.go
+  s_0ec32d14caf17e::t_841f4dc424af98 24-26
+internal/proxy/service.go
+  s_1f0150b349ee2c::t_9b6389dbc39924 4283-4284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "37af64e424a36842004011bbcf4ba5a95f63d08f",
+  "prompts": {},
+  "sessions": {
+    "s_0ec32d14caf17e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f2ef114-0da3-4256-81ea-16f0a83d52b1",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_1f0150b349ee2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b525f980-c9fc-4332-bbe9-8a627ee8612e",
+        "model": "unknown"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+cmd/router/hmm_roster_source.go
+  s_59ef03ad05c9ff::t_fbda8f269e7a9c 46-50,53
+  s_59ef03ad05c9ff::t_95337036ef0199 85-86
+  s_59ef03ad05c9ff::t_113879f1261c2c 65-67
+  s_59ef03ad05c9ff::t_fcf0767a7b0807 68
+  s_59ef03ad05c9ff::t_dfccfcafbe493f 32-33,35-36
+  s_59ef03ad05c9ff::t_a665357fb3ae2e 20
+  s_59ef03ad05c9ff::t_a2153e404226c0 54-55
+  s_59ef03ad05c9ff::t_bef409837f44ee 69
+cmd/router/main.go
+  s_59ef03ad05c9ff::t_f4005fb7482204 620
+cmd/router/hmm_roster_source_test.go
+  s_59ef03ad05c9ff::t_cc0fdd724a093d 18-23,26,28-31
+  s_59ef03ad05c9ff::t_88c55f2d5f7efa 43,76,100,115,157
+  s_59ef03ad05c9ff::t_a1392f9c632159 57-73
+  s_59ef03ad05c9ff::t_96e32403a1c861 9
+internal/server/server.go
+  s_59ef03ad05c9ff::t_c23a55c3301ae2 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "52263b019136949e5648f06d69118321bfd1d935",
+  "prompts": {},
+  "sessions": {
+    "s_59ef03ad05c9ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0159a601-1daa-41de-9cd6-6bc84effc891",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    }
+  }
+}

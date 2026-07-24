@@ -1,0 +1,29 @@
+internal/router/cluster/artifacts/v0.75/model_registry.json
+  s_ad13b868f05b56::t_71a6579a42ca55 1-213
+internal/router/cluster/artifacts/v0.75/quality_means.json
+  s_ad13b868f05b56::t_71a6579a42ca55 1-446
+internal/router/cluster/artifacts/v0.75/model_features.json
+  s_ad13b868f05b56::t_71a6579a42ca55 1-578
+internal/router/cluster/artifacts/v0.75/metadata.yaml
+  s_ad13b868f05b56::t_71a6579a42ca55 1-237
+internal/router/cluster/artifacts/v0.75/rankings.json
+  s_ad13b868f05b56::t_71a6579a42ca55 1-455
+internal/router/cluster/artifacts/v0.75/model_axes.json
+  s_ad13b868f05b56::t_71a6579a42ca55 1-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4ae87e1a658c8cf05e2cc2be6749529be79bc93c",
+  "prompts": {},
+  "sessions": {
+    "s_ad13b868f05b56": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "07e11b6f-a653-4bdd-9ffe-48b4e6eb073b",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

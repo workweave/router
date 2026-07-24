@@ -1,0 +1,65 @@
+smoke/mitmproxy/store.go
+  s_4e0c6c8f023723::t_23d58544071ce7 24-46
+  s_4e0c6c8f023723::t_695c0d8030f45a 146
+  s_4e0c6c8f023723::t_30ed66284dae1c 148
+  s_4e0c6c8f023723::t_32ee1ad4319957 121-123
+smoke/mitmproxy/ca.go
+  s_4e0c6c8f023723::t_505fa23a6fdf33 20-21
+smoke/mitmproxy/cassettes/32d91196ecc77609b7e8d9d6cc7e10f652a15844fb4f6ef85a28e2c259be9e86.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16
+  s_4e0c6c8f023723::t_5b919d70403ab2 17
+smoke/request_builder_test.go
+  s_4e0c6c8f023723::t_c1affb057a5658 91-93
+smoke/harness_test.go
+  s_4e0c6c8f023723::t_5c4581029233f4 3-5,7-8
+smoke/mitmproxy/cassettes/0feb08ea0fc4a2ac2adefd797e470df5d06abdf412672c2423be4c9a696e067a.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16-17
+smoke/mitmproxy/cassettes/53b462972e28354dc4af2e11bc384ed32264a03dfa74391358671f9f63529fa1.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16-17
+scripts/smoke/run.sh
+  s_4e0c6c8f023723::t_1556d251ea8dfc 40-46,54
+  s_4e0c6c8f023723::t_bfd15ddaca015a 114
+  s_4e0c6c8f023723::t_e1a71680b4f9c9 100-103,108
+smoke/mitmproxy/cassettes/bf071f14960610fc42020d5ae8c7d2647e4e7861997fd052ab1cbd9ec7494a4c.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16
+  s_4e0c6c8f023723::t_5b919d70403ab2 17
+smoke/mitmproxy/cassettes/ce7b8426d863183f7eb03e632a3dace137bed9fbb8ce04b7734af34dabb33d19.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 17-18
+smoke/mitmproxy/cassettes/d6fc9046ebb4ec512f2ed0e9faacbcfb1d3a0c8a4f7d49c28a526dccd6ffc302.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 17-18
+.github/workflows/smoke.yml
+  s_4e0c6c8f023723::t_c17d508e7389d6 137-142
+smoke/cache_test.go
+  s_4e0c6c8f023723::t_4cc32826507744 48-49
+smoke/mitmproxy/cassettes/2ad7397c4dc74d96a7206c34493417fac93676705efd719ba4a754ffffef4a60.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16-17
+smoke/mitmproxy/cassettes/7fbc7a63fae278692c893ba8e341f5b0074ef0130266b2cdb7ab00b59b61e2bf.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 16-17
+smoke/mitmproxy/cassettes/f3249ba5e36d05b18079f731c9bab5156c2bbb148180e01e466ef57c685fd298.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 17-18
+.gitignore
+  s_4e0c6c8f023723::t_9d7002a1ba8bb5 60
+smoke/mitmproxy/cassettes/9b626717e3f2dc5919d7a7f1eb5e942a0986c13507477a7408990384faa33e5a.json
+  s_4e0c6c8f023723::t_ed97351bb705f6 17-18
+smoke/mitmproxy/proxy.go
+  s_4e0c6c8f023723::t_7bdfd9fd048393 65-66
+  s_4e0c6c8f023723::t_b5a053df12759b 90-91
+internal/translate/strictify_openai.go
+  s_4e0c6c8f023723::t_994e049c77ae7b 212-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1b081e7e62e0d4114d71145675e4af6ea9fbac58",
+  "prompts": {},
+  "sessions": {
+    "s_4e0c6c8f023723": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4018d120-f74f-40d5-83ed-814edec85067",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

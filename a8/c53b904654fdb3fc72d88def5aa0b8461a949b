@@ -1,0 +1,19 @@
+internal/translate/strip_seq_ack_test.go
+  s_b6ea7217b3c1e9::t_35c16d5cbeed5b 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a8c53b904654fdb3fc72d88def5aa0b8461a949b",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

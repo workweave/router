@@ -1,0 +1,40 @@
+internal/router/policy/resolver_test.go
+  s_0cb555d8dc2e1e::t_e41bdbb8024b19 68-78
+internal/router/policy/arm.go
+  s_0cb555d8dc2e1e::t_226d408a200084 46,51,63-79
+  s_0cb555d8dc2e1e::t_0c4e048814d90a 80-81
+internal/router/policy/sidecar_router_test.go
+  s_0cb555d8dc2e1e::t_5111337ae2f34b 124-127,139-146
+internal/router/router.go
+  s_0cb555d8dc2e1e::t_d056aeebc9a050 228-229,234-235
+internal/policyclient/client_test.go
+  s_0cb555d8dc2e1e::t_33e1f82ee5b6dd 130-166
+internal/policyclient/client.go
+  s_0cb555d8dc2e1e::t_fbebc5d2eca576 371-375
+internal/router/policy/arm_test.go
+  s_0cb555d8dc2e1e::t_7b6b578c775501 9,46-56
+  s_0cb555d8dc2e1e::t_602172d69172ab 57
+internal/router/policy/resolver.go
+  s_0cb555d8dc2e1e::t_2d65029ae4bd0f 142-150,167-174,176,179-180
+  s_0cb555d8dc2e1e::t_69c4f3a601058a 175
+  s_0cb555d8dc2e1e::t_ad01e20960d9f7 177-178
+internal/router/policy/sidecar_router.go
+  s_0cb555d8dc2e1e::t_366ba5e7b6cb8a 347-349,352-366
+  s_0cb555d8dc2e1e::t_c5b352b10b914e 350-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "24d6f2a79c80ddd7a1973b711b2fcc0af0e14348",
+  "prompts": {},
+  "sessions": {
+    "s_0cb555d8dc2e1e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "23f0b5f2-4a34-40f1-83b5-d80fcdbb65d9",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
