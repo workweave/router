@@ -111,6 +111,26 @@ func TestApplyClusterArmOverrides_AllEmptyKeepsSidecar(t *testing.T) {
 	assert.False(t, out.Applied, "emptied overrides must fail open to the sidecar selection")
 }
 
+func TestApplyClusterArmOverrides_ReturnsResolverArmID(t *testing.T) {
+	ranked := []policy.PreviewGroup{
+		{Group: "maximum", EligibleArms: []string{"anthropic/opus"}},
+	}
+	// Arm ID distinct from roster ID (arm-enumerating resolver shape).
+	resolved := policy.ResolvedCandidates{
+		Candidates: []policy.Candidate{{
+			ArmID:     "anthropic/opus#0",
+			RosterID:  "anthropic/opus",
+			CatalogID: "opus",
+		}},
+	}
+	overrides := map[string][]string{"maximum": {"opus"}}
+
+	out := policy.ApplyClusterArmOverrides(overrides, ranked, resolved, "anthropic/other")
+	require.True(t, out.Applied)
+	assert.Equal(t, "anthropic/opus", out.RosterID)
+	assert.Equal(t, "anthropic/opus#0", out.ArmID, "the resolved arm ID must be returned so binding goes through ByArmID")
+}
+
 func TestApplyClusterArmOverrides_OldSidecarNoFallbackKeepsSidecar(t *testing.T) {
 	resolved := resolvedFor(map[string]string{"opus": "anthropic/opus"})
 	overrides := map[string][]string{"maximum": {"opus"}}

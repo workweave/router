@@ -451,8 +451,9 @@ func TestSidecarRouterAppliesClusterArmOverride(t *testing.T) {
 
 func TestSidecarRouterClusterOverrideResolvesArmEnumeratingBinding(t *testing.T) {
 	// Arm-enumerating resolver: arm IDs differ from roster IDs. The override
-	// selects a roster ID, so binding resolution must go through ByRosterID —
-	// passing the roster ID as an arm ID would miss ByArmID and hard-fail.
+	// selects a roster ID, and binding resolution must go through the resolved
+	// arm ID — a roster ID shared across providers is dropped from ByRosterID as
+	// ambiguous, so resolving by roster ID alone would hard-fail.
 	resolver := policy.NewArmResolver(
 		set("claude-opus-4-8", "claude-sonnet-5"),
 		set(providers.ProviderAnthropic),
@@ -487,7 +488,7 @@ func TestSidecarRouterClusterOverrideResolvesArmEnumeratingBinding(t *testing.T)
 		},
 	})
 
-	require.NoError(t, err, "override must resolve via ByRosterID on an arm-enumerating resolver")
+	require.NoError(t, err, "override must resolve via the arm ID on an arm-enumerating resolver")
 	assert.Equal(t, "claude-sonnet-5", decision.Model)
 	assert.Equal(t, providers.ProviderAnthropic, decision.Provider)
 }

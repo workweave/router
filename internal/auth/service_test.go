@@ -928,3 +928,38 @@ func TestService_WriteHooksInvalidateAndNotify(t *testing.T) {
 			"DeleteAPIKey must publish NOTIFY so peer replicas also drop the deleted key immediately")
 	})
 }
+
+type fakeClusterModelListRepo struct {
+	lists []auth.ClusterModelList
+	err   error
+}
+
+func (f *fakeClusterModelListRepo) GetForAPIKey(ctx context.Context, apiKeyID string) ([]auth.ClusterModelList, error) {
+	return f.lists, f.err
+}
+
+func TestService_VerifyAPIKey_ClusterModelListFetchErrorSkipsCache(t *testing.T) {
+	rawToken := "rk_cluster_list_error"
+	keyHash := auth.HashAPIKeySHA256(rawToken)
+	wantInstall := &auth.Installation{ID: "install_cml", ExternalID: "org_cml", Name: "cml-tenant"}
+	wantKey := &auth.APIKey{ID: "key_cml", InstallationID: wantInstall.ID, ExternalID: wantInstall.ExternalID, KeyHash: keyHash}
+
+	cache := newRecordingAPIKeyCache()
+	apiKeys := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{keyHash: {apiKey: wantKey, installation: wantInstall}}}
+	svc := auth.NewService(
+		&fakeInstallationRepository{},
+		apiKeys,
+		nil,
+		nil,
+		cache,
+		nil,
+		frozenClock(),
+	).WithClusterModelLists(&fakeClusterModelListRepo{err: errors.New("cluster list repo unavailable")})
+
+	_, _, _, lists, err := svc.VerifyAPIKey(context.Background(), rawToken)
+
+	require.NoError(t, err, "a cluster model list fetch error must not fail authentication")
+	assert.Nil(t, lists, "a failed fetch must serve artifact-default routing (nil lists)")
+	assert.Empty(t, cache.setSnapshot(),
+		"a transient cluster-list fetch error must NOT be cached, so the next request retries")
+}

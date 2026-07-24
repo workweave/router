@@ -311,25 +311,21 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		return router.Decision{}, fmt.Errorf("%s: sidecar decide: %w: %w", strategy, err, r.config.Unavailable)
 	}
 
-	// Per-key cluster allowlist enforcement. Applies whenever the request
-	// carries overrides AND this /route response includes ranked_fallback — the
-	// presence of that data is itself proof the sidecar reports it, so we don't
-	// gate on the boot-time ReportsRankedFallback capability (which can be stale
-	// after a sidecar upgrade with no capability refresh). Older sidecars omit
-	// ranked_fallback entirely → the outer guard is false → fail open, serving
-	// the sidecar's own arm.
+	// Per-key cluster allowlist enforcement. Applies when the request carries
+	// overrides AND this /route response includes ranked_fallback — ranked_fallback
+	// presence is proof the sidecar supports it (boot-time capability can be stale
+	// after a sidecar upgrade). Absent ranked_fallback → guard is false → fail open.
 	overrideArmID := res.ArmID
 	overrideRosterID := res.Model
 	overrideReasonSuffix := ""
 	if len(req.ClusterArmOverrides) > 0 && len(res.RankedFallback) > 0 {
 		outcome := ApplyClusterArmOverrides(req.ClusterArmOverrides, res.RankedFallback, resolved, res.Model)
 		if outcome.Applied && outcome.RosterID != "" {
-			// ApplyClusterArmOverrides selects a roster ID. Clear the arm ID so
-			// BindingForSelection resolves via ByRosterID — for arm-enumerating
-			// resolvers armID != rosterID, and passing the roster ID as an arm ID
-			// would miss ByArmID and hard-fail. (On HMM's legacy resolver the two
-			// are equal, so this is also correct there.)
-			overrideArmID = ""
+			// Prefer the resolved arm ID so BindingForSelection goes through
+			// ByArmID; on arm-enumerating resolvers a roster ID can be ambiguous
+			// (shared across providers) and dropped from ByRosterID, so resolving
+			// by roster ID alone would hard-fail even though eligible arms exist.
+			overrideArmID = outcome.ArmID
 			overrideRosterID = outcome.RosterID
 			if outcome.Changed {
 				overrideReasonSuffix = ":cluster_override"

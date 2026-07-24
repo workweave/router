@@ -5,6 +5,11 @@ package policy
 type ClusterOverrideResult struct {
 	// RosterID is the selected roster arm after overrides.
 	RosterID string
+	// ArmID is the resolver arm ID for the selected roster arm, so binding
+	// resolution can go through ByArmID. On arm-enumerating resolvers a roster
+	// ID can be ambiguous (shared across providers) and absent from ByRosterID;
+	// the arm ID is always unambiguous. Empty when no arm maps to the selection.
+	ArmID string
 	// Group is the classifier group the selection came from.
 	Group string
 	// Applied is true when an override was configured for at least one ranked
@@ -31,10 +36,14 @@ func ApplyClusterArmOverrides(
 	}
 
 	catalogToRoster := make(map[string]string, len(resolved.Candidates))
+	rosterToArm := make(map[string]string, len(resolved.Candidates))
 	eligibleRosterIDs := make(map[string]struct{}, len(resolved.Candidates))
 	for _, candidate := range resolved.Candidates {
 		if _, exists := catalogToRoster[candidate.CatalogID]; !exists {
 			catalogToRoster[candidate.CatalogID] = candidate.RosterID
+		}
+		if _, exists := rosterToArm[candidate.RosterID]; !exists {
+			rosterToArm[candidate.RosterID] = candidate.ArmID
 		}
 		eligibleRosterIDs[candidate.RosterID] = struct{}{}
 	}
@@ -48,6 +57,7 @@ func ApplyClusterArmOverrides(
 		selected := effective[0]
 		return ClusterOverrideResult{
 			RosterID: selected,
+			ArmID:    rosterToArm[selected],
 			Group:    group.Group,
 			Applied:  true,
 			Changed:  selected != sidecarRosterID,
@@ -72,10 +82,9 @@ func effectiveArms(
 	if !hasOverride {
 		return group.EligibleArms
 	}
-	// An override may reorder/prune the artifact's arms AND add models the
-	// artifact never placed in this cluster. Eligibility is therefore the full
-	// request-resolved candidate set (which already honors global exclusions and
-	// provider filters), not just this group's artifact arms.
+	// An override may add models the artifact never placed in this cluster, so
+	// eligibility uses the full request-resolved candidate set (honors global
+	// exclusions/provider filters), not just this group's artifact arms.
 	out := make([]string, 0, len(override))
 	seen := make(map[string]struct{}, len(override))
 	for _, catalogID := range override {

@@ -350,16 +350,22 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawToken string) (*Installat
 	}
 
 	var clusterModelLists []ClusterModelList
+	clusterModelListsFetchOK := true
 	if s.clusterModelLists != nil {
 		clusterModelLists, err = s.clusterModelLists.GetForAPIKey(ctx, apiKey.ID)
 		if err != nil {
-			// Non-fatal: proceed with artifact-default routing.
+			// Non-fatal: serve this request with artifact-default routing, but
+			// don't cache the empty result — a transient DB error would otherwise
+			// disable per-key cluster restrictions for the full positive TTL.
 			observability.Get().Warn("Failed to fetch cluster model lists", "api_key_id", apiKey.ID, "err", err)
 			clusterModelLists = nil
+			clusterModelListsFetchOK = false
 		}
 	}
 
-	s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys, ClusterModelLists: clusterModelLists})
+	if clusterModelListsFetchOK {
+		s.cache.Set(keyHash, CachedKey{APIKey: apiKey, Installation: installation, ExternalKeys: externalKeys, ClusterModelLists: clusterModelLists})
+	}
 	s.fireMarkUsed(apiKey.ID)
 	return installation, apiKey, externalKeys, clusterModelLists, nil
 }
