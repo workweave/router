@@ -12,6 +12,7 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/rl"
+	"workweave/router/internal/translate"
 )
 
 // DispatchErrorKind identifies which sentinel a dispatch error (from
@@ -42,6 +43,7 @@ const (
 	DispatchErrorTranslationProviderUnavailable
 	DispatchErrorUserSpendLimitReached
 	DispatchErrorSpendLimitUnavailable
+	DispatchErrorAnthropicCacheControlInvalid
 )
 
 // DispatchErrorClass is the format-agnostic classification of a dispatch
@@ -97,6 +99,16 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 			Kind:    DispatchErrorRequestNotJSONObject,
 			Status:  http.StatusBadRequest,
 			Message: "Request body must be a JSON object.",
+		}, true
+	case errors.Is(err, translate.ErrAnthropicCacheControlOverflow), errors.Is(err, translate.ErrAnthropicCacheControlInvalid):
+		// Client's explicit cache_control is invalid (overflow or bad TTL order);
+		// validator caught it pre-dispatch, so the generic 502 was misleading.
+		return DispatchErrorClass{
+			Kind:       DispatchErrorAnthropicCacheControlInvalid,
+			Status:     http.StatusBadRequest,
+			Message:    unwrapToSentinelMessage(err),
+			LogLevel:   "warn",
+			LogMessage: "Rejected request: invalid Anthropic cache_control",
 		}, true
 	case errors.Is(err, ErrTranslationIntrinsicallyIncompatible):
 		return DispatchErrorClass{
@@ -214,13 +226,26 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 	}
 }
 
+// unwrapToSentinelMessage walks err's wrap chain and returns the message of
+// the wrapper whose direct child is one of the two cache_control sentinels —
+// strips outer prefixes like "emit body: " while keeping the sentinel's own
+// dynamic detail. Falls back to err.Error() if no such layer is found.
+func unwrapToSentinelMessage(err error) string {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if child := errors.Unwrap(e); child == translate.ErrAnthropicCacheControlOverflow || child == translate.ErrAnthropicCacheControlInvalid {
+			return e.Error()
+		}
+	}
+	return err.Error()
+}
+
 // IsClientError reports whether the classified error stems from a bad
 // request (as opposed to an upstream/routing failure), which anthropic and
 // openai handlers surface as the "invalid_request_error" envelope type
 // rather than "api_error".
 func (k DispatchErrorKind) IsClientError() bool {
 	switch k {
-	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorContextWindowExceeded, DispatchErrorInvalidRoutingKnobs, DispatchErrorTranslationIntrinsicallyIncompatible:
+	case DispatchErrorRequestNotJSONObject, DispatchErrorNoEligibleProvider, DispatchErrorContextWindowExceeded, DispatchErrorInvalidRoutingKnobs, DispatchErrorTranslationIntrinsicallyIncompatible, DispatchErrorAnthropicCacheControlInvalid:
 		return true
 	default:
 		return false
