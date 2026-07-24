@@ -59,8 +59,7 @@ func TestBasic(t *testing.T) {
 }
 
 // assertServedByPin checks the x-router-model / x-router-provider decision
-// headers name the pinned model on Anthropic. The pin resolves the requested
-// model verbatim, so decision_model must equal PinModel.
+// headers name the pinned model on Anthropic.
 func assertServedByPin(t *testing.T, r response) {
 	t.Helper()
 	assertServedByModel(t, r, cfg.PinModel, "anthropic")
