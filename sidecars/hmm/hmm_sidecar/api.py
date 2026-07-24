@@ -101,6 +101,26 @@ def capabilities() -> JSONResponse:
     )
 
 
+@app.get("/roster")
+def roster() -> JSONResponse:
+    """Return the frozen roster: flat arm union + per-cluster ordered arm lists."""
+    policy: FrozenPolicy | None = getattr(app.state, "policy", None)
+    if policy is None:
+        return JSONResponse({"error": "policy unavailable"}, status_code=503)
+    clusters: dict[str, list[str]] = {
+        label: [str(arm) for arm in cluster.get("arms") or []]
+        for label, cluster in policy.clusters.items()
+    }
+    return JSONResponse(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "roster_version": policy.roster_version,
+            "roster_ids": policy.roster_ids(),
+            "clusters": clusters,
+        }
+    )
+
+
 @app.post("/outcome", status_code=204)
 def outcome() -> None:
     return None
@@ -109,26 +129,6 @@ def outcome() -> None:
 @app.post("/feedback", status_code=204)
 def feedback() -> None:
     return None
-
-
-@app.get("/roster")
-def roster() -> JSONResponse:
-    """Return the frozen roster: per-cluster ordered arm lists + sha256."""
-    artifacts = _artifacts()
-    policy: FrozenPolicy | None = getattr(app.state, "policy", None)
-    if policy is None or artifacts is None:
-        return JSONResponse({"error": "policy not loaded"}, status_code=503)
-    clusters: dict[str, list[str]] = {
-        label: [str(arm) for arm in cluster.get("arms") or []]
-        for label, cluster in policy.clusters.items()
-    }
-    return JSONResponse(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "clusters": clusters,
-            "roster_sha256": policy.roster_version,
-        }
-    )
 
 
 @app.post("/route")

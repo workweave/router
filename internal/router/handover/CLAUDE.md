@@ -6,7 +6,7 @@
 
 ## What it does
 
-When the planner decides SWITCH, proxy asks a small model to summarize prior conversation + rewrites the message history to `[synthesizedSummary, latestUser]` before dispatching to the new model. Bounds the switch turn's input cost regardless of session length.
+When the planner decides SWITCH, proxy asks a small model to summarize prior conversation + rewrites the message history to `[synthesizedSummary, latestUser]` before dispatching to the new model. Bounds the switch action's input cost regardless of session length.
 
 ## Layout
 
@@ -15,5 +15,5 @@ When the planner decides SWITCH, proxy asks a small model to summarize prior con
 
 ## Invariants
 
-- **`Summarizer` implementations MUST respect the context deadline.** On summarizer timeout or error, proxy keeps the full prior history unchanged (no trim) — a pricier switch turn beats silently dropping context. Do not "fix" by waiting longer, and do not reintroduce a silent trim fallback.
+- **`Summarizer` implementations MUST respect the context deadline.** On summarizer timeout or error, proxy keeps the full prior history unchanged (no trim) — a pricier switch action beats silently dropping context. Do not "fix" by waiting longer, and do not reintroduce a silent trim fallback.
 - **No I/O in this package.** All I/O lives in the proxy-side implementation.

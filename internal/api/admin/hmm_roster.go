@@ -29,7 +29,7 @@ type hmmRosterResponse struct {
 // like /v1/router/models: read-only and non-sensitive.
 func HMMRosterHandler(source policy.RosterSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		snapshot, err := source.Roster(c.Request.Context())
+		snapshot, err := source.ClusterRoster(c.Request.Context())
 		if err != nil {
 			observability.FromGin(c).Warn("HMM roster fetch failed", "err", err)
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "hmm_roster_unavailable"})

@@ -102,6 +102,18 @@ class FrozenPolicy:
             if isinstance(card, dict) and isinstance(card.get("state_id"), int)
         }
 
+    def roster_ids(self) -> list[str]:
+        """Deduplicated union of arm roster IDs across every cluster, in first-seen order."""
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for cluster in self.clusters.values():
+            for arm in cluster.get("arms") or []:
+                arm_id = str(arm)
+                if arm_id not in seen:
+                    seen.add(arm_id)
+                    ordered.append(arm_id)
+        return ordered
+
     async def _evaluate(
         self, payload: dict[str, Any], *, allow_empty_candidates: bool
     ) -> tuple[list[Candidate], Any, Any]:

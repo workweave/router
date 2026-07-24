@@ -56,10 +56,50 @@ func isClaudeCodeOnlyTool(name string) bool {
 	return ok
 }
 
+// claudeCodeOrchestrationToolNames is the subset of claudeCodeOnlyToolNames
+// a capable non-Anthropic model can act on. Must stay a strict subset of
+// claudeCodeOnlyToolNames — see TestOrchestrationToolsAreSubsetOfCCOnly.
+var claudeCodeOrchestrationToolNames = map[string]struct{}{
+	"Task":          {},
+	"TaskCreate":    {},
+	"TaskUpdate":    {},
+	"TaskGet":       {},
+	"TaskList":      {},
+	"TaskOutput":    {},
+	"TaskStop":      {},
+	"Workflow":      {},
+	"Skill":         {},
+	"EnterPlanMode": {},
+	"ExitPlanMode":  {},
+}
+
+// isCrossVendorOrchestrationTool reports whether name is a Claude Code
+// orchestration tool that may be preserved on cross-vendor emit.
+func isCrossVendorOrchestrationTool(name string) bool {
+	_, ok := claudeCodeOrchestrationToolNames[name]
+	return ok
+}
+
+// shouldStripCCTool reports whether a tool must be dropped from a cross-vendor
+// emit. Non-CC-only tools are always kept. CC-only tools are dropped, except
+// that orchestration tools are retained when keepOrchestration is set.
+func shouldStripCCTool(name string, keepOrchestration bool) bool {
+	if !isClaudeCodeOnlyTool(name) {
+		return false
+	}
+	if keepOrchestration && isCrossVendorOrchestrationTool(name) {
+		return false
+	}
+	return true
+}
+
 // filterClaudeCodeOnlyToolsFromAnthropicBody returns body with any
 // Claude-Code-only tools removed from the top-level "tools" array. Returns
 // body unchanged when none match, so callers can apply this unconditionally
 // without paying a re-serialize cost on the common case.
+//
+// When keepOrchestration is set, the orchestration subset (Task*, Workflow,
+// Skill, plan-mode) is retained; other CC-only tools are still dropped.
 //
 // Only the tools array is rewritten; tool_choice and message content are
 // left alone. tool_choice is rare and Anthropic only honors "any"/"auto"/
@@ -68,14 +108,14 @@ func isClaudeCodeOnlyTool(name string) bool {
 // blocks from past turns) is not rewritten because those represent history
 // the model has already acted on — rewriting it would invalidate prompt
 // caches and could leave dangling tool_use_id references.
-func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte) (out []byte, removed int, err error) {
+func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte, keepOrchestration bool) (out []byte, removed int, err error) {
 	tools := gjson.GetBytes(body, "tools")
 	if !tools.Exists() || !tools.IsArray() {
 		return body, 0, nil
 	}
 
 	tools.ForEach(func(_, t gjson.Result) bool {
-		if isClaudeCodeOnlyTool(t.Get("name").String()) {
+		if shouldStripCCTool(t.Get("name").String(), keepOrchestration) {
 			removed++
 		}
 		return true
@@ -87,7 +127,7 @@ func filterClaudeCodeOnlyToolsFromAnthropicBody(body []byte) (out []byte, remove
 	jw := newJSONWriter()
 	jw.Arr()
 	tools.ForEach(func(_, t gjson.Result) bool {
-		if !isClaudeCodeOnlyTool(t.Get("name").String()) {
+		if !shouldStripCCTool(t.Get("name").String(), keepOrchestration) {
 			jw.Raw(t.Raw)
 		}
 		return true

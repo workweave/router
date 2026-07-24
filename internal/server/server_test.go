@@ -78,7 +78,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
 		engine := gin.New()
 		// Nil services are fine: engine.Routes() inspection never invokes the closure-captured handlers.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeSelfHosted, nil, nil, nil)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, nil, server.DeploymentModeSelfHosted, nil, nil, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in selfhosted mode")
@@ -93,7 +93,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		// Pass a non-nil DeployedModelsSource: managed prod always boots a
 		// *cluster.Multiversion router, so the catalog endpoint must mount
 		// even though the dashboard does not.
-		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, server.DeploymentModeManaged, nil, nil, nil)
+		server.Register(engine, nil, nil, fakeDeployedModelsSource{}, nil, server.DeploymentModeManaged, nil, nil, nil)
 		got := routeSet(engine)
 		for _, want := range productRoutes {
 			assert.Contains(t, got, want, "product route missing in managed mode")
@@ -105,7 +105,7 @@ func TestRegister_DeploymentMode(t *testing.T) {
 
 	t.Run("nil deployed-models source skips catalog endpoint", func(t *testing.T) {
 		engine := gin.New()
-		server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, nil, nil)
+		server.Register(engine, nil, nil, nil, nil, server.DeploymentModeManaged, nil, nil, nil)
 		got := routeSet(engine)
 		assert.NotContains(t, got, "GET /v1/router/models", "catalog endpoint must not mount without a deployed-models source")
 	})
@@ -117,7 +117,7 @@ func TestRegisterSeparatesLivenessFromReadiness(t *testing.T) {
 	checker := healthCheckerFunc(func(context.Context) error {
 		return errors.New("dependency unavailable")
 	})
-	server.Register(engine, nil, nil, nil, server.DeploymentModeManaged, nil, checker, nil)
+	server.Register(engine, nil, nil, nil, nil, server.DeploymentModeManaged, nil, checker, nil)
 
 	for _, test := range []struct {
 		path       string

@@ -107,32 +107,58 @@ func (c *Client) Capabilities(ctx context.Context) (policy.Capabilities, error) 
 	return capabilities, nil
 }
 
-// Roster fetches the sidecar's frozen per-cluster arm roster.
-func (c *Client) Roster(ctx context.Context) (policy.RosterSnapshot, error) {
+// rosterResponse is the shape of the sidecar's GET /roster body.
+type rosterResponse struct {
+	SchemaVersion string              `json:"schema_version"`
+	RosterVersion string              `json:"roster_version"`
+	RosterIDs     []string            `json:"roster_ids"`
+	Clusters      map[string][]string `json:"clusters"`
+}
+
+// Roster fetches roster arm IDs from the sidecar; unlike the cluster
+// artifact registry, this is the set the HMM strategy actually routes across.
+func (c *Client) Roster(ctx context.Context) ([]string, error) {
+	roster, err := c.fetchRoster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return roster.RosterIDs, nil
+}
+
+// ClusterRoster fetches the sidecar's frozen per-cluster arm roster.
+func (c *Client) ClusterRoster(ctx context.Context) (policy.RosterSnapshot, error) {
+	roster, err := c.fetchRoster(ctx)
+	if err != nil {
+		return policy.RosterSnapshot{}, err
+	}
+	return policy.RosterSnapshot{Clusters: roster.Clusters, RosterSHA256: roster.RosterVersion}, nil
+}
+
+func (c *Client) fetchRoster(ctx context.Context) (rosterResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/roster", nil)
 	if err != nil {
-		return policy.RosterSnapshot{}, fmt.Errorf("build policy roster request: %w", err)
+		return rosterResponse{}, fmt.Errorf("build policy roster request: %w", err)
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return policy.RosterSnapshot{}, fmt.Errorf("call policy roster endpoint: %w", err)
+		return rosterResponse{}, fmt.Errorf("call policy roster endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return policy.RosterSnapshot{}, fmt.Errorf("read policy roster response: %w", err)
+		return rosterResponse{}, fmt.Errorf("read policy roster response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return policy.RosterSnapshot{}, fmt.Errorf("policy roster status %d", resp.StatusCode)
+		return rosterResponse{}, fmt.Errorf("policy roster status %d", resp.StatusCode)
 	}
-	var parsed struct {
-		Clusters     map[string][]string `json:"clusters"`
-		RosterSHA256 string              `json:"roster_sha256"`
+	var roster rosterResponse
+	if err := json.Unmarshal(payload, &roster); err != nil {
+		return rosterResponse{}, fmt.Errorf("decode policy roster response: %w", err)
 	}
-	if err := json.Unmarshal(payload, &parsed); err != nil {
-		return policy.RosterSnapshot{}, fmt.Errorf("decode policy roster response: %w", err)
+	if roster.SchemaVersion != policy.SchemaVersionV1 && roster.SchemaVersion != policy.SchemaVersionV2 {
+		return rosterResponse{}, fmt.Errorf("unsupported policy roster schema %q", roster.SchemaVersion)
 	}
-	return policy.RosterSnapshot{Clusters: parsed.Clusters, RosterSHA256: parsed.RosterSHA256}, nil
+	return roster, nil
 }
 
 func (c *Client) post(ctx context.Context, path string, payload map[string]interface{}, label string) error {

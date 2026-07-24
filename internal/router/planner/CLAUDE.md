@@ -2,7 +2,7 @@
 
 > **Mirror notice.** Verbatim sync with [AGENTS.md](AGENTS.md). **Update both together** — divergence = bug.
 
-Prism-style cache-aware EV policy. Decides STAY (preserve pinned model's upstream prompt cache) vs SWITCH (take cluster scorer's fresh decision + eat one-time cache miss) per turn. Read [root CLAUDE.md](../../../CLAUDE.md) first.
+Prism-style cache-aware EV policy. Decides STAY (preserve pinned model's upstream prompt cache) vs SWITCH (take cluster scorer's fresh decision + eat one-time cache miss) per action. Read [root CLAUDE.md](../../../CLAUDE.md) first.
 
 ## Contract
 
@@ -15,7 +15,7 @@ Decide(pin, fresh router.Decision, estimated tokens, available models) → STAY 
 
 ## Math, briefly
 
-Compares expected per-turn savings over the remaining horizon against the eviction cost of warming a new cache. The **tier-upgrade guard** fires when STAY would clearly under-serve the prompt — uses [`../catalog`](../catalog)'s Low/Mid/High tier to overturn a cost-driven "stay" when the fresh decision is in a strictly higher tier than the pin.
+Compares expected per-action savings over the remaining horizon against the eviction cost of warming a new cache. The **tier-upgrade guard** fires when STAY would clearly under-serve the prompt — uses [`../catalog`](../catalog)'s Low/Mid/High tier to overturn a cost-driven "stay" when the fresh decision is in a strictly higher tier than the pin.
 
 **Cache-warmth gate.** The cache-read multipliers and eviction cost only apply while the pin's upstream cache is warm. When `Inputs.PinCacheCold` is set (the pinned provider's cache TTL has lapsed — short and best-effort on the OSS compat providers vs Anthropic's 1h window; see [`../../providers`](../../providers).`CacheTTLFor`), both sides are priced uncached so raw economics + the tier guard decide, instead of a phantom cache gluing the session to a stale pin. The zero value means "assume warm", preserving the original behavior.
 

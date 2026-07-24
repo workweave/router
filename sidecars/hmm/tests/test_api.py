@@ -51,6 +51,9 @@ class RosterPolicy:
     }
     roster_version = "c" * 64
 
+    def roster_ids(self) -> list[str]:
+        return ["openai/gpt-5.6-sol", "anthropic/claude-opus-4.8"]
+
 
 def test_liveness_does_not_depend_on_model_readiness() -> None:
     with TestClient(app) as client:
@@ -77,14 +80,13 @@ def test_capabilities_are_frozen_and_do_not_request_content_callbacks() -> None:
 def test_roster_returns_ordered_cluster_arms() -> None:
     with TestClient(app) as client:
         app.state.policy = RosterPolicy()
-        app.state.artifacts = object()
         response = client.get("/roster")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["clusters"]["maximum"] == ["provider/opus", "provider/fable"]
     assert payload["clusters"]["fast"] == ["provider/haiku"]
-    assert payload["roster_sha256"] == "c" * 64
+    assert payload["roster_version"] == "c" * 64
 
 
 def test_roster_fails_closed_without_a_policy() -> None:
@@ -138,3 +140,25 @@ def test_preview_requires_explicit_mode_and_returns_all_selected_arms() -> None:
     assert rejected.status_code == 400
     assert response.status_code == 200
     assert response.json()["eligible_roster_ids"] == ["provider/a"]
+
+
+def test_roster_returns_arm_union() -> None:
+    with TestClient(app) as client:
+        app.state.policy = RosterPolicy()
+        response = client.get("/roster")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "policy_router_v1"
+    assert payload["roster_ids"] == [
+        "openai/gpt-5.6-sol",
+        "anthropic/claude-opus-4.8",
+    ]
+
+
+def test_roster_fails_closed_without_policy() -> None:
+    with TestClient(app) as client:
+        app.state.policy = None
+        response = client.get("/roster")
+
+    assert response.status_code == 503

@@ -70,7 +70,7 @@ Three concentric layers. Imports flow inward only.
 |  |  |  internal/proxy     (routing/dispatch service:        |  |  |
 |  |  |                      Route, ProxyMessages,            |  |  |
 |  |  |                      ProxyOpenAIChatCompletion,       |  |  |
-|  |  |                      ProxyGemini; turn loop,          |  |  |
+|  |  |                      ProxyGemini; action loop,          |  |  |
 |  |  |                      handover adapter, cache writer,  |  |  |
 |  |  |                      session-key derivation)          |  |  |
 |  |  |  internal/proxy/usage (Anthropic unified-limit        |  |  |
@@ -109,7 +109,7 @@ Three concentric layers. Imports flow inward only.
 
 ### Hard rules
 
-- **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `catalog`, `turntype`, `usage`, `billing` to compose a turn).
+- **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `catalog`, `turntype`, `usage`, `billing` to compose an action).
 - **Small utility third-party libs allowed at every layer.** Layering = about *where I/O and behavior live*, not banning go.mod entries. Reach for vetted small lib (`golang-lru`, `uuid`, error helpers) before rolling own. Reject heavyweight frameworks (DI containers, ORMs, metaprogramming kits).
 - **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/timing`, `internal/feedback`, `internal/router/{cache,catalog,handover,planner,sessionpin,turntype,banditexplore}`, `internal/proxy/usage` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` / `billing.Service` or adapter subpackage. Pure-Go utility libs fine.
 - **Adapters depend only on inner ring.** `internal/postgres` may also import `internal/sqlc`. Adapters never import each other — `internal/postgres` doesn't know `internal/api/admin` etc. Note: provider adapters (`internal/providers/<name>/`) import `internal/proxy` for `OnUpstreamMeta` callback so streaming responses record usage/headers back to proxy — one of few inward-pointing adapter→inner-ring imports, intentional. `internal/server/middleware` and `internal/providers/httputil` (both adapters) stamp/read request latency via `internal/timing`'s `Timing` value type instead of importing `internal/observability/otel` directly — `Timing` used to live in `otel` and was pulled out specifically so these adapters (and `internal/providers/{anthropic,openai,google,openaicompat}`) don't need a concrete dependency on the OTel exporter adapter just to stamp a timestamp. `internal/proxy` also imports `internal/timing` (an inner-ring package importing another inner-ring package, which is allowed) to read timing back into span attributes.
@@ -127,7 +127,7 @@ Pick by responsibility, then read that package's `CLAUDE.md`:
 |---|---|---|
 | HTTP endpoint (handler + route) | `internal/api/<group>/` | [internal/api/CLAUDE.md](internal/api/CLAUDE.md) |
 | Identity / API-key logic | `internal/auth` (method on `*Service`) | [internal/auth/CLAUDE.md](internal/auth/CLAUDE.md) |
-| Routing / dispatch / per-turn orchestration | `internal/proxy` (method on `*Service`) | [internal/proxy/CLAUDE.md](internal/proxy/CLAUDE.md) |
+| Routing / dispatch / per-action orchestration | `internal/proxy` (method on `*Service`) | [internal/proxy/CLAUDE.md](internal/proxy/CLAUDE.md) |
 | Balance check / inference debit | `internal/billing` (method on `*Service`) | — |
 | Feedback-link token signing (no I/O) | `internal/feedback` | — |
 | Cross-format wire conversion (no I/O) | `internal/translate` | [internal/translate/CLAUDE.md](internal/translate/CLAUDE.md) |
@@ -135,7 +135,7 @@ Pick by responsibility, then read that package's `CLAUDE.md`:
 | New `Router` implementation | `internal/router/<name>/` | [internal/router/CLAUDE.md](internal/router/CLAUDE.md) |
 | Cluster scorer / artifacts | `internal/router/cluster/` | [internal/router/cluster/CLAUDE.md](internal/router/cluster/CLAUDE.md) |
 | New model / per-model pricing data | `internal/router/catalog/` | [internal/router/catalog/CLAUDE.md](internal/router/catalog/CLAUDE.md) |
-| Cache-aware turn routing internals | `internal/router/{planner,handover,cache,sessionpin,turntype}/` | each has its own CLAUDE.md |
+| Cache-aware action routing internals | `internal/router/{planner,handover,cache,sessionpin,turntype}/` | each has its own CLAUDE.md |
 | Bounded quality-tie-band exploration | `internal/router/banditexplore/` | — |
 | Anthropic usage-bypass gate | `internal/proxy/usage` | [internal/proxy/usage/CLAUDE.md](internal/proxy/usage/CLAUDE.md) |
 | New column / SQL query | `db/queries/` + `internal/postgres/` | [db/CLAUDE.md](db/CLAUDE.md), [internal/postgres/CLAUDE.md](internal/postgres/CLAUDE.md) |
@@ -215,7 +215,7 @@ The eval harness is a sibling Poetry package, **not in this repo** — lives at 
 **Per-request router selection (server side):**
 
 - [`internal/server/middleware`](internal/server/middleware).`WithClusterVersionOverride` reads `x-weave-cluster-version: v0.X` header + stashes version on request context. `cluster.Multiversion.Route` reads via `cluster.VersionFromContext` + dispatches to matching `Scorer`. Customer traffic (no header) always serves deployment's default version (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
-- `WithEmbedOnlyUserMessageOverride` honors `x-weave-embed-only-user-message: true|false` header, flipping proxy between embedding user-role text only (default) + concatenated turn stream.
+- `WithEmbedOnlyUserMessageOverride` honors `x-weave-embed-only-user-message: true|false` header, flipping proxy between embedding user-role text only (default) + concatenated action stream.
 
 **What to NOT do:**
 

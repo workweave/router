@@ -151,7 +151,7 @@ type RosterSnapshot struct {
 
 // RosterSource returns the sidecar's frozen per-cluster arm roster.
 type RosterSource interface {
-	Roster(ctx context.Context) (RosterSnapshot, error)
+	ClusterRoster(ctx context.Context) (RosterSnapshot, error)
 }
 
 // Decider asks a policy sidecar to choose one supplied candidate.

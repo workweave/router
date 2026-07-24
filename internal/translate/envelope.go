@@ -61,6 +61,11 @@ type EmitOptions struct {
 	// instead of 200K, avoiding a 400 "prompt is too long" on large requests.
 	// No-op below 200K input. deriveAnthropicHeaders gates on CapExtendedContext.
 	EnableExtendedContext bool
+	// KeepCrossVendorOrchestrationTools preserves CC orchestration tools
+	// (Task*, Workflow, Skill, plan-mode) on cross-vendor emit; other CC-only
+	// tools are always stripped. Set from ROUTER_CC_ORCH_TOOLS_CROSSVENDOR;
+	// zero value false preserves historical strip-all behavior.
+	KeepCrossVendorOrchestrationTools bool
 	// DowngradeGeminiValidatedToAuto emits functionCallingConfig.mode=AUTO
 	// instead of VALIDATED for Gemini 3.x. VALIDATED compiles tool schemas into
 	// a decode-time grammar and 400s INVALID_ARGUMENT if one won't compile; the

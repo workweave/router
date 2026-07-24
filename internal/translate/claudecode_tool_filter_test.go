@@ -149,6 +149,90 @@ func TestStripCCTools_AnthropicSourceAnthropicTarget_KeepsCCOnly(t *testing.T) {
 	assert.Contains(t, got, "Read", "real coding tools must also survive on passthrough")
 }
 
+func TestKeepOrchestrationTools_OpenAITarget_KeepsOrchestrationDropsRest(t *testing.T) {
+	// Flag on: orchestration tools survive; other CC-only tools (AskUserQuestion, NotebookEdit) are still stripped.
+	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:                       "deepseek/deepseek-v4-pro",
+		KeepCrossVendorOrchestrationTools: true,
+	})
+	require.NoError(t, err)
+
+	names := emittedToolNames(t, out.Body)
+	assert.ElementsMatch(t, []string{
+		"Read", "Edit", "Write", "Bash",
+		"Task", "TaskCreate", "TaskUpdate", "TaskList",
+		"EnterPlanMode", "ExitPlanMode", "Skill", "Workflow",
+	}, names, "orchestration tools survive when the flag is on; other CC-only tools still stripped")
+	assert.NotContains(t, names, "AskUserQuestion", "non-orchestration CC-only tools stay stripped")
+	assert.NotContains(t, names, "NotebookEdit")
+}
+
+func TestKeepOrchestrationTools_OpenAITarget_NormalizesTypelessAnyOf(t *testing.T) {
+	body := `{
+		"model":"claude-opus-4-7",
+		"messages":[{"role":"user","content":"run a workflow"}],
+		"tools":[{
+			"name":"Workflow",
+			"input_schema":{"type":"object","properties":{"args":{"anyOf":[{}, {"type":"null"}]}}}
+		}]
+	}`
+	env, err := translate.ParseAnthropic([]byte(body))
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{
+		TargetModel:                       "deepseek/deepseek-v4-pro",
+		KeepCrossVendorOrchestrationTools: true,
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out.Body, &doc))
+	tools := doc["tools"].([]any)
+	workflow := tools[0].(map[string]any)["function"].(map[string]any)
+	params := workflow["parameters"].(map[string]any)
+	args := params["properties"].(map[string]any)["args"].(map[string]any)
+	branch := args["anyOf"].([]any)[0].(map[string]any)
+	assert.Equal(t, []any{"string", "number", "boolean", "object", "array", "null"}, branch["type"],
+		"OpenAI requires every anyOf branch to declare a type")
+}
+
+func TestKeepOrchestrationTools_GeminiTarget_KeepsOrchestrationDropsRest(t *testing.T) {
+	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
+	require.NoError(t, err)
+
+	out, err := env.PrepareGemini(http.Header{}, translate.EmitOptions{
+		TargetModel:                       "gemini-3.1-pro-preview",
+		KeepCrossVendorOrchestrationTools: true,
+	})
+	require.NoError(t, err)
+
+	names := emittedGeminiToolNames(t, out.Body)
+	assert.ElementsMatch(t, []string{
+		"Read", "Edit", "Write", "Bash",
+		"Task", "TaskCreate", "TaskUpdate", "TaskList",
+		"EnterPlanMode", "ExitPlanMode", "Skill", "Workflow",
+	}, names, "Anthropic→Gemini keeps orchestration tools when the flag is on")
+	assert.NotContains(t, names, "AskUserQuestion")
+	assert.NotContains(t, names, "NotebookEdit")
+}
+
+func TestKeepOrchestrationTools_EmitOptionsZeroValue_StripsAll(t *testing.T) {
+	// Zero-value EmitOptions strips all CC-only tools; production default
+	// (on) is set by the proxy composition root, not the translate layer.
+	env, err := translate.ParseAnthropic([]byte(claudeCodeMixedToolBody))
+	require.NoError(t, err)
+
+	out, err := env.PrepareOpenAI(nil, translate.EmitOptions{TargetModel: "deepseek/deepseek-v4-pro"})
+	require.NoError(t, err)
+
+	names := emittedToolNames(t, out.Body)
+	assert.ElementsMatch(t, []string{"Read", "Edit", "Write", "Bash"}, names,
+		"unset flag must strip every CC-only tool including orchestration ones")
+}
+
 func TestStripCCTools_NoCCToolsNoRewrite(t *testing.T) {
 	// When the request carries no CC-only tools, the filter must not
 	// re-serialize the body (cheap fast path).

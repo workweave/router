@@ -500,6 +500,7 @@ func main() {
 	cyberRefusalRepin := config.GetOr("ROUTER_CYBER_REFUSAL_REPIN", "false") == "true"
 	cyberRefusalFallbackModel := config.GetOr("ROUTER_CYBER_REFUSAL_FALLBACK_MODEL", "claude-sonnet-5")
 	effortEscalation := config.GetOr("ROUTER_EFFORT_ESCALATION", "false") == "true"
+	ccOrchToolsCrossVendor := config.GetOr("ROUTER_CC_ORCH_TOOLS_CROSSVENDOR", "true") == "true"
 	// Per-turn large-vs-small action-classifier swap. Off by default until the
 	// Layer-2 extrinsic validation clears it; enabling loads the compiled-in head.
 	bandSwapEnabled := config.GetOr("ROUTER_BAND_SWAP", "false") == "true"
@@ -609,6 +610,7 @@ func main() {
 	var hmmCapabilities policy.Capabilities
 	var hmmReadinessChecker admin.HealthChecker
 	var hmmRosterSource policy.RosterSource
+	var hmmRosterModels admin.HMMRosterSource
 	if hmmSidecarURL := config.GetOr("ROUTER_HMM_SIDECAR_URL", ""); hmmSidecarURL != "" {
 		hmmTimeout := parseEnvDurationMs("ROUTER_HMM_SIDECAR_TIMEOUT_MS", policyclient.DefaultTimeout)
 		hmmAuthMode := config.GetOr("ROUTER_HMM_SIDECAR_AUTH", policySidecarAuthNone)
@@ -619,6 +621,7 @@ func main() {
 		}
 		hmmReadinessChecker = hmmClient
 		hmmRosterSource = hmmClient
+		hmmRosterModels = newHMMRosterSource(hmmClient, hmmTimeout)
 		capabilityCtx, cancelCapabilityDiscovery := context.WithTimeout(context.Background(), hmmTimeout)
 		var capabilityErr error
 		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)
@@ -729,6 +732,7 @@ func main() {
 		WithHMMUpgradeConfidenceThreshold(hmmUpgradeConfidence).
 		WithEscapeNormalize(escapeNormalize).
 		WithEffortEscalation(effortEscalation).
+		WithCCOrchestrationToolsCrossVendor(ccOrchToolsCrossVendor).
 		WithBandSwap(bandSwapEnabled).
 		WithLoopEscalationConfig(loopEscalationEnabled, loopEscalationHoldoutPct).
 		WithLoopEscalationStore(repo.Telemetry).
@@ -747,6 +751,7 @@ func main() {
 		logger.Info("Generic policy sidecar wired", "strategy", spec.Strategy, "candidate_models", len(availableModels))
 	}
 	logger.Info("Effort escalation configured", "enabled", effortEscalation)
+	logger.Info("Cross-vendor Claude Code orchestration tools configured", "enabled", ccOrchToolsCrossVendor)
 	logger.Info("Loop escalation configured", "enabled", loopEscalationEnabled, "holdout_pct", loopEscalationHoldoutPct)
 	logger.Info("Spiral shadow detector configured", "enabled", spiralShadowEnabled)
 	logger.Info("Text-repetition break configured", "enabled", textRepetitionBreakEnabled)
@@ -854,7 +859,7 @@ func main() {
 	// Lets the admin model-selection handler surface deployed models; nil
 	// fallback keeps non-cluster routers bootable.
 	deployedModels, _ := rtr.(*cluster.Multiversion)
-	server.Register(engine, authSvc, proxySvc, deployedModels, deploymentMode, billingSvc, hmmReadinessChecker, hmmRosterSource)
+	server.Register(engine, authSvc, proxySvc, deployedModels, hmmRosterModels, deploymentMode, billingSvc, hmmReadinessChecker, hmmRosterSource)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

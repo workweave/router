@@ -40,9 +40,11 @@ loved by Robinhood, PostHog, Reducto, and hundreds of others.*
 
 Point Claude Code, Codex, Cursor, or your own app at `localhost:8080`. The router:
 
-- 🎯 **Routes per request.** A cluster scorer derived from
+- 🎯 **Routes per action.** A cluster scorer derived from
   [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] picks the right
-  model from your enabled providers, every turn.
+  model from your enabled providers, for every upstream API request.
+  (See [docs/SEMANTICS.md](docs/SEMANTICS.md) for the canonical terminology:
+  the router routes per **action**, not per **turn**.)
 - 🔌 **Speaks everyone's API.** Anthropic Messages, OpenAI Chat Completions,
   Gemini native. Streaming, tools, vision, the works.
 - 🧠 **Knows OSS too.** DeepSeek, Kimi, GLM, Qwen, Llama, Mistral via
@@ -180,6 +182,8 @@ Keep liveness probes on `/health`. Point startup or readiness probes at
 
 - 📐 [**Configuration reference**](docs/CONFIGURATION.md): every env var,
   BYOK encryption, OTel knobs, cluster routing.
+- 🧭 [**Semantics and terminology**](docs/SEMANTICS.md): canonical definitions
+  for session, round, turn, action, and step.
 - [**Policy router harness**](docs/POLICY_ROUTER_HARNESS.md): contract and
   rollout checklist for adding an out-of-process policy model.
 - 🛠️ [**Contributing**](CONTRIBUTING.md): layering rules, hot-reload dev,

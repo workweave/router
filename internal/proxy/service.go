@@ -146,6 +146,10 @@ type Service struct {
 	// failed/no-progress turn; gemini is pinned low. Off by default (set from
 	// ROUTER_EFFORT_ESCALATION) so it can be baked off before enabling.
 	effortEscalation bool
+	// ccOrchToolsCrossVendor keeps CC orchestration tools (Task*, Workflow,
+	// Skill, plan-mode) on cross-vendor routes. Kill switch:
+	// ROUTER_CC_ORCH_TOOLS_CROSSVENDOR=false strips all CC-only tools.
+	ccOrchToolsCrossVendor bool
 	// bandSwap is the per-turn large-vs-small action classifier. Non-nil only
 	// when ROUTER_BAND_SWAP is on and the head loaded; a sticky MainLoop STAY
 	// then serves the predicted band (one of the pin's {Model, PairedModel})
@@ -954,6 +958,7 @@ func NewService(r router.Router, providerMap map[string]providers.Client, emitte
 		spiralTracker:                newSpiralTracker(),
 		spiralShadowEnabled:          true,
 		textRepetitionBreakEnabled:   true,
+		ccOrchToolsCrossVendor:       true,
 		hardPinExplore:               hardPinExplore,
 		hardPinProvider:              hardPinProvider,
 		hardPinModel:                 hardPinModel,
@@ -1055,6 +1060,13 @@ func (s *Service) WithEscapeNormalize(enabled bool) *Service {
 // When false (default) the router leaves request-derived effort untouched.
 func (s *Service) WithEffortEscalation(enabled bool) *Service {
 	s.effortEscalation = enabled
+	return s
+}
+
+// WithCCOrchestrationToolsCrossVendor preserves Claude Code orchestration
+// tools (Task*, Workflow, Skill, plan-mode) on cross-vendor emit. False strips all.
+func (s *Service) WithCCOrchestrationToolsCrossVendor(enabled bool) *Service {
+	s.ccOrchToolsCrossVendor = enabled
 	return s
 }
 
@@ -2419,13 +2431,14 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	otel.Flush(ctx)
 
 	opts := translate.EmitOptions{
-		TargetModel:           decision.Model,
-		TargetProvider:        decision.Provider,
-		Capabilities:          router.Lookup(decision.Model),
-		IncludeStreamUsage:    s.usageRequired(),
-		SessionAffinity:       sessionAffinityHint(routeRes.SessionKey),
-		ModelSwitched:         routeRes.modelSwitched(),
-		EnableExtendedContext: shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
+		TargetModel:                       decision.Model,
+		TargetProvider:                    decision.Provider,
+		Capabilities:                      router.Lookup(decision.Model),
+		IncludeStreamUsage:                s.usageRequired(),
+		SessionAffinity:                   sessionAffinityHint(routeRes.SessionKey),
+		ModelSwitched:                     routeRes.modelSwitched(),
+		EnableExtendedContext:             shouldEnableExtendedContext(env.FullTokenEstimate(), outputReserve),
+		KeepCrossVendorOrchestrationTools: s.ccOrchToolsCrossVendor,
 	}
 	// User-forced effort wins over effortEscalation; also pre-populate
 	// ForceReasoningEffort so the gpt-5.x/gemini-3.x emit seams honor it.

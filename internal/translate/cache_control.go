@@ -38,11 +38,26 @@ func applyAnthropicCachePolicy(body []byte, injectRouterBreakpoints bool) ([]byt
 	if remaining == 0 {
 		return body, nil
 	}
-	if addCacheControlToLastSystemBlock(request) {
-		remaining--
+	if undo, ok := addCacheControlToLastSystemBlock(request); ok {
+		if _, err := validateAnthropicCacheControls(request); err != nil {
+			undo()
+		} else {
+			remaining--
+		}
 	}
 	if remaining > 0 {
-		addCacheControlToLastMessageBlock(request)
+		if undo, ok := addCacheControlToLastMessageBlock(request); ok {
+			if _, err := validateAnthropicCacheControls(request); err != nil {
+				undo()
+			}
+		}
+	}
+	count, err = validateAnthropicCacheControls(request)
+	if err != nil {
+		return nil, err
+	}
+	if count > anthropicCacheControlCapacity {
+		return nil, fmt.Errorf("%w: got %d, maximum is %d", ErrAnthropicCacheControlOverflow, count, anthropicCacheControlCapacity)
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
@@ -51,8 +66,16 @@ func applyAnthropicCachePolicy(body []byte, injectRouterBreakpoints bool) ([]byt
 	return encoded, nil
 }
 
+type anthropicCacheControlTTL int
+
+const (
+	anthropicCacheControlTTL1h anthropicCacheControlTTL = iota
+	anthropicCacheControlTTL5m
+)
+
 func validateAnthropicCacheControls(request map[string]any) (int, error) {
 	count := 0
+	seenFiveMinuteTTL := false
 	visit := func(block any) error {
 		object, ok := block.(map[string]any)
 		if !ok {
@@ -62,11 +85,25 @@ func validateAnthropicCacheControls(request map[string]any) (int, error) {
 		if !exists {
 			return nil
 		}
-		if err := validateAnthropicCacheControl(policy); err != nil {
+		ttl, err := validateAnthropicCacheControl(policy)
+		if err != nil {
 			return err
+		}
+		if seenFiveMinuteTTL && ttl == anthropicCacheControlTTL1h {
+			return fmt.Errorf("%w: ttl=1h cache_control must not follow ttl=5m", ErrAnthropicCacheControlInvalid)
+		}
+		if ttl == anthropicCacheControlTTL5m {
+			seenFiveMinuteTTL = true
 		}
 		count++
 		return nil
+	}
+	if tools, ok := request["tools"].([]any); ok {
+		for _, tool := range tools {
+			if err := visit(tool); err != nil {
+				return 0, err
+			}
+		}
 	}
 	if system, ok := request["system"].([]any); ok {
 		for _, block := range system {
@@ -89,70 +126,82 @@ func validateAnthropicCacheControls(request map[string]any) (int, error) {
 	return count, nil
 }
 
-func validateAnthropicCacheControl(v any) error {
+func validateAnthropicCacheControl(v any) (anthropicCacheControlTTL, error) {
 	policy, ok := v.(map[string]any)
 	if !ok || policy["type"] != "ephemeral" {
-		return fmt.Errorf("%w: expected type=ephemeral", ErrAnthropicCacheControlInvalid)
+		return anthropicCacheControlTTL5m, fmt.Errorf("%w: expected type=ephemeral", ErrAnthropicCacheControlInvalid)
 	}
+	ttl := anthropicCacheControlTTL5m
 	for key, value := range policy {
 		switch key {
 		case "type":
 		case "ttl":
-			ttl, ok := value.(string)
-			if !ok || (ttl != "5m" && ttl != "1h") {
-				return fmt.Errorf("%w: ttl must be 5m or 1h", ErrAnthropicCacheControlInvalid)
+			value, ok := value.(string)
+			if !ok || (value != "5m" && value != "1h") {
+				return anthropicCacheControlTTL5m, fmt.Errorf("%w: ttl must be 5m or 1h", ErrAnthropicCacheControlInvalid)
+			}
+			if value == "1h" {
+				ttl = anthropicCacheControlTTL1h
 			}
 		default:
-			return fmt.Errorf("%w: unsupported field %q", ErrAnthropicCacheControlInvalid, key)
+			return anthropicCacheControlTTL5m, fmt.Errorf("%w: unsupported field %q", ErrAnthropicCacheControlInvalid, key)
 		}
 	}
-	return nil
+	return ttl, nil
 }
 
-func addCacheControlToLastSystemBlock(request map[string]any) bool {
+func addCacheControlToLastSystemBlock(request map[string]any) (func(), bool) {
 	system, ok := request["system"].([]any)
 	if !ok || len(system) == 0 {
-		return false
+		return nil, false
 	}
 	last, ok := system[len(system)-1].(map[string]any)
 	if !ok {
-		return false
+		return nil, false
 	}
 	if _, exists := last["cache_control"]; exists {
-		return false
+		return nil, false
 	}
 	last["cache_control"] = map[string]any{"type": "ephemeral"}
-	return true
+	return func() { delete(last, "cache_control") }, true
 }
 
-func addCacheControlToLastMessageBlock(request map[string]any) bool {
+func addCacheControlToLastMessageBlock(request map[string]any) (func(), bool) {
 	messages, ok := request["messages"].([]any)
 	if !ok || len(messages) == 0 {
-		return false
+		return nil, false
 	}
 	message, ok := messages[len(messages)-1].(map[string]any)
 	if !ok {
-		return false
+		return nil, false
 	}
 	blocks, ok := message["content"].([]any)
+	promoted := false
+	originalContent := message["content"]
 	if !ok {
 		if content, ok := message["content"].(string); ok {
 			blocks = []any{map[string]any{"type": "text", "text": content}}
 			message["content"] = blocks
+			promoted = true
 		} else {
-			return false
+			return nil, false
 		}
 	}
 	if len(blocks) == 0 {
-		return false
+		return nil, false
 	}
 	last, ok := blocks[len(blocks)-1].(map[string]any)
 	if !ok {
-		return false
+		return nil, false
 	}
 	if _, exists := last["cache_control"]; exists {
-		return false
+		return nil, false
 	}
 	last["cache_control"] = map[string]any{"type": "ephemeral"}
-	return true
+	return func() {
+		delete(last, "cache_control")
+		if promoted {
+			message["content"] = originalContent
+		}
+	}, true
 }

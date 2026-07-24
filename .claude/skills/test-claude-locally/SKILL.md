@@ -92,7 +92,7 @@ Then <task that requires tool use>, then stop.' \
 
 ### 6. Verify via logs
 
-The decision + completion log per turn carries the signals you need. Strip ANSI first:
+The decision + completion log per action (one `ProxyMessages complete`) carries the signals you need. Strip ANSI first:
 
 ```bash
 docker compose logs server --since=3m 2>&1 | sed -E 's/\x1b\[[0-9;]*m//g' \

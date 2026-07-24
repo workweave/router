@@ -2,7 +2,7 @@
 
 > **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). **Update both together** — divergence = bug.
 
-Routing/dispatch service. Per-turn orchestrator that composes scorer, planner, handover, cache, sessionpin, catalog, turntype, usage, billing, providers, and translate. Read [root CLAUDE.md](../../CLAUDE.md) first.
+Routing/dispatch service. Per-action orchestrator that composes scorer, planner, handover, cache, sessionpin, catalog, turntype, usage, billing, providers, and translate. Read [root CLAUDE.md](../../CLAUDE.md) first.
 
 ## Surface
 
@@ -13,7 +13,7 @@ Routing/dispatch service. Per-turn orchestrator that composes scorer, planner, h
 - `ProxyOpenAIChatCompletion` — OpenAI Chat Completions
 - `ProxyGemini` — Gemini native generateContent
 
-Plus the turn loop, handover adapter, cache writer, and session-key derivation in sibling files.
+Plus the action loop, handover adapter, cache writer, and session-key derivation in sibling files.
 
 ## Adding a method to `*proxy.Service`
 
@@ -21,21 +21,21 @@ Plus the turn loop, handover adapter, cache writer, and session-key derivation i
 2. **If you need new repo methods**, surface them as an interface in the inner-ring package, implement in `internal/postgres/`. Example: `sessionpin.Store` in [`../router/sessionpin/store.go`](../router/sessionpin/store.go), implemented by `postgres.SessionPinRepository`.
 3. **Update `service_test.go` fakes** to satisfy the expanded interface. Real assertions on return values, not "mock called with X".
 
-## Per-turn flow (cache-aware turn routing)
+## Per-action flow (cache-aware action routing)
 
-The per-turn flow is more than "scorer → dispatch". Pinned session, planner verdict, optional handover summary, and the semantic response cache all sit between the inbound request and the upstream provider. Packages are intentionally small + single-purpose so each is unit-testable without the others.
+The per-action flow is more than "scorer → dispatch". Pinned session, planner verdict, optional handover summary, and the semantic response cache all sit between the inbound request and the upstream provider. Packages are intentionally small + single-purpose so each is unit-testable without the others. ("Action" = one upstream API request; see [../../docs/SEMANTICS.md](../../docs/SEMANTICS.md). The `Stage` column below is a pipeline stage *within* one action, not a router step.)
 
-| Step | Package | Notes |
+| Stage | Package | Notes |
 |---|---|---|
 | Turn-type classification | [`../router/turntype`](../router/turntype) | MainLoop / ToolResult / SubAgentDispatch / Compaction / Probe |
 | Session-pin lookup | [`../router/sessionpin`](../router/sessionpin) | Sticky `(api_key_id, session_key, role)` pin |
 | Fresh routing decision | [`../router/cluster`](../router/cluster) | Cluster scorer argmax |
 | STAY vs SWITCH | [`../router/planner`](../router/planner) | Cache-aware EV policy |
-| Handover summary on SWITCH | [`../router/handover`](../router/handover) | Bounds switch-turn input cost |
+| Handover summary on SWITCH | [`../router/handover`](../router/handover) | Bounds switch-action input cost |
 | Semantic response cache | [`../router/cache`](../router/cache) | Cross-request, non-streaming only |
 | Subscription strict pass-through gate | [`usage`](usage) | See [`usage/CLAUDE.md`](usage/CLAUDE.md) |
 
-The provider-backed `Summarizer` implementation for handover lives in [`handover.go`](handover.go); the inner-ring `handover` package only defines the contract. On summarizer timeout or error, proxy keeps the full prior history unchanged (it does **not** trim) — a pricier switch turn beats silently dropping the conversation the switched-to model needs.
+The provider-backed `Summarizer` implementation for handover lives in [`handover.go`](handover.go); the inner-ring `handover` package only defines the contract. On summarizer timeout or error, proxy keeps the full prior history unchanged (it does **not** trim) — a pricier switch action beats silently dropping the conversation the switched-to model needs.
 
 ## Proactive context-window compaction
 
@@ -49,9 +49,9 @@ The provider-backed `Summarizer` implementation for handover lives in [`handover
 
 Multi-binding models (deepseek/qwen/moonshot with Fireworks/Makora/Bedrock primary + OpenRouter fallback in [`catalog.Model.Providers`](../router/catalog/catalog.go)) dispatch through [`dispatchWithFallback`](fallback.go). The helper walks the ordered binding list, retries on `providers.IsRetryable` errors (5xx/408/429 buffered responses, transport errors, `httputil.ErrUpstreamIdleTimeout`), and on exhaustion writes the final upstream error envelope via a format-specific renderer (`flushUpstreamErrorAsAnthropic` for ProxyMessages, `flushBufferedIfPresent` for ProxyOpenAIChatCompletion).
 
-**Model-not-found 404 → cross-binding failover (only).** A buffered upstream 404 (`providers.IsUpstreamModelNotFound`) means the chosen provider doesn't serve the model — a stale/wrong upstream id or a provider with no active endpoints. It is deliberately *not* in `IsRetryable`: re-hitting the same provider is futile (so it never triggers same-binding retry), but a different provider binding may carry the model, so it triggers one cross-binding hop. This rescues a turn that would otherwise hard-fail at the client as "selected model may not exist." On the last binding the 404 still flushes.
+**Model-not-found 404 → cross-binding failover (only).** A buffered upstream 404 (`providers.IsUpstreamModelNotFound`) means the chosen provider doesn't serve the model — a stale/wrong upstream id or a provider with no active endpoints. It is deliberately *not* in `IsRetryable`: re-hitting the same provider is futile (so it never triggers same-binding retry), but a different provider binding may carry the model, so it triggers one cross-binding hop. This rescues a request that would otherwise hard-fail at the client as "selected model may not exist." On the last binding the 404 still flushes.
 
-**Single-binding same-binding retry.** Most catalog models carry one binding (Anthropic/OpenAI/Google), so cross-binding failover has nowhere to walk — a sole-provider 5xx/timeout would kill the turn. For these, `dispatchWithFallback` retries the *same* binding in place up to `maxSameBindingRetries` (2) with exponential backoff (`sameBindingBackoff`: 250ms, 500ms), pre-commit only, abortable on ctx cancel (`sleepWithContext`). Multi-binding models skip in-place retry (`len(bindings) > 1` breaks the inner loop) and fail straight over to the next provider — a different upstream beats re-hitting the flaky one. Tests inject `Service.retrySleep` to keep the backoff instant.
+**Single-binding same-binding retry.** Most catalog models carry one binding (Anthropic/OpenAI/Google), so cross-binding failover has nowhere to walk — a sole-provider 5xx/timeout would kill the request. For these, `dispatchWithFallback` retries the *same* binding in place up to `maxSameBindingRetries` (2) with exponential backoff (`sameBindingBackoff`: 250ms, 500ms), pre-commit only, abortable on ctx cancel (`sleepWithContext`). Multi-binding models skip in-place retry (`len(bindings) > 1` breaks the inner loop) and fail straight over to the next provider — a different upstream beats re-hitting the flaky one. Tests inject `Service.retrySleep` to keep the backoff instant.
 
 `preludeBuffer` wraps the client writer on every request so the eager SSE Prelude doesn't commit the response to the client before the upstream produces its first byte. The buffer absorbs pre-Seal writes (Prelude's status + `message_start`), commits on the first post-Seal write (= first upstream chunk), and `Discard()`s pre-commit state between attempts so a retry begins with a pristine writer. `Committed()` is the retry gate: once it flips, the response is on the wire and no further retry is allowed.
 
@@ -67,7 +67,7 @@ Per-attempt body rebuild: each closure constructs `EmitOptions` with `TargetProv
 
 ## `OnUpstreamMeta` callbacks
 
-Provider adapters call back into `proxy.OnUpstreamMeta` so streaming responses record usage/headers back to proxy without coupling provider packages to proxy internals. The catalog / planner stack depends on per-turn token counts being recorded promptly — **don't add a provider that forgets to call the callback.**
+Provider adapters call back into `proxy.OnUpstreamMeta` so streaming responses record usage/headers back to proxy without coupling provider packages to proxy internals. The catalog / planner stack depends on per-action token counts being recorded promptly — **don't add a provider that forgets to call the callback.**
 
 ## What NOT to do
 
