@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,43 @@ func TestHandleNoProgressBreak_PreservesUserForcedPin(t *testing.T) {
 	assert.Equal(t, translate.ReasonUserForceModel, store.pin.Reason,
 		"automatic no-progress recovery must not clear an explicit force-model pin")
 	assert.Contains(t, rec.Body.String(), "preserving the explicit force-model pin")
+}
+
+// TestHandleNoProgressBreak_OpenAIChatCompletionShape covers the FormatOpenAI
+// branch that was production-dead until #825 wired ProxyOpenAIChatCompletion.
+func TestHandleNoProgressBreak_OpenAIChatCompletionShape(t *testing.T) {
+	env, err := translate.ParseOpenAI([]byte(`{
+		"model":"gpt-4o",
+		"messages":[{"role":"user","content":"retry"}]
+	}`))
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	svc := &Service{}
+
+	err = svc.handleNoProgressBreak(
+		context.Background(), rec, env, noProgressMatchThreshold, uuid.New(),
+		sessionKeyFromString("openai-noprogress"),
+		"default_high", "gpt-4o", "openai", 42,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat.completion", resp["object"])
+	assert.Equal(t, "weave-router", resp["model"])
+	choices, ok := resp["choices"].([]any)
+	require.True(t, ok)
+	require.Len(t, choices, 1)
+	choice := choices[0].(map[string]any)
+	assert.Equal(t, "stop", choice["finish_reason"])
+	msg := choice["message"].(map[string]any)
+	assert.Equal(t, "assistant", msg["role"])
+	content, _ := msg["content"].(string)
+	assert.Contains(t, strings.ToLower(content), "no-progress loop detected")
+	usage, ok := resp["usage"].(map[string]any)
+	require.True(t, ok)
+	assert.EqualValues(t, 42, usage["prompt_tokens"])
 }
 
 func TestComputeNoProgressFingerprint_StableAcrossCalls(t *testing.T) {

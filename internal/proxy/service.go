@@ -4251,8 +4251,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 	baseExcludedOAI := s.excludedModelsForRequest(ctx)
 
-	// Snapshot the inbound tool-output size before any env rewrite (proactive
-	// compaction below, or runTurnLoop's switch handover); see toolResultBytesPtr.
+	// Snapshot inbound tool state before any env rewrite (proactive compaction
+	// below, or runTurnLoop's switch handover). Same shape as ProxyMessages:
+	// no-progress gating and toolResultBytesPtr must see what the client sent.
+	inboundToolCallCount := len(env.AssistantToolCallSignatures())
 	inboundLastUser := env.LastUserMessage()
 
 	// Proactive context-window compaction, as in ProxyMessages. Skipped for
@@ -4336,6 +4338,20 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	pinTier := routeRes.PinTier
 	pinAgeSec := routeRes.PinAgeSec
 	s.logPlannerOutcome(ctx, routeRes)
+
+	// Cross-envelope no-progress detector (same gate as ProxyMessages). OpenAI
+	// tool-bearing turns use AssistantToolCallSignatures + trailing role=tool
+	// HasToolResult — same envelope helpers, different wire shape. Reuses
+	// handleNoProgressBreak's FormatOpenAI branch.
+	_, agentShadowMode := AgentShadowEvalFromContext(ctx)
+	toolBearingTurn := inboundToolCallCount > 0 || inboundLastUser.HasToolResult
+	if !agentShadowMode && !routeRes.AuthoritativePerTurn && toolBearingTurn && s.noProgress != nil {
+		fp := computeNoProgressFingerprint(decision, promptText, feats.MessageCount, toolProgressMarker(env))
+		role := roleForTier(catalog.TierFor(feats.Model))
+		if looped, count := s.noProgress.recordAndDetect(routeRes.SessionKey, installationID, role, fp, time.Now()); looped {
+			return s.handleNoProgressBreak(ctx, w, env, count, installationID, routeRes.SessionKey, role, decision.Model, decision.Provider, feats.Tokens)
+		}
+	}
 
 	// See the ProxyMessages cache-eligibility note: subsidized requests bypass the
 	// semantic cache (the key doesn't capture headroom-dependent model choice).
