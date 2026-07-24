@@ -57,6 +57,7 @@ logs/
 
 # Docker overrides
 docker-compose.override.yml
+docker-compose.smoke-run.override.yml
 
 # Node (eval/scripts tooling, dashboard frontend)
 node_modules/

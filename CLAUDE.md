@@ -177,6 +177,7 @@ If new helper doesn't fit, justify new package in code comment before creating.
 - Use `testify/assert` + `testify/require`. Use `require.Eventually` for async (see [service_test.go](internal/auth/service_test.go) `fireMarkUsed` assertion).
 - In-memory fakes for repos/routers/provider clients are cheap + far better than mocks for unit testing Service.
 - No DB-backed integration tests in `internal/`. If need real Postgres, `docker compose` stack is runtime fixture; write scripts under `scripts/` rather than `*_test.go`.
+- **Pre-merge end-to-end smoke suite** (`smoke/`, `smoke` build tag) boots the real router against real upstream providers via a record/replay MITM proxy — catches what unit/conformance tests can't see (real provider acceptance of translated wire formats, prompt-cache accounting, SSE lifecycle). Path-gated in CI to `internal/proxy/**`, `internal/translate/**`, `internal/providers/**`, `internal/router/catalog/**`, `cmd/router/**`. Add a scenario when a change touches one of those surfaces AND the bug class needs a real upstream call to catch (wire-format translation, dispatch error classification, streaming order) — not for pure unit-testable logic already covered elsewhere. See [docs/SMOKE.md](docs/SMOKE.md) for when it runs, how to add a scenario, and how to refresh cassettes.
 
 ### Logging
 

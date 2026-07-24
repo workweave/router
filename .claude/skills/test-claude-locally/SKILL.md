@@ -5,6 +5,8 @@ description: Run the Weave router locally in docker compose and drive it with `c
 
 # Testing the router locally
 
+> For an **automated** pre-merge regression net (fixture-driven, asserts caching/streaming/decision-headers against real Anthropic), run `make smoke` — see [docs/SMOKE.md](../../../docs/SMOKE.md). This skill is the interactive counterpart: stand the stack up by hand and drive it with `claude -p` to reproduce or verify a one-off bug.
+
 Stand up the router in docker compose, point a one-off `claude -p` session at it via `--settings`, and read the local server logs to confirm behavior. Two upstream modes: the **real** provider API (needs a working key + credits) or a **mock** upstream that emits an exact SSE shape (deterministic, no credits).
 
 ## Critical gotchas (read first)

@@ -1,0 +1,29 @@
+# CI-only compose overlay: adds GitHub Actions cache (type=gha) to the
+# server/mitmproxy builds. Deliberately a SEPARATE file from
+# smoke/mitmproxy/docker-compose.yml (the local+CI overlay) — type=gha only
+# works inside an actual GitHub Actions runner (it needs
+# ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN, only populated by that runtime) and
+# hard-errors everywhere else. Included by scripts/smoke/run.sh only when
+# SMOKE_CI_CACHE=1 (set by .github/workflows/smoke.yml), so `make smoke` on a
+# laptop never touches this file and never sees a "url not set for github
+# actions cache" failure.
+#
+# mode=max caches every intermediate build stage (not just the final layer),
+# which matters here: both Dockerfiles are multi-stage (server: ui-builder +
+# build-stage + build-release-stage; mitmproxy: build + distroless), and the
+# expensive steps (ONNX/tokenizer downloads, npm build, go build) all live in
+# non-final stages that mode=max is what actually caches.
+services:
+  server:
+    build:
+      cache_from:
+        - type=gha,scope=router-server
+      cache_to:
+        - type=gha,scope=router-server,mode=max
+
+  mitmproxy:
+    build:
+      cache_from:
+        - type=gha,scope=router-smoke-mitmproxy
+      cache_to:
+        - type=gha,scope=router-smoke-mitmproxy,mode=max
