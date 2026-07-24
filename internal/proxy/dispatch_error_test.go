@@ -13,6 +13,7 @@ import (
 	"workweave/router/internal/router/cluster"
 	"workweave/router/internal/router/hmm"
 	"workweave/router/internal/router/rl"
+	"workweave/router/internal/translate"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,4 +139,33 @@ func TestClassifyDispatchError_SpendLimitUnavailableFailsClosed503(t *testing.T)
 	assert.Equal(t, http.StatusServiceUnavailable, cls.Status)
 	assert.True(t, cls.RetryAfter)
 	assert.Equal(t, "error", cls.LogLevel)
+}
+
+func TestClassifyDispatchError_AnthropicCacheControlOverflowIs400(t *testing.T) {
+	// Mirror the wrapping service.go uses: fmt.Errorf("emit body: %w", emitErr).
+	err := fmt.Errorf("emit body: %w", fmt.Errorf("%w: got 5, maximum is 4", translate.ErrAnthropicCacheControlOverflow))
+
+	cls, ok := proxy.ClassifyDispatchError(err)
+
+	require.True(t, ok, "ErrAnthropicCacheControlOverflow must be classified, not fall through to a generic 502")
+	assert.Equal(t, proxy.DispatchErrorAnthropicCacheControlInvalid, cls.Kind)
+	assert.Equal(t, http.StatusBadRequest, cls.Status)
+	assert.True(t, cls.Kind.IsClientError(), "the client's own explicit breakpoints exceeded capacity, not an upstream/routing problem")
+	assert.Equal(t, "warn", cls.LogLevel)
+	assert.False(t, cls.RetryAfter)
+	assert.NotContains(t, cls.Message, "emit body:", "the internal wrap-chain prefix must not leak into the client-facing message")
+	assert.Contains(t, cls.Message, "got 5, maximum is 4", "the validator's dynamic detail must survive unwrapping")
+}
+
+func TestClassifyDispatchError_AnthropicCacheControlInvalidTTLOrderingIs400(t *testing.T) {
+	err := fmt.Errorf("emit body: %w", fmt.Errorf("%w: ttl=1h cache_control must not follow ttl=5m", translate.ErrAnthropicCacheControlInvalid))
+
+	cls, ok := proxy.ClassifyDispatchError(err)
+
+	require.True(t, ok)
+	assert.Equal(t, proxy.DispatchErrorAnthropicCacheControlInvalid, cls.Kind)
+	assert.Equal(t, http.StatusBadRequest, cls.Status)
+	assert.True(t, cls.Kind.IsClientError())
+	assert.NotContains(t, cls.Message, "emit body:", "the internal wrap-chain prefix must not leak into the client-facing message")
+	assert.Contains(t, cls.Message, "ttl=1h cache_control must not follow ttl=5m")
 }
