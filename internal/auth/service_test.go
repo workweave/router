@@ -71,8 +71,11 @@ func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) error {
-	return f.override
+func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) (int64, error) {
+	if f.override != nil {
+		return 0, f.override
+	}
+	return 1, nil
 }
 
 type fakeExternalAPIKeyRepo struct {

@@ -34,5 +34,6 @@ type APIKeyRepository interface {
 	GetActiveByHashWithInstallation(ctx context.Context, keyHash string) (*APIKey, *Installation, error)
 	ListForInstallation(ctx context.Context, installationID string) ([]*APIKey, error)
 	MarkUsed(ctx context.Context, id string) error
-	SoftDelete(ctx context.Context, installationID, id string) error
+	// SoftDelete soft-deletes the key and returns the rows-affected count; 0 means the key was already gone.
+	SoftDelete(ctx context.Context, installationID, id string) (int64, error)
 }
