@@ -78,8 +78,8 @@ func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) error {
-	return errors.New("not used")
+func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) (int64, error) {
+	return 0, errors.New("not used")
 }
 
 type fakeInstallationRepository struct{}

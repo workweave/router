@@ -65,17 +65,17 @@ func (f *fakeAPIKeyRepository) ListForInstallation(_ context.Context, installati
 
 func (f *fakeAPIKeyRepository) MarkUsed(context.Context, string) error { return nil }
 
-func (f *fakeAPIKeyRepository) SoftDelete(_ context.Context, installationID, id string) error {
+func (f *fakeAPIKeyRepository) SoftDelete(_ context.Context, installationID, id string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, k := range f.keys {
 		if k.ID == id && k.InstallationID == installationID && k.DeletedAt == nil {
 			now := time.Now()
 			k.DeletedAt = &now
-			return nil
+			return 1, nil
 		}
 	}
-	return nil
+	return 0, nil
 }
 
 func (f *fakeAPIKeyRepository) softDeletedSnapshot() []string {
