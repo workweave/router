@@ -1,0 +1,20 @@
+cmd/routing-report/main.go
+  s_9c42d5feb92c70::t_704bab577e47d6 48,51
+  s_9c42d5feb92c70::t_83e2b9ec8ab0ee 292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c11f5d670b6509bfbff939d8b42b39cfd1ba93ce",
+  "prompts": {},
+  "sessions": {
+    "s_9c42d5feb92c70": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b2bbf49-4c4c-47d2-b855-60d6d32013b8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
