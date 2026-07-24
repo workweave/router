@@ -1,0 +1,30 @@
+cmd/router/main.go
+  s_59ef03ad05c9ff::t_f4005fb7482204 620
+cmd/router/hmm_roster_source.go
+  s_59ef03ad05c9ff::t_dfccfcafbe493f 33-34,36-37
+  s_59ef03ad05c9ff::t_bef409837f44ee 67-69,71
+  s_59ef03ad05c9ff::t_fbda8f269e7a9c 47-51,54-57
+  s_59ef03ad05c9ff::t_fcf0767a7b0807 70
+  s_59ef03ad05c9ff::t_23cfb6b23465a9 88-89
+cmd/router/hmm_roster_source_test.go
+  s_59ef03ad05c9ff::t_88c55f2d5f7efa 43,76,100,115,157
+  s_59ef03ad05c9ff::t_96e32403a1c861 9
+  s_59ef03ad05c9ff::t_a1392f9c632159 57-73
+  s_59ef03ad05c9ff::t_cc0fdd724a093d 18-23,26,28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "25cb227473cbea99a49bacc64936c03e3af2e3f2",
+  "prompts": {},
+  "sessions": {
+    "s_59ef03ad05c9ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0159a601-1daa-41de-9cd6-6bc84effc891",
+        "model": "gpt-5.5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+install/npm/README.md
+  s_474b8ceff46b9a::t_e76b1dbabd10e1 3,6-9,12,18,24-27,35-49,58-59
+README.md
+  s_474b8ceff46b9a::t_aabd3dc14e2c0d 40
+  s_474b8ceff46b9a::t_621c659a84f91d 57-58,64-66,69-71,77-78
+  s_474b8ceff46b9a::t_768826c31b6501 120-127
+install/README.md
+  s_474b8ceff46b9a::t_1220db019d26ea 1,3-4,11,14-20,27,34-37,40-44,46-47,57,61-63,66-67,82-84,91,105-127,132-134,137-138,144-146,149,156,166-174,178-181,184-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "b12af258baedcf3e901662ac0aede7a18bd52770",
+  "prompts": {},
+  "sessions": {
+    "s_474b8ceff46b9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "55aba179-0748-477b-832c-24da8d88df13",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

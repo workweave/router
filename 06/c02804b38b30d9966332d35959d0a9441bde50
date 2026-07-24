@@ -1,0 +1,21 @@
+internal/proxy/service.go
+  s_0c531687887366::t_1c9e23078303eb 3089-3101
+internal/proxy/subscription_suppression_credential_internal_test.go
+  s_0c531687887366::t_d014f1dc4ab1dd 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "06c02804b38b30d9966332d35959d0a9441bde50",
+  "prompts": {},
+  "sessions": {
+    "s_0c531687887366": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91b9ff4d-fa5b-44dd-a5d4-c5ce8476493c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

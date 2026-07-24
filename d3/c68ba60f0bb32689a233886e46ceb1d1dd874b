@@ -1,0 +1,41 @@
+internal/router/CLAUDE.md
+  s_181299bbd674e9::t_44aa189d3d8f58 13,24-25,27
+internal/router/policy/sidecar_router.go
+  s_181299bbd674e9::t_72c49d02f82ba1 1-162
+internal/router/policy/resolver.go
+  s_181299bbd674e9::t_72c49d02f82ba1 55-56,79-85,173-177,194-206,238-244
+  s_181299bbd674e9::t_f39b5864f56095 69-76
+  s_181299bbd674e9::t_9270d0b3f1c091 77-78,245-246
+internal/router/hmm/hmm_test.go
+  s_181299bbd674e9::t_df0b8fdbf3fb7d 34,62,80,90-101
+internal/router/policy/contract.go
+  s_181299bbd674e9::t_72c49d02f82ba1 65
+internal/router/policy/resolver_test.go
+  s_181299bbd674e9::t_938ed13a10e3e3 91-108
+internal/router/policy/sidecar_router_test.go
+  s_181299bbd674e9::t_938ed13a10e3e3 1-97
+internal/router/hmm/hmm.go
+  s_181299bbd674e9::t_70cafa7dd0ea78 26-27,31,33-38
+internal/policyclient/client_test.go
+  s_181299bbd674e9::t_938ed13a10e3e3 29-30,102-103
+internal/router/AGENTS.md
+  s_181299bbd674e9::t_44aa189d3d8f58 13,24-25,27
+internal/policyclient/client.go
+  s_181299bbd674e9::t_70cafa7dd0ea78 180-181,285-288,294-295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3c68ba60f0bb32689a233886e46ceb1d1dd874b",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

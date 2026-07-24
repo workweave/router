@@ -1,0 +1,31 @@
+internal/router/cluster/artifacts/v0.75/aa_runtime_priors.json
+  s_6b24562fe92814::t_66054b151017b5 1-1538
+internal/router/cluster/artifacts/v0.75/metadata.yaml
+  s_6b24562fe92814::t_66054b151017b5 1-161
+internal/router/cluster/artifacts/v0.75/model_registry.json
+  s_6b24562fe92814::t_66054b151017b5 1-198
+internal/router/cluster/artifacts/v0.75/model_axes.json
+  s_6b24562fe92814::t_affdf838f654e7 1-206
+internal/router/cluster/artifacts/v0.75/model_features.json
+  s_6b24562fe92814::t_0f7d3147d54a0b 1-497
+internal/router/cluster/artifacts/v0.75/quality_means.json
+  s_6b24562fe92814::t_258514d227ec0f 1-398
+internal/router/cluster/artifacts/v0.75/rankings.json
+  s_6b24562fe92814::t_5fbaf54014e511 1-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1a03b4cf3704fccfc9609fe6c97b6ed7d42091fe",
+  "prompts": {},
+  "sessions": {
+    "s_6b24562fe92814": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "00e5bd50-9aaf-4c4a-8cd5-f50a7ce7bcc8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

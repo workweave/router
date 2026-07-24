@@ -1,0 +1,47 @@
+internal/auth/user_test.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 69,83,97,113,125,135,141-176,182,190,209,214
+db/migrations/0007_user_display_name.up.sql
+  s_8dc5fd3493d72f::t_a98db8255d7d44 1-13
+internal/auth/user.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 23,35,42
+internal/sqlc/models.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 110-111
+install/install.sh
+  s_8dc5fd3493d72f::t_a98db8255d7d44 210-333,580-598,977-989,996,1022
+internal/postgres/user_repo.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 32,53,106-109,123-131
+db/queries/model_router_users.sql
+  s_8dc5fd3493d72f::t_a98db8255d7d44 2-6,11-12,17-18,22-23,37-38,43-44,48-50
+internal/api/gemini/generate_content.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 145-149
+internal/api/anthropic/messages.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 130,132-138,149,151
+internal/sqlc/model_router_users.sql.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 16,24,39,45,54,76,92-93,98-99,103-106,112,126-127,132-133,137-140,142,152,161-162,167-168,172-174,181,185-189,194-195,200-201,205-207,209-214,224
+internal/proxy/client_identity_test.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 87-113
+db/migrations/0007_user_display_name.down.sql
+  s_8dc5fd3493d72f::t_a98db8255d7d44 1-6
+internal/proxy/client_identity.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 13-14,16-22,60,62,123-152
+internal/auth/service.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 287-288,290,307-312,324,330
+internal/api/openai/completions.go
+  s_8dc5fd3493d72f::t_a98db8255d7d44 87-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "15140d5c13525288cbd522753112dc2e273d1c8a",
+  "prompts": {},
+  "sessions": {
+    "s_8dc5fd3493d72f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "135cd53f-67ae-43c4-9b15-837e062c1ab7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

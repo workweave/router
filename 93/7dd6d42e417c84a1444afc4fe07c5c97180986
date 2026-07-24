@@ -1,0 +1,31 @@
+internal/providers/anthropic/sse_prelude.go
+  s_2ebea8dd6d71f8::t_6eb004184adeff 10,27,31
+  s_2ebea8dd6d71f8::t_946c95baee1beb 18-19,86
+  s_2ebea8dd6d71f8::t_50dba67f0fa74e 20-23,47-48,56
+  s_2ebea8dd6d71f8::t_0242ba00ac8ee0 1-9,11-17,24-26,28-30,32-46,49-55,57-85,87-100
+internal/providers/anthropic/client_test.go
+  s_2ebea8dd6d71f8::t_54b18ed1774dae 325-346
+internal/proxy/failover_integration_test.go
+  s_2ebea8dd6d71f8::t_5cce7e5bae058e 14,285-369
+  s_2ebea8dd6d71f8::t_e0897ada4ac69b 370
+internal/providers/anthropic/client.go
+  s_2ebea8dd6d71f8::t_dc78f59aeb1f0c 7,216-235,259
+internal/providers/anthropic/sse_prelude_test.go
+  s_2ebea8dd6d71f8::t_d751b4a56145e9 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "937dd6d42e417c84a1444afc4fe07c5c97180986",
+  "prompts": {},
+  "sessions": {
+    "s_2ebea8dd6d71f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f7d33-c2a0-7873-a850-1658c84a2758",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

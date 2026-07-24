@@ -1,0 +1,19 @@
+CONTRIBUTING.md
+  s_2ca6ef11e05ca0::t_58fb64d41407e3 176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4b26123ab3b756ad47a51848e8dc094b397e5d62",
+  "prompts": {},
+  "sessions": {
+    "s_2ca6ef11e05ca0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8290169-6c43-403c-9796-2c0aa557aec5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

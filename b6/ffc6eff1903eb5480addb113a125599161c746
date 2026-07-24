@@ -1,0 +1,21 @@
+internal/router/policy/sidecar_router.go
+  s_181299bbd674e9::t_74a1ff40412f79 32-33,55-56,82-84
+internal/router/policy/sidecar_router_test.go
+  s_181299bbd674e9::t_74a1ff40412f79 122-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b6ffc6eff1903eb5480addb113a125599161c746",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

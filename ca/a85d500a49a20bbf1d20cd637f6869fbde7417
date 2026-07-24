@@ -1,0 +1,30 @@
+internal/server/server.go
+  s_d7c5c5bbb49c18::t_f096f3138110e4 66
+  s_d7c5c5bbb49c18::t_bbe27d8ad0c89e 18
+  s_d7c5c5bbb49c18::t_58cbc83b308186 36-42
+internal/api/admin/catalog.go
+  s_d7c5c5bbb49c18::t_4022949631e8c5 22-23
+  s_d7c5c5bbb49c18::t_82b7603c3cb671 30-31
+cmd/router/hmm_roster_source.go
+  s_d7c5c5bbb49c18::t_2e9aa19121943e 46-48
+  s_d7c5c5bbb49c18::t_3bfb24c0e1a21c 49-50,58-62,70-76
+  s_d7c5c5bbb49c18::t_133db6254cadb8 38-41
+internal/policyclient/client.go
+  s_d7c5c5bbb49c18::t_6bae380d0afdeb 117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "caa85d500a49a20bbf1d20cd637f6869fbde7417",
+  "prompts": {},
+  "sessions": {
+    "s_d7c5c5bbb49c18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15055bfd-f65a-4383-bf0e-cde54b4807c5",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

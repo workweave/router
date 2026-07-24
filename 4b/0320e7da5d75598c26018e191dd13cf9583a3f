@@ -1,0 +1,39 @@
+internal/proxy/subsidy_test.go
+  s_0c531687887366::t_b9e928bdd794a1 77
+internal/proxy/usage/CLAUDE.md
+  s_0c531687887366::t_da209ca3a2ed5b 20
+internal/providers/openai/client.go
+  s_0c531687887366::t_f9eccc682f2941 247
+internal/providers/provider.go
+  s_0c531687887366::t_57a8cf5be4a002 17-27
+  s_0c531687887366::t_998ab1f756ca7f 39-42,44
+internal/proxy/usage/usage.go
+  s_0c531687887366::t_f45bc36c6ee751 219-269
+internal/providers/anthropic/client.go
+  s_0c531687887366::t_1213cdb0efa5d7 141
+internal/proxy/subscription_exhaustion_429_internal_test.go
+  s_0c531687887366::t_fa3475c4b125e5 1-95
+internal/proxy/usage/AGENTS.md
+  s_0c531687887366::t_e0e39f7a10b6b7 20
+internal/proxy/subsidy.go
+  s_0c531687887366::t_8096ad710ce0b0 88,102-103,108-120,122
+internal/proxy/usage/exhaustion_test.go
+  s_0c531687887366::t_ee945366c9b0db 17
+  s_0c531687887366::t_dc57302171a5ed 1-16,18-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "4b0320e7da5d75598c26018e191dd13cf9583a3f",
+  "prompts": {},
+  "sessions": {
+    "s_0c531687887366": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91b9ff4d-fa5b-44dd-a5d4-c5ce8476493c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

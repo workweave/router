@@ -1,0 +1,19 @@
+internal/proxy/baseline_failover_integration_test.go
+  s_c21bfd5b246b3b::t_82dbfe5eb052a0 125-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "06f11c466207c40914902d500523ba43ce4aa35a",
+  "prompts": {},
+  "sessions": {
+    "s_c21bfd5b246b3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6831-3013-73c2-b856-83cda62dd4b8",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

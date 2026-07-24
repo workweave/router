@@ -1,0 +1,26 @@
+internal/proxy/router_feedback.go
+  s_822a04e3969173::t_8d40dfe8f8cd8e 47
+internal/translate/router_feedback_test.go
+  s_822a04e3969173::t_207695e980a9af 179-181,184-202
+internal/translate/router_feedback.go
+  s_822a04e3969173::t_fed82f9092c6a7 135-137,139-141
+  s_822a04e3969173::t_10f2deffbf96c2 15
+  s_822a04e3969173::t_8e4df561039fb1 276-279
+  s_822a04e3969173::t_52f852c3610832 263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5367619629012265453a97e6af92908f55c0ffe2",
+  "prompts": {},
+  "sessions": {
+    "s_822a04e3969173": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8af687f-7198-40ff-8f1e-d272ebf132eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
