@@ -86,6 +86,8 @@ const claudeCodeMixedToolBody = `{
 		{"name":"ScheduleWakeup","description":"loop wake","input_schema":{"type":"object"}},
 		{"name":"CronCreate","description":"cron","input_schema":{"type":"object"}},
 		{"name":"Monitor","description":"watch","input_schema":{"type":"object"}},
+		{"name":"BashOutput","description":"bg out","input_schema":{"type":"object"}},
+		{"name":"KillShell","description":"bg kill","input_schema":{"type":"object"}},
 		{"name":"Task","description":"sub-agent dispatch","input_schema":{"type":"object"}},
 		{"name":"Agent","description":"sub-agent dispatch","input_schema":{"type":"object"}},
 		{"name":"TaskCreate","description":"","input_schema":{"type":"object"}},
@@ -93,6 +95,7 @@ const claudeCodeMixedToolBody = `{
 		{"name":"TaskList","description":"","input_schema":{"type":"object"}},
 		{"name":"EnterPlanMode","description":"","input_schema":{"type":"object"}},
 		{"name":"ExitPlanMode","description":"","input_schema":{"type":"object"}},
+		{"name":"UpdatePlan","description":"","input_schema":{"type":"object"}},
 		{"name":"Skill","description":"","input_schema":{"type":"object"}},
 		{"name":"Workflow","description":"","input_schema":{"type":"object"}},
 		{"name":"AskUserQuestion","description":"","input_schema":{"type":"object"}},
@@ -103,10 +106,10 @@ const claudeCodeMixedToolBody = `{
 }`
 
 // keptOnNonAnthropicDefault are tools that survive Anthropic→non-Anthropic emit
-// when KeepCrossVendorOrchestrationTools is off: coding + scheduling.
+// when KeepCrossVendorOrchestrationTools is off: coding + scheduling + shell session.
 var keptOnNonAnthropicDefault = []string{
 	"Read", "Edit", "Write", "Bash", "NotebookEdit",
-	"ScheduleWakeup", "CronCreate", "Monitor",
+	"ScheduleWakeup", "CronCreate", "Monitor", "BashOutput", "KillShell",
 }
 
 func TestStripCCTools_AnthropicSourceOpenAITarget_DropsCCOnlyKeepsReal(t *testing.T) {
@@ -183,9 +186,9 @@ func TestKeepOrchestrationTools_OpenAITarget_KeepsOrchestrationDropsRest(t *test
 	names := emittedToolNames(t, out.Body)
 	assert.ElementsMatch(t, []string{
 		"Read", "Edit", "Write", "Bash", "NotebookEdit",
-		"ScheduleWakeup", "CronCreate", "Monitor",
+		"ScheduleWakeup", "CronCreate", "Monitor", "BashOutput", "KillShell",
 		"Task", "Agent", "TaskCreate", "TaskUpdate", "TaskList",
-		"EnterPlanMode", "ExitPlanMode", "Skill", "Workflow",
+		"EnterPlanMode", "ExitPlanMode", "UpdatePlan", "Skill", "Workflow",
 	}, names, "orchestration + scheduling tools survive when the flag is on")
 	assert.NotContains(t, names, "AskUserQuestion", "non-orchestration CC-only tools stay stripped")
 	assert.NotContains(t, names, "ToolSearch")
@@ -234,9 +237,9 @@ func TestKeepOrchestrationTools_GeminiTarget_KeepsOrchestrationDropsRest(t *test
 	names := emittedGeminiToolNames(t, out.Body)
 	assert.ElementsMatch(t, []string{
 		"Read", "Edit", "Write", "Bash", "NotebookEdit",
-		"ScheduleWakeup", "CronCreate", "Monitor",
+		"ScheduleWakeup", "CronCreate", "Monitor", "BashOutput", "KillShell",
 		"Task", "Agent", "TaskCreate", "TaskUpdate", "TaskList",
-		"EnterPlanMode", "ExitPlanMode", "Skill", "Workflow",
+		"EnterPlanMode", "ExitPlanMode", "UpdatePlan", "Skill", "Workflow",
 	}, names, "Anthropic→Gemini keeps orchestration + scheduling tools when the flag is on")
 	assert.NotContains(t, names, "AskUserQuestion")
 	assert.NotContains(t, names, "ToolSearch")

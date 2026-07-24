@@ -22,9 +22,10 @@ import (
 // preserves them.
 //
 // Scheduling / wake-up tools (ScheduleWakeup, CronCreate/Delete/List, Monitor)
-// are client-executed like Read/Bash; stripping them while leaving ScheduleWakeup
-// broke fixed-interval /loop on non-Anthropic routes. NotebookEdit is a coding
-// tool (same family as Edit), not a CC-internal control-plane tool.
+// and shell-session tools (BashOutput, KillShell) are client-executed like
+// Read/Bash; stripping them broke /loop and background-shell control on
+// non-Anthropic routes. NotebookEdit is a coding tool (same family as Edit),
+// not a CC-internal control-plane tool.
 var claudeCodeOnlyToolNames = map[string]struct{}{
 	// Subagent dispatch. Task = pre-2.1 name; Agent = current CC name.
 	"Task":       {},
@@ -45,10 +46,8 @@ var claudeCodeOnlyToolNames = map[string]struct{}{
 	// Tool registry / deferred-loading discovery (Anthropic-native protocol;
 	// non-Anthropic emit drops defer_loading anyway, so ToolSearch is noise).
 	"ToolSearch": {},
-	// Todo / shell-session bookkeeping that non-Anthropic models invent.
-	"TodoWrite":  {},
-	"BashOutput": {},
-	"KillShell":  {},
+	// Todo bookkeeping that non-Anthropic models invent.
+	"TodoWrite": {},
 	// Notifications / remote triggers / worktrees / LSP.
 	"PushNotification": {},
 	"RemoteTrigger":    {},
@@ -88,6 +87,7 @@ var claudeCodeOrchestrationToolNames = map[string]struct{}{
 	"Skill":         {},
 	"EnterPlanMode": {},
 	"ExitPlanMode":  {},
+	"UpdatePlan":    {},
 }
 
 // isCrossVendorOrchestrationTool reports whether name is a Claude Code
