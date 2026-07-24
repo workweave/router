@@ -208,7 +208,19 @@ func makeNullable(node map[string]any) map[string]any {
 	}
 	// No type and no anyOf: give the synthetic branch an explicit value-type union
 	// so OpenAI strict mode accepts it; preserve any inline constraints on the original node.
-	branch := map[string]any{"type": []any{"string", "number", "boolean", "object", "array", "null"}}
+	//
+	// OpenAI strict mode requires, on every node whose type can be "object": additionalProperties:false
+	// + empty properties/required (400: "'additionalProperties' is required to be supplied and to be false").
+	// On every node whose type can be "array": an "items" sub-schema (400: "array schema missing items").
+	// items bottoms out at primitives — this branch means "no type info at all", so a shallow
+	// terminating schema is deliberate.
+	branch := map[string]any{
+		"type":                 []any{"string", "number", "boolean", "object", "array", "null"},
+		"additionalProperties": false,
+		"properties":           map[string]any{},
+		"required":             []any{},
+		"items":                map[string]any{"type": []any{"string", "number", "boolean", "null"}},
+	}
 	for k, v := range node {
 		branch[k] = v
 	}
