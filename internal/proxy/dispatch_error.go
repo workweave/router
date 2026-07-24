@@ -226,10 +226,9 @@ func ClassifyDispatchError(err error) (DispatchErrorClass, bool) {
 	}
 }
 
-// unwrapToSentinelMessage walks err's wrap chain and returns the message of
-// the wrapper whose direct child is one of the two cache_control sentinels —
-// strips outer prefixes like "emit body: " while keeping the sentinel's own
-// dynamic detail. Falls back to err.Error() if no such layer is found.
+// unwrapToSentinelMessage returns the message of the wrap layer whose direct
+// child is one of the cache_control sentinels, stripping outer prefixes like
+// "emit body: ". Falls back to err.Error().
 func unwrapToSentinelMessage(err error) string {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if child := errors.Unwrap(e); child == translate.ErrAnthropicCacheControlOverflow || child == translate.ErrAnthropicCacheControlInvalid {
