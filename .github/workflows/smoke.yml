@@ -134,7 +134,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- smoke/mitmproxy/cassettes/; then
+          # git diff alone misses brand-new cassette files (a new scenario, or
+          # the very first recording) since they're untracked, not modified —
+          # git status --porcelain catches both. run.sh's own end-of-run check
+          # already uses this combined form; this step must match it.
+          if git diff --quiet -- smoke/mitmproxy/cassettes/ && \
+             [ -z "$(git status --porcelain -- smoke/mitmproxy/cassettes/)" ]; then
             echo "No drift — cassettes unchanged."
             exit 0
           fi

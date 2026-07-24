@@ -37,7 +37,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-OVERRIDE_FILE="$REPO_ROOT/docker-compose.override.yml"
+# A dedicated, uniquely-named override — never the well-known
+# docker-compose.override.yml path, which is Compose's own auto-load
+# convention and is also the file .claude/skills/test-claude-locally has a
+# developer hand-edit for local debugging. Clobbering (and then deleting) that
+# shared path would silently destroy an unrelated local setup with no backup.
+# Passed via explicit -f below, so a different filename works identically.
+OVERRIDE_FILE="$REPO_ROOT/docker-compose.smoke-run.override.yml"
 BASE_URL="${SMOKE_BASE_URL:-http://localhost:8080}"
 PROXY_MODE="${SMOKE_PROXY_MODE:-replay-only}"
 # docker compose only auto-loads docker-compose.override.yml when no -f flags
@@ -45,7 +51,7 @@ PROXY_MODE="${SMOKE_PROXY_MODE:-replay-only}"
 # it must be listed explicitly too, or the pubsub-port-drop below silently
 # never applies and `up` fails on the 8085 conflict with the monorepo's own
 # emulator (see .claude/skills/test-claude-locally).
-COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.override.yml -f smoke/mitmproxy/docker-compose.yml)
+COMPOSE_FILES=(-f docker-compose.yml -f "$OVERRIDE_FILE" -f smoke/mitmproxy/docker-compose.yml)
 if [[ "${SMOKE_CI_CACHE:-0}" == "1" ]]; then
   COMPOSE_FILES+=(-f smoke/mitmproxy/docker-compose.ci-cache.yml)
 fi
@@ -91,17 +97,21 @@ cleanup() {
     err "smoke run failed (exit $code); dumping server + mitmproxy logs:"
     $COMPOSE logs server mitmproxy --since=10m 2>&1 | sed -E 's/\x1b\[[0-9;]*m//g' | tail -150 || true
   fi
-  rm -f "$OVERRIDE_FILE"
+  # $COMPOSE still references $OVERRIDE_FILE via -f, so it must be torn down
+  # (or the user told how to) BEFORE the file is deleted — `docker compose
+  # down` against a missing -f file errors, and that error used to be
+  # swallowed by `|| true` here, silently leaving the stack running.
   if [[ "${SMOKE_KEEP_STACK:-0}" == "1" ]]; then
     log "SMOKE_KEEP_STACK=1 — leaving the stack up. Tear down with: $COMPOSE down -v"
   else
     $COMPOSE down -v >/dev/null 2>&1 || true
+    rm -f "$OVERRIDE_FILE"
   fi
   exit $code
 }
 trap cleanup EXIT
 
-log "writing ephemeral docker-compose.override.yml"
+log "writing $(basename "$OVERRIDE_FILE")"
 cat > "$OVERRIDE_FILE" <<EOF
 services:
   pubsub-emulator:

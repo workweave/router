@@ -1,19 +1,11 @@
 //go:build smoke
 
-// Package smoke holds the router's pre-merge smoke suite: it drives a live
-// router (docker compose stack) with deterministic, Claude-Code-shaped request
-// fixtures against the REAL Anthropic API and asserts observable outcomes —
-// HTTP status, response/usage shape, cache-token accounting, and the
-// x-router-* decision headers.
+// Package smoke holds the router's pre-merge smoke suite: boots a live docker
+// compose stack and drives real Anthropic/OpenAI APIs, asserting HTTP status,
+// response/usage shape, cache-token accounting, and x-router-* decision headers.
 //
-// This package is guarded by the `smoke` build tag so `go test ./...` never
-// compiles or runs it. Invoke it via `scripts/smoke/run.sh` (or `make smoke`),
-// which boots the stack, seeds a router key, and runs:
-//
-//	go test -tags smoke -count=1 -v ./smoke/
-//
-// The suite hits paid upstream APIs. Every scenario pins the cheapest model
-// (claude-haiku-4-5) and caps max_tokens, so a full run costs a few cents.
+// Guarded by the `smoke` build tag; run via `make smoke`. Pins claude-haiku-4-5
+// and caps max_tokens — a full run costs a few cents.
 package smoke
 
 import (

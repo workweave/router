@@ -45,10 +45,8 @@ func TestCaching(t *testing.T) {
 		requireOKMessage(t, r)
 	})
 
-	// Client pins a ttl=1h breakpoint on the final message block and nothing
-	// else. The router must not inject an earlier implicit-5m breakpoint that
-	// would order 5m-before-1h and trip Anthropic's TTL rule. Assert 200 and
-	// that caching still engages.
+	// Client pins ttl=1h on the final message block. The router must not inject
+	// an earlier 5m breakpoint that would violate Anthropic's TTL-ordering rule.
 	t.Run("ttl=1h message breakpoint is not poisoned", func(t *testing.T) {
 		uid := "smoke-cache-ttl-order"
 		warm := call(t, newRequest(uid).tokens(32).msgCache("1h").text("Say: alpha").build(t))

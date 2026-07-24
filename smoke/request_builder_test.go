@@ -88,15 +88,9 @@ func (b *requestBuilder) build(t *testing.T) []byte {
 }
 
 // buildTools returns a realistic Claude Code tool registry plus any extra
-// cache-breakpoint-carrying tools and any withTool() additions. toolTTL, when
-// set, tags the last of the three built-in tools (Edit) — a separate tool from
-// the ones cachedTools() adds — so the two knobs are additive: cachedTools(N)
-// contributes N breakpoints and toolCache contributes one more, independent of
-// N. (A prior version applied toolTTL to tools[len(tools)-1] AFTER appending
-// the extra tools, so it re-tagged an already-breakpointed extra tool instead
-// of adding a new one — cachedTools(2).toolCache("5m") silently produced 2
-// tool breakpoints, not 3, undercounting exactly the tools[] capacity the
-// #820 regression hinged on.)
+// cache-breakpoint-carrying tools and withTool() additions. toolTTL tags the
+// last built-in tool (Edit) BEFORE the extra tools are appended, so toolCache
+// and cachedTools are additive and each contribute an independent breakpoint.
 func (b *requestBuilder) buildTools() []any {
 	tools := []any{
 		tool("Bash", "Run a shell command", map[string]any{

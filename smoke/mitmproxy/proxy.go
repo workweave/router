@@ -62,10 +62,8 @@ func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One request per CONNECT tunnel: the router's transport opens a fresh
-	// connection per attempt rather than pipelining, and the smoke suite makes
-	// small sequential calls — a single-request loop keeps this simple and
-	// correct for that traffic shape.
+	// One request per CONNECT tunnel — the router doesn't pipeline, and
+	// sequential smoke calls keep the implementation simple and correct.
 	if err := p.serveOne(tlsConn, host); err != nil && !errors.Is(err, io.EOF) {
 		log.Printf("mitmproxy: serve %s: %v", host, err)
 	}
@@ -89,10 +87,8 @@ func (p *proxy) serveOne(conn net.Conn, host string) error {
 
 	c, err := p.resolve(host, req, body, key)
 	if err != nil {
-		// Synthesize a real HTTP response rather than dropping the connection:
-		// the router's client sees a clean 502 with a diagnosable body instead
-		// of a raw connection reset, so a cache-miss failure shows up in the
-		// smoke suite's own assertions instead of as a confusing transport error.
+		// Synthesize a clean 502 so a cache-miss appears as an assertion failure
+		// in the smoke suite rather than a confusing transport error.
 		writeErr := writeCassetteResponse(conn, &cassette{
 			StatusCode: http.StatusBadGateway,
 			Headers:    map[string]string{"Content-Type": "text/plain"},

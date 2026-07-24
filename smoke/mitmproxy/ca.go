@@ -17,11 +17,8 @@ import (
 	"time"
 )
 
-// caCertFilename is the name the public CA cert is written under in certDir.
-// The server container's SSL_CERT_DIR must point at that directory so Go's
-// crypto/x509 picks it up (Go trusts every *.pem/*.crt file in SSL_CERT_DIR
-// alongside the system roots — no update-ca-certificates step needed in a
-// distroless image).
+// caCertFilename is written to certDir; the server container's SSL_CERT_DIR
+// points there so crypto/x509 picks it up without update-ca-certificates.
 const caCertFilename = "smoke-mitm-ca.pem"
 
 // ca mints TLS leaf certificates on demand for whatever host the client is
