@@ -19,12 +19,8 @@ type cassette struct {
 	Path       string            `json:"path"`
 	StatusCode int               `json:"status_code"`
 	Headers    map[string]string `json:"headers"`
-	// Body holds the raw response bytes (for streamed SSE responses, the full
-	// concatenated event stream — byte-for-byte, preserving chunk boundaries
-	// as written, so replay reproduces the same event framing). Recorded
-	// bodies are always UTF-8 text (JSON or text/event-stream) — stored as a
-	// plain JSON string, not []byte's default base64, so cassettes stay
-	// human-diffable and secret-scannable in review.
+	// Body holds the raw response bytes. Stored as a plain JSON string (not
+	// []byte's base64 default) so cassettes stay human-diffable and secret-scannable.
 	Body rawTextBody `json:"body"`
 }
 

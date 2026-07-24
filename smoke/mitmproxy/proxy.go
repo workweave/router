@@ -15,11 +15,8 @@ import (
 	"strings"
 )
 
-// proxy is the forward-proxy handler. It only understands CONNECT (the shape
-// Go's HTTP transport always uses for an HTTPS target through an HTTP proxy)
-// followed by one TLS-terminated request/response — exactly what a single
-// router→Anthropic call looks like. No general-purpose proxy features
-// (WebSocket upgrade, HTTP/1.0, pipelining) are needed for this suite's traffic.
+// proxy is the forward-proxy handler. It handles only CONNECT (the shape
+// Go's HTTP transport uses for HTTPS through a proxy), one request per tunnel.
 type proxy struct {
 	cfg   config
 	ca    *ca

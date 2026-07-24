@@ -4,10 +4,8 @@ package smoke
 
 import "testing"
 
-// TestOpenAIResponsesAPI exercises the OpenAI Responses-API path when a tool carries a
-// typeless optional param (no "type"/"anyOf"/"enum"). makeNullable's fallback previously
-// wrapped such nodes in anyOf without checking schemaHasStrictType, so OpenAI strict mode
-// 400'd (#829). End-to-end companion to the strictify_openai_test.go unit coverage.
+// TestOpenAIResponsesAPI exercises the OpenAI Responses-API path, including a tool
+// with a typeless optional param — end-to-end companion to strictify_openai_test.go.
 func TestOpenAIResponsesAPI(t *testing.T) {
 	if !cfg.OpenAIEnabled {
 		t.Skip("SMOKE_OPENAI_ENABLED=0 (no OPENAI_API_KEY for this recording run)")

@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// TestStreaming targets the streaming lifecycle, a repeat regression offender
-// (#765 streaming/retry hardening, #701 Fable during slow thinking). It drives
-// a tool-use-inducing turn so the stream carries multiple content blocks, then
-// asserts the SSE event sequence is well-formed end to end.
+// TestStreaming asserts the SSE lifecycle on a multi-block tool-use turn:
+// balanced content_block_start/stop pairs and a single terminal message_stop.
 func TestStreaming(t *testing.T) {
 	body := newRequest("smoke-stream-lifecycle").tokens(256).streaming().
 		text("Use the Bash tool to list files in the current directory. Call the tool; do not answer in prose.").
@@ -29,11 +27,9 @@ func TestStreaming(t *testing.T) {
 	}
 }
 
-// assertStreamWellFormed checks Anthropic SSE invariants: the stream opens with
-// message_start and closes with exactly one message_stop, every
-// content_block_start has a matching content_block_stop, and a message_delta
-// precedes the terminal stop. A truncated or malformed stream (the #765 class)
-// trips one of these.
+// assertStreamWellFormed checks Anthropic SSE invariants: message_start first,
+// exactly one message_stop last, balanced content_block_start/stop pairs, and at
+// least one message_delta. A truncated or re-ordered stream trips one of these.
 func assertStreamWellFormed(t *testing.T, r response) {
 	t.Helper()
 	ev := r.streamEvents
