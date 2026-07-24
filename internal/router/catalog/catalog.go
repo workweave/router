@@ -201,16 +201,11 @@ var Models = []Model{
 	{ID: "claude-opus-4-7", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
-	// Opus 4.8 is retired as a routing target (superseded by Opus 5, same
-	// $5/$25 price) but kept as a priced passthrough entry — like the legacy
-	// opus-4-0/4-1/4-5 rows — so lingering BYOK/direct pins bill at real cost
-	// instead of catalog.PrimaryPriceFor silently returning $0.
+	// Opus 4.8 retired from routing; kept as priced passthrough so lingering BYOK/direct pins bill at real cost.
 	{ID: "claude-opus-4-8", ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
-	// Opus 5 ships 1M context natively (no context-1m beta header needed),
-	// like Fable 5 and unlike Opus 4.6–4.8. Same $5/$25 as Opus 4.8, which it
-	// replaces in the routing roster.
+	// 1M context natively (no context-1m beta header), same $5/$25 as opus-4-8.
 	{ID: "claude-opus-5", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
