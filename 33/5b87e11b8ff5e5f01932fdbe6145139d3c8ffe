@@ -1,0 +1,21 @@
+smoke/request_builder_test.go
+  s_4e0c6c8f023723::t_9c3044463c17b2 10-12
+smoke/mitmproxy/main.go
+  s_4e0c6c8f023723::t_e9d9d3a3d96a00 2-3,5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "335b87e11b8ff5e5f01932fdbe6145139d3c8ffe",
+  "prompts": {},
+  "sessions": {
+    "s_4e0c6c8f023723": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4018d120-f74f-40d5-83ed-814edec85067",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
