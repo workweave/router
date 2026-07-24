@@ -56,9 +56,8 @@ WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
 
--- Replaces the per-installation model priority ranking, scoped to an
--- external_id to prevent cross-tenant updates. Empty array means no preference.
--- Bumps updated_at so dashboards see the change.
+-- Replaces model priority ranking, scoped by external_id to prevent
+-- cross-tenant writes.
 -- name: UpdateModelRouterInstallationPreferredModels :execrows
 UPDATE router.model_router_installations
 SET preferred_models = @preferred_models::text[],

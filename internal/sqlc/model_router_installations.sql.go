@@ -285,9 +285,8 @@ type UpdateModelRouterInstallationPreferredModelsParams struct {
 	ExternalID      string
 }
 
-// Replaces the per-installation model priority ranking, scoped to an
-// external_id to prevent cross-tenant updates. Empty array means no preference.
-// Bumps updated_at so dashboards see the change.
+// Replaces model priority ranking, scoped by external_id to prevent
+// cross-tenant writes.
 //
 //	UPDATE router.model_router_installations
 //	SET preferred_models = $1::text[],
