@@ -22,12 +22,9 @@ import (
 // preserves them.
 //
 // Scheduling / wake-up tools (ScheduleWakeup, CronCreate/Delete/List, Monitor)
-// are intentionally NOT in this set: they are client-executed the same way as
-// Read/Bash, and when the schema is present non-Anthropic models call them
-// correctly (observed in prod CC transcripts). Stripping Cron*/Monitor while
-// leaving ScheduleWakeup broke fixed-interval /loop on non-Anthropic routes.
-// NotebookEdit is also omitted — it is a real coding tool (same family as
-// Edit), not a CC-internal control-plane tool.
+// are client-executed like Read/Bash; stripping them while leaving ScheduleWakeup
+// broke fixed-interval /loop on non-Anthropic routes. NotebookEdit is a coding
+// tool (same family as Edit), not a CC-internal control-plane tool.
 var claudeCodeOnlyToolNames = map[string]struct{}{
 	// Subagent dispatch. Task = pre-2.1 name; Agent = current CC name.
 	"Task":       {},
