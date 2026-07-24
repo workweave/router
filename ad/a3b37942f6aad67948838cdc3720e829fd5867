@@ -1,0 +1,24 @@
+internal/router/policy/cluster_override.go
+  s_93097ba71072dc::t_6c1ec6bdfbf5a4 8-10,14-15
+internal/server/server.go
+  s_93097ba71072dc::t_3e2a0cbaf200bd 115-116
+  s_93097ba71072dc::t_20ab455e7c91b8 72-73
+internal/router/policy/sidecar_router.go
+  s_93097ba71072dc::t_ce71bc29c1adca 314-316,323-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ada3b37942f6aad67948838cdc3720e829fd5867",
+  "prompts": {},
+  "sessions": {
+    "s_93097ba71072dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "871ffeb7-914c-42f7-a49f-3a50ebb91f39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

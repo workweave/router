@@ -1,0 +1,34 @@
+.claude/skills/debug-claude-session/SKILL.md
+  s_3a18b7288ce1b0::t_c68e14b9cc5ffa 135-138
+internal/translate/translate_test.go
+  s_3a18b7288ce1b0::t_d369db209f3cd6 472-525
+internal/translate/translate.go
+  s_3a18b7288ce1b0::t_f257aa4fa919d4 183-185
+internal/translate/responses_outbound_test.go
+  s_3a18b7288ce1b0::t_53758d4ff4c519 235
+internal/translate/responses_to_anthropic_writer_stream_test.go
+  s_3a18b7288ce1b0::t_c7a81cdfa609d6 143-175
+internal/translate/stream.go
+  s_3a18b7288ce1b0::t_a47b818951514c 730-731
+  s_3a18b7288ce1b0::t_74d50d16a71ed0 1201-1206,1209-1210
+internal/translate/responses_to_anthropic_writer.go
+  s_3a18b7288ce1b0::t_2bf8874b132666 111
+  s_3a18b7288ce1b0::t_823087e3965e7e 32-40
+  s_3a18b7288ce1b0::t_95ea4dd906a2ad 740
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "925bb475a541a1cc1648dd7678ea0912d2a87382",
+  "prompts": {},
+  "sessions": {
+    "s_3a18b7288ce1b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6296a73a-7580-4b86-b18d-1376970515ef",
+        "model": "claude-fable-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

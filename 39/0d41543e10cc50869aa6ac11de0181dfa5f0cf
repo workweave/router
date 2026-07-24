@@ -1,0 +1,21 @@
+internal/translate/router_feedback.go
+  s_b6ea7217b3c1e9::t_157be26b0c4b8b 328-331
+internal/translate/router_feedback_test.go
+  s_b6ea7217b3c1e9::t_b6d36385d01a48 229-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "390d41543e10cc50869aa6ac11de0181dfa5f0cf",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

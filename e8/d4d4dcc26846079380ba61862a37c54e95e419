@@ -1,0 +1,75 @@
+internal/router/planner/CLAUDE.md
+  s_4780c3a1bee72a::t_8ef5300b3fe704 5,18
+internal/proxy/CLAUDE.md
+  s_4780c3a1bee72a::t_ec3999727e17bd 34
+  s_31b38289dc69d0::t_1eedbd5f5a3458 5
+  s_4780c3a1bee72a::t_0947d1abe09663 52,54
+  s_4780c3a1bee72a::t_604030795208ea 38,70
+  s_31b38289dc69d0::t_e9d0e71b9cc57f 16
+  s_4780c3a1bee72a::t_aa7dd5088e632b 24,26,28
+internal/router/AGENTS.md
+  s_4780c3a1bee72a::t_8ef5300b3fe704 5
+CLAUDE.md
+  s_31b38289dc69d0::t_12723fc205ca9a 112
+  s_31b38289dc69d0::t_07cfd6004ac4e1 218
+  s_31b38289dc69d0::t_e4f06833195711 73
+  s_31b38289dc69d0::t_fef67a092e3739 130,138
+AGENTS.md
+  s_31b38289dc69d0::t_05ca59ef330182 73
+  s_31b38289dc69d0::t_b2f43d7a00d6ed 218
+  s_31b38289dc69d0::t_fe44d7214ca2c5 130,138
+  s_31b38289dc69d0::t_954b393e7621e7 112
+.claude/skills/test-claude-locally/SKILL.md
+  s_4780c3a1bee72a::t_8e02f993d6c89e 95
+docs/README.md
+  s_31b38289dc69d0::t_c06f0bb4c04eb1 1-13
+README.md
+  s_31b38289dc69d0::t_f27378da70393a 185-186
+  s_31b38289dc69d0::t_b64090294d8676 43,45-47
+install/opencode-weave/README.md
+  s_4780c3a1bee72a::t_fcd74deb78b3f5 37,39
+  s_4780c3a1bee72a::t_1870e2d0a3ed04 6
+internal/router/CLAUDE.md
+  s_4780c3a1bee72a::t_8ef5300b3fe704 5
+internal/proxy/AGENTS.md
+  s_4780c3a1bee72a::t_0947d1abe09663 52,54
+  s_4780c3a1bee72a::t_604030795208ea 38,70
+  s_4780c3a1bee72a::t_96987af1fa0bc2 5,16,24,26,28,34
+internal/router/handover/AGENTS.md
+  s_4780c3a1bee72a::t_604030795208ea 9,18
+internal/router/turntype/CLAUDE.md
+  s_4780c3a1bee72a::t_256f6645fc1b24 12,19
+internal/router/turntype/AGENTS.md
+  s_4780c3a1bee72a::t_256f6645fc1b24 12,19
+internal/router/handover/CLAUDE.md
+  s_4780c3a1bee72a::t_604030795208ea 9,18
+docs/SEMANTICS.md
+  s_31b38289dc69d0::t_035bd53b3b3354 1-10,22-26,30-31,36,55-56,61-64,67-68,70-78
+  s_4780c3a1bee72a::t_d9f51819784275 11-21,27-29,32-35,37-54,57-60,65-66,69
+internal/router/planner/AGENTS.md
+  s_4780c3a1bee72a::t_8ef5300b3fe704 5,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e8d4d4dcc26846079380ba61862a37c54e95e419",
+  "prompts": {},
+  "sessions": {
+    "s_31b38289dc69d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe2cf715-9b77-4b0a-b9de-cc092e16ac7f",
+        "model": "moonshotai/kimi-k2.7"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_4780c3a1bee72a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a52845b-a9ca-492e-bcb7-fbaff25287ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

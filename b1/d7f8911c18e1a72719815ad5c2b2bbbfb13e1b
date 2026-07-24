@@ -1,0 +1,19 @@
+docs/MHLC_TWO_BAND_ROUTER_PLAN.md
+  s_6b24562fe92814::t_066ae35b55ee10 1-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b1d7f8911c18e1a72719815ad5c2b2bbbfb13e1b",
+  "prompts": {},
+  "sessions": {
+    "s_6b24562fe92814": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "00e5bd50-9aaf-4c4a-8cd5-f50a7ce7bcc8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

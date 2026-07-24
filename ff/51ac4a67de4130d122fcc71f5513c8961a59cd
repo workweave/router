@@ -1,0 +1,21 @@
+internal/translate/strictify_openai_test.go
+  s_92fb1aa226a67b::t_9d38bc220d1e5a 238-259
+internal/translate/strictify_openai.go
+  s_92fb1aa226a67b::t_18f04012a2821c 209-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ff51ac4a67de4130d122fcc71f5513c8961a59cd",
+  "prompts": {},
+  "sessions": {
+    "s_92fb1aa226a67b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ceefcad-c3be-477c-b761-c4f1bd59bdd7",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

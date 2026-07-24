@@ -1,0 +1,80 @@
+internal/providers/httputil/httputil.go
+  s_c4ecee41717be0::t_4202ad43d2f49e 290-308,314-319,325,331-334
+internal/providers/httputil/httputil_test.go
+  s_c4ecee41717be0::t_d955239b9528c4 67-103
+internal/router/catalog/cost_test.go
+  s_c4ecee41717be0::t_7d5e73b381adcd 1-70
+internal/api/anthropic/messages.go
+  s_c4ecee41717be0::t_ecd8c65148f0c0 97
+internal/api/openai/completions.go
+  s_c4ecee41717be0::t_0d6c4452f4ede4 21,27
+internal/observability/preview.go
+  s_c4ecee41717be0::t_dad51b0b1d119f 1-2,7-21,29-35
+  s_c4ecee41717be0::t_acfe1a343f6728 3-6,22-28
+internal/postgres/telemetry.go
+  s_c4ecee41717be0::t_1d027fa0bff8b4 8,20-21
+  s_c4ecee41717be0::t_879aa4d2d2cd6b 60-63
+internal/proxy/gemini.go
+  s_c4ecee41717be0::t_a6b5acc9e96106 81
+internal/router/catalog/cost.go
+  s_c4ecee41717be0::t_9212d4844c1fc6 3-7
+  s_c4ecee41717be0::t_6ff08434813dc8 35-48
+internal/providers/openai/client_test.go
+  s_c4ecee41717be0::t_3e621630e99740 14
+  s_c4ecee41717be0::t_7ec8245b45dfcf 203-216,221-239
+  s_c4ecee41717be0::t_9fb0f9edc5e7d5 4,8
+  s_c4ecee41717be0::t_e0d3eec75608dc 217-220
+internal/translate/features.go
+  s_c4ecee41717be0::t_9c6554b1e30ea3 7-8
+  s_c4ecee41717be0::t_138bb20dc53e1e 234,239
+internal/api/openai/responses.go
+  s_c4ecee41717be0::t_05b3ea7b12e81a 25,31
+internal/api/gemini/generate_content.go
+  s_c4ecee41717be0::t_67e8f8f0ade664 40,46
+internal/api/anthropic/route.go
+  s_c4ecee41717be0::t_e7b5e179cd35a3 19,25
+internal/translate/toolcheck/toolcheck.go
+  s_c4ecee41717be0::t_b4a83f9bcbd949 356
+internal/api/anthropic/passthrough.go
+  s_c4ecee41717be0::t_3183b6d00f1e71 17,23
+internal/proxy/limits.go
+  s_c4ecee41717be0::t_bdea725fffb4c8 1-6
+internal/translate/message_tail.go
+  s_c4ecee41717be0::t_a28cc01269301f 6-7
+  s_76fd6ae07299cc::t_b34f5f7e59f44a 67,84,88-89,94-95,148,158-159,166,213,215,220-221,227-228,232,235
+internal/providers/openai/client.go
+  s_c4ecee41717be0::t_616e7721803fa6 288-297,299-300,303-311,313-314,316
+internal/observability/preview_test.go
+  s_c4ecee41717be0::t_8c1865e312a8f6 1-55
+scripts/record_provider_fixtures/main.go
+  s_c4ecee41717be0::t_23d4ca3f42a408 32
+  s_c4ecee41717be0::t_290c179b7c5ad6 141
+internal/billing/service.go
+  s_c4ecee41717be0::t_10aa9241ae27a1 228
+internal/proxy/service.go
+  s_c4ecee41717be0::t_d03382bf9b8451 1610,3357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d2882a75735aa80aeb37c4444e9957f7dfd8c787",
+  "prompts": {},
+  "sessions": {
+    "s_76fd6ae07299cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3fb66009734c27e2",
+        "model": "unknown"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

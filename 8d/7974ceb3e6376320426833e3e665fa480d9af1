@@ -1,0 +1,40 @@
+internal/translate/usage_sink.go
+  s_14149f8f972376::t_8606fbcdaa4784 12
+internal/observability/otel/usage.go
+  s_14149f8f972376::t_8606fbcdaa4784 94,106,112-114
+  s_14149f8f972376::t_39e7d6d617fb99 115-116
+internal/translate/usage_values.go
+  s_14149f8f972376::t_8606fbcdaa4784 1-62
+internal/translate/responses_to_anthropic_writer.go
+  s_14149f8f972376::t_f34e617d79e818 579,694-698
+internal/translate/cache_usage_test.go
+  s_14149f8f972376::t_85078bed4e2a67 37-42
+  s_14149f8f972376::t_3bd5467225f54f 45-46
+  s_14149f8f972376::t_9c3c2e6010dffc 43-44
+internal/observability/otel/usage_test.go
+  s_14149f8f972376::t_3bd5467225f54f 61-78
+internal/translate/usage_values_test.go
+  s_14149f8f972376::t_3bd5467225f54f 1-33
+internal/translate/stream.go
+  s_14149f8f972376::t_8606fbcdaa4784 126,229-233,336,805,938
+internal/translate/gemini_stream.go
+  s_14149f8f972376::t_eee4a235afbe70 149,257-264,267-269,321,341,352,354,356,358-363,371,375
+.github/workflows/provider-contract-refresh.yml
+  s_14149f8f972376::t_f34e617d79e818 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8d7974ceb3e6376320426833e3e665fa480d9af1",
+  "prompts": {},
+  "sessions": {
+    "s_14149f8f972376": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6d52-9326-7bc3-af28-c09e8b819a1a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

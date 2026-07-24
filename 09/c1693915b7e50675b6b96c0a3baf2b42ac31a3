@@ -1,0 +1,21 @@
+internal/router/cluster/artifacts/v0.68/metadata.yaml
+  s_c5c3a4e3dd2fe4::t_30f5c510ce0801 2-3
+  s_c5c3a4e3dd2fe4::t_b9ba783b77db5d 62-84
+  s_c5c3a4e3dd2fe4::t_62bcc45f41a812 141-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "09c1693915b7e50675b6b96c0a3baf2b42ac31a3",
+  "prompts": {},
+  "sessions": {
+    "s_c5c3a4e3dd2fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8d2654f-a38b-4c45-aa60-fdc811fcf202",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

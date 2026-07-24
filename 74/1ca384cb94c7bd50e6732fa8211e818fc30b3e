@@ -1,0 +1,19 @@
+internal/proxy/client_identity_test.go
+  s_7ab01a3c53e457::t_971ccae11f6812 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "741ca384cb94c7bd50e6732fa8211e818fc30b3e",
+  "prompts": {},
+  "sessions": {
+    "s_7ab01a3c53e457": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e36ab8f1-621e-44e7-939a-9c06ddbebd93",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

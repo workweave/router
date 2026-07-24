@@ -1,0 +1,24 @@
+internal/proxy/service.go
+  s_c4ecee41717be0::t_a756d23471b4be 37-38
+  s_c4ecee41717be0::t_bca4acf763cc8c 1078-1079
+cmd/router/main.go
+  s_c4ecee41717be0::t_f9aed3c4a5ceef 453-455
+internal/observability/otel/emitter.go
+  s_c4ecee41717be0::t_a0c1a5143bae9b 106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b2b375deeaea56c3d56ce56c46bf1032615e5b7f",
+  "prompts": {},
+  "sessions": {
+    "s_c4ecee41717be0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e09f59e-3a16-4cbd-82c9-3fb8a4551930",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

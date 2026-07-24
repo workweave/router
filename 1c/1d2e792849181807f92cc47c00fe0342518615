@@ -1,0 +1,39 @@
+internal/proxy/service.go
+  s_3f578244e04c71::t_45e0caa3023fca 658-677
+  s_3f578244e04c71::t_3b53ee5e561441 1760-1768
+  s_3f578244e04c71::t_464cc13f6ca5a9 2645-2650
+  s_3f578244e04c71::t_5162e732c36c35 2067-2071
+  s_3f578244e04c71::t_14f12b92b8f524 2679
+internal/proxy/usage_bypass_test.go
+  s_3f578244e04c71::t_100bc99a39ee4a 225-288
+internal/proxy/usage_bypass.go
+  s_3f578244e04c71::t_0a4f1c7fea55ad 90-133
+internal/proxy/usage/usage_test.go
+  s_3f578244e04c71::t_5b7fd894d33ee5 245-274
+internal/proxy/usage/CLAUDE.md
+  s_3f578244e04c71::t_b0903189bec97c 20
+internal/proxy/subscription_exhaustion_internal_test.go
+  s_3f578244e04c71::t_9dce30d31183fb 1-156
+internal/proxy/usage/usage.go
+  s_3f578244e04c71::t_443c64249907ef 70-89
+internal/proxy/usage/AGENTS.md
+  s_3f578244e04c71::t_4c3e4873d4aefa 20
+internal/proxy/service_test.go
+  s_3f578244e04c71::t_bea94bef213223 38-41,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "1c1d2e792849181807f92cc47c00fe0342518615",
+  "prompts": {},
+  "sessions": {
+    "s_3f578244e04c71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2c92ce47-d680-4fc5-b1e5-4593226de67c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

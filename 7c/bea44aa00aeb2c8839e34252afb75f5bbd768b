@@ -1,0 +1,31 @@
+internal/api/admin/routing_preferences_internal_test.go
+  s_7dcc4382d45cab::t_61b635d520a4d2 1-50
+internal/api/admin/routing_preferences.go
+  s_7dcc4382d45cab::t_111df24ddd8890 1-136
+frontend/src/lib/api.ts
+  s_7dcc4382d45cab::t_a174cfabaff87b 137-142
+  s_7dcc4382d45cab::t_d97bf092e66d78 214-226
+internal/server/server.go
+  s_7dcc4382d45cab::t_8900ca5609333d 113-114
+frontend/src/app/(app)/settings/page.tsx
+  s_7dcc4382d45cab::t_d46091834b3b39 975-976,1053,1064-1069,1073,1075-1090,1092,1103-1106,1108-1145,1147-1149,1209,1211-1236
+  s_7dcc4382d45cab::t_2b33b51af39b8f 967-974,977-1052,1054-1063,1070-1072,1074,1091,1093-1102,1107,1146,1150-1208,1210
+  s_7dcc4382d45cab::t_1c2c821dc60e9e 19
+  s_7dcc4382d45cab::t_c3836f062e87d4 96-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "7cbea44aa00aeb2c8839e34252afb75f5bbd768b",
+  "prompts": {},
+  "sessions": {
+    "s_7dcc4382d45cab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "615fab61-4aa0-4803-8606-3af679117a96",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

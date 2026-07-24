@@ -1,0 +1,21 @@
+internal/proxy/dispatch_error_test.go
+  s_4e0c6c8f023723::t_23740d7a740dcb 16,143-171
+internal/proxy/dispatch_error.go
+  s_4e0c6c8f023723::t_23740d7a740dcb 15,46,103-112,229-241,248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "74af4604e920cfeb8f2537706e6bc80d4c3bc813",
+  "prompts": {},
+  "sessions": {
+    "s_4e0c6c8f023723": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4018d120-f74f-40d5-83ed-814edec85067",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

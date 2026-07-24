@@ -1,0 +1,25 @@
+internal/router/policy/contract.go
+  s_93097ba71072dc::t_bf32382757ab6a 144-145
+internal/router/policy/sidecar_router_test.go
+  s_93097ba71072dc::t_300dc5151a37c3 453-455
+internal/api/admin/hmm_roster.go
+  s_93097ba71072dc::t_d5d072404860c6 26-27
+internal/auth/cluster_model_list.go
+  s_93097ba71072dc::t_702356cca135ed 15-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "841729899e4acf79f7b4863ad85a32f2459c1979",
+  "prompts": {},
+  "sessions": {
+    "s_93097ba71072dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "871ffeb7-914c-42f7-a49f-3a50ebb91f39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

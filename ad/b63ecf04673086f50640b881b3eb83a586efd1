@@ -1,0 +1,38 @@
+internal/router/hmm/hmm.go
+  s_181299bbd674e9::t_cb52b6ef2bc5dc 17,22,69,79,99-100,114,120,134-135,142-143,146-147
+internal/router/CLAUDE.md
+  s_181299bbd674e9::t_5f4f71e0ec6128 13
+internal/router/hmm/client_test.go
+  s_181299bbd674e9::t_5f4f71e0ec6128 14,67
+  s_181299bbd674e9::t_c479740bd7d30c 66,68
+internal/router/policy/resolver_test.go
+  s_181299bbd674e9::t_e1e1f81f21c26c 1-97
+internal/router/hmm/hmm_test.go
+  s_181299bbd674e9::t_861e8afd98205f 161-162
+  s_181299bbd674e9::t_484587621c50ce 19,23,92-99,101-138,140-160
+  s_181299bbd674e9::t_5f4f71e0ec6128 40,65,72,84,100,139
+internal/router/AGENTS.md
+  s_181299bbd674e9::t_5f4f71e0ec6128 13
+internal/router/rl/rl.go
+  s_181299bbd674e9::t_d7d2a16b8f6381 26,37,66-67,77-78,87-88,104,111,120-121,125,128-129,132-136
+internal/router/hmm/mapping.go
+  s_181299bbd674e9::t_b9c4d4994f67ce 14
+internal/router/policy/resolver.go
+  s_181299bbd674e9::t_e1e1f81f21c26c 1-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "adb63ecf04673086f50640b881b3eb83a586efd1",
+  "prompts": {},
+  "sessions": {
+    "s_181299bbd674e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4841-18f5-7a31-a231-397b13493d1d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+internal/translate/router_feedback_test.go
+  s_b6ea7217b3c1e9::t_a8abe00016cba3 287
+  s_b6ea7217b3c1e9::t_688abee975368f 20
+  s_b6ea7217b3c1e9::t_1f9956966fe598 222-271
+internal/translate/router_feedback.go
+  s_b6ea7217b3c1e9::t_91de844c999683 324-325
+  s_b6ea7217b3c1e9::t_1016e0c39d89e1 365-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e145ea27a0bc14b65ce759478d9300aa88ca5e80",
+  "prompts": {},
+  "sessions": {
+    "s_b6ea7217b3c1e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96c29440-b9a6-42d4-a46f-e3b78698201e",
+        "model": "minimax/minimax-m3"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

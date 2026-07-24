@@ -1,0 +1,22 @@
+.github/workflows/cluster_routing_ack.yml
+  s_aec95a8ffbca65::t_d40bcd18714eed 30-31
+.github/workflows/publish_cluster_routing.yml
+  s_aec95a8ffbca65::t_7107c3a55d7179 44
+  s_aec95a8ffbca65::t_64454fbbc08a4f 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16b8b3f96597e9d44f10f27c4115efd3056102e9",
+  "prompts": {},
+  "sessions": {
+    "s_aec95a8ffbca65": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5171f88b-c1be-400a-a996-54fc547b3115",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
