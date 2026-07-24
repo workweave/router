@@ -29,13 +29,11 @@ type Config struct {
 	BaseURL string
 	// RouterKey is the rk_... key the orchestrator seeded. Required.
 	RouterKey string
-	// PinModel is the model every scenario forces via x-weave-force-model
-	// (default claude-haiku-4-5) so decisions land on Anthropic deterministically
-	// and cheaply.
+	// PinModel is forced via x-weave-force-model so decisions land on Anthropic
+	// deterministically and cheaply (default claude-haiku-4-5).
 	PinModel string
-	// OpenAIPinModel is the gpt-5.x model the OpenAI-path scenarios force
-	// (default gpt-5.4-nano — cheapest reasoning-capable tier, bound solely to
-	// the direct OpenAI provider so it can't drift onto OpenRouter).
+	// OpenAIPinModel is the gpt-5.x model forced for OpenAI-path scenarios
+	// (default gpt-5.4-nano — bound solely to direct OpenAI, can't drift onto OpenRouter).
 	OpenAIPinModel string
 	// OpenAIEnabled gates smoke/openai_test.go scenarios. Set SMOKE_OPENAI_ENABLED=0
 	// to skip when recording without an OPENAI_API_KEY. Defaults to true.
@@ -168,12 +166,9 @@ func call(t *testing.T, body []byte) response {
 	return callModel(t, body, cfg.PinModel)
 }
 
-// callModel is call with an explicit model to pin via x-weave-force-model,
-// instead of the suite-wide default. It sends the router key and the
-// anthropic-version header, and pins the served model unless the body itself
-// is a /force-model command turn. It retries once on a 5xx / 529 to absorb
-// upstream transients. When the request body has "stream":true it parses the
-// SSE stream; otherwise it parses JSON.
+// callModel posts to /v1/messages pinning model via x-weave-force-model, skipping
+// the pin for /force-model command bodies. Retries once on 5xx/529; parses SSE
+// when stream:true, JSON otherwise.
 func callModel(t *testing.T, body []byte, model string) response {
 	t.Helper()
 	streaming := jsonBool(body, "stream")

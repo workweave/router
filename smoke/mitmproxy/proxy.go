@@ -194,9 +194,8 @@ func writeCassetteResponse(conn net.Conn, c *cassette) error {
 		ProtoMinor: 1,
 		Header:     make(http.Header, len(c.Headers)),
 		Body:       io.NopCloser(bytes.NewReader(c.Body)),
-		// ContentLength is left at 0 (unset) and Transfer-Encoding driven by
-		// resp.Write, which chunks the body — fine for both JSON and SSE since
-		// the router's SSE reader doesn't require a specific transfer-encoding.
+		// ContentLength:-1 lets resp.Write use chunked encoding — fine for both
+		// JSON and SSE since the router's SSE reader doesn't require a specific transfer-encoding.
 		ContentLength: -1,
 	}
 	for k, v := range c.Headers {

@@ -12,10 +12,8 @@ func TestOpenAIResponsesAPI(t *testing.T) {
 	}
 
 	t.Run("tool with typeless optional arg does not 400", func(t *testing.T) {
-		// Mirrors the Workflow tool's `args` param: an optional property with
-		// no "type", "anyOf", or "enum" at all — deliberately accepts any JSON
-		// value verbatim. Pre-fix this made strictify emit an invalid anyOf
-		// and OpenAI rejected the whole tool list with a 400.
+		// Optional property with no "type"/"anyOf"/"enum" — deliberately accepts any JSON
+		// value verbatim. makeNullable's fallback produced a typeless anyOf[0] that OpenAI 400'd.
 		workflowLike := tool("Workflow", "Execute a workflow script", map[string]any{
 			"scriptPath": map[string]any{"type": "string", "description": "Path to a workflow script file"},
 			"args":       map[string]any{"description": "Optional input value, verbatim — any JSON value, no fixed shape"},
