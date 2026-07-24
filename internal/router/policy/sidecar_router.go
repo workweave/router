@@ -311,20 +311,17 @@ func (r *SidecarRouter) Route(ctx context.Context, req router.Request) (router.D
 		return router.Decision{}, fmt.Errorf("%s: sidecar decide: %w: %w", strategy, err, r.config.Unavailable)
 	}
 
-	// Per-key cluster allowlist enforcement. Applies when the request carries
-	// overrides AND this /route response includes ranked_fallback — ranked_fallback
-	// presence is proof the sidecar supports it (boot-time capability can be stale
-	// after a sidecar upgrade). Absent ranked_fallback → guard is false → fail open.
+	// Per-key cluster allowlist enforcement. ranked_fallback presence in the /route
+	// response is proof the sidecar supports it — boot-time capabilities can be
+	// stale after an upgrade. Missing ranked_fallback → fail open.
 	overrideArmID := res.ArmID
 	overrideRosterID := res.Model
 	overrideReasonSuffix := ""
 	if len(req.ClusterArmOverrides) > 0 && len(res.RankedFallback) > 0 {
 		outcome := ApplyClusterArmOverrides(req.ClusterArmOverrides, res.RankedFallback, resolved, res.Model)
 		if outcome.Applied && outcome.RosterID != "" {
-			// Prefer the resolved arm ID so BindingForSelection goes through
-			// ByArmID; on arm-enumerating resolvers a roster ID can be ambiguous
-			// (shared across providers) and dropped from ByRosterID, so resolving
-			// by roster ID alone would hard-fail even though eligible arms exist.
+			// Use the resolved arm ID: on arm-enumerating resolvers a roster ID can
+			// be ambiguous (shared across providers) and absent from ByRosterID.
 			overrideArmID = outcome.ArmID
 			overrideRosterID = outcome.RosterID
 			if outcome.Changed {

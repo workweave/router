@@ -5,16 +5,14 @@ package policy
 type ClusterOverrideResult struct {
 	// RosterID is the selected roster arm after overrides.
 	RosterID string
-	// ArmID is the resolver arm ID for the selected roster arm, so binding
-	// resolution can go through ByArmID. On arm-enumerating resolvers a roster
-	// ID can be ambiguous (shared across providers) and absent from ByRosterID;
-	// the arm ID is always unambiguous. Empty when no arm maps to the selection.
+	// ArmID is the resolver arm ID for the selected roster arm. On arm-enumerating
+	// resolvers a roster ID can be ambiguous (shared across providers) and absent
+	// from ByRosterID; the arm ID is always unambiguous.
 	ArmID string
 	// Group is the classifier group the selection came from.
 	Group string
-	// Applied is true when an override was configured for at least one ranked
-	// group and produced a definite selection. When false, the caller keeps the
-	// sidecar's own selection (fail-open / no override configured).
+	// Applied is true when an override matched at least one ranked group and
+	// produced a definite selection. When false the caller fails open.
 	Applied bool
 	// Changed is true when the override selected a different arm than the
 	// sidecar's own pick (for reason annotation and telemetry).

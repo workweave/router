@@ -69,9 +69,8 @@ const (
 //
 // readinessChecker gates /readyz only; /health remains process liveness.
 //
-// hmmRosterSource, when non-nil, mounts GET /v1/router/hmm-roster so the Weave
-// control plane can read the frozen per-cluster arm roster for the cluster
-// allowlist UI. Nil (no HMM sidecar wired) leaves the endpoint unmounted.
+// hmmRosterSource, when non-nil, mounts GET /v1/router/hmm-roster for the
+// control plane's cluster allowlist UI.
 func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service, deployedModels admin.DeployedModelsSource, hmmModels admin.HMMRosterSource, mode DeploymentMode, billingSvc *billing.Service, readinessChecker admin.HealthChecker, hmmRosterSource policy.RosterSource) {
 	// Managed mode bills via platform-key credits; a leftover BYOK row would
 	// double-charge (upstream provider + Weave credits), so drop it here.
@@ -113,9 +112,8 @@ func Register(engine *gin.Engine, authSvc *auth.Service, proxySvc *proxy.Service
 		}
 	}
 
-	// /v1/router/hmm-roster exposes the frozen per-cluster arm roster (mapped to
-	// catalog model IDs) so the control plane can render the cluster allowlist
-	// UI's default order. Same unauthed rationale as /v1/router/models.
+	// /v1/router/hmm-roster: frozen per-cluster arm roster mapped to catalog IDs.
+	// Unauthed — read-only and non-sensitive, same rationale as /v1/router/models.
 	if hmmRosterSource != nil {
 		engine.GET("/v1/router/hmm-roster", middleware.WithTimeout(readinessTimeout), admin.HMMRosterHandler(hmmRosterSource))
 	}
