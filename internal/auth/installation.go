@@ -90,6 +90,9 @@ type InstallationRepository interface {
 	// UpdateExcludedProviders replaces the per-installation provider
 	// exclusion list. An empty (or nil) slice clears the list.
 	UpdateExcludedProviders(ctx context.Context, externalID, id string, providerNames []string) error
+	// UpdatePreferredModels replaces the per-installation model priority
+	// ranking. An empty (or nil) slice clears the ranking.
+	UpdatePreferredModels(ctx context.Context, externalID, id string, models []string) error
 	// UpdateRoutingPreference sets the routing quality weight (a normalized
 	// fraction in [0, 1]). Passing nil clears the preference so the scorer
 	// reverts to its tuned per-cluster defaults.

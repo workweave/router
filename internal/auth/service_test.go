@@ -108,6 +108,8 @@ type fakeInstallationRepository struct {
 	excludedModelsExternalByID      map[string]string
 	excludedProvidersByID           map[string][]string
 	excludedProvidersExternalByID   map[string]string
+	preferredModelsByID             map[string][]string
+	preferredModelsExternalByID     map[string]string
 	routingQualityByID              map[string]*float64
 	usageBypassEnabledByID          map[string]bool
 	usageBypassThresholdByID        map[string]*float64
@@ -156,6 +158,20 @@ func (f *fakeInstallationRepository) UpdateExcludedProviders(ctx context.Context
 	}
 	f.excludedProvidersByID[id] = append([]string{}, providerNames...)
 	f.excludedProvidersExternalByID[id] = externalID
+	return nil
+}
+func (f *fakeInstallationRepository) UpdatePreferredModels(ctx context.Context, externalID, id string, models []string) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	if f.preferredModelsByID == nil {
+		f.preferredModelsByID = map[string][]string{}
+	}
+	if f.preferredModelsExternalByID == nil {
+		f.preferredModelsExternalByID = map[string]string{}
+	}
+	f.preferredModelsByID[id] = append([]string{}, models...)
+	f.preferredModelsExternalByID[id] = externalID
 	return nil
 }
 func (f *fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
@@ -773,6 +789,35 @@ func TestService_SetInstallationExcludedProviders(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{}, out)
 		assert.Equal(t, []string{}, installRepo.excludedProvidersByID["inst-3"])
+	})
+}
+
+func TestService_SetInstallationPreferredModels(t *testing.T) {
+	installRepo := &fakeInstallationRepository{}
+	svc := auth.NewService(installRepo, &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}, nil, nil, auth.NoOpAPIKeyCache{}, nil, frozenClock())
+
+	allowed := map[string]struct{}{"gpt-4o": {}, "claude-opus-4-7": {}}
+
+	t.Run("persists deduped ranking scoped by external_id", func(t *testing.T) {
+		out, err := svc.SetInstallationPreferredModels(context.Background(), "ext-1", "inst-1", []string{"gpt-4o", "gpt-4o", "claude-opus-4-7"}, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, out, "duplicates collapsed; order preserved")
+		assert.Equal(t, []string{"gpt-4o", "claude-opus-4-7"}, installRepo.preferredModelsByID["inst-1"])
+		assert.Equal(t, "ext-1", installRepo.preferredModelsExternalByID["inst-1"],
+			"external_id must be propagated to the repo for cross-tenant scoping")
+	})
+
+	t.Run("rejects unknown model with ErrUnknownModel", func(t *testing.T) {
+		_, err := svc.SetInstallationPreferredModels(context.Background(), "ext-1", "inst-1", []string{"gemini-nope"}, allowed)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, auth.ErrUnknownModel))
+	})
+
+	t.Run("nil models persists empty slice", func(t *testing.T) {
+		out, err := svc.SetInstallationPreferredModels(context.Background(), "ext-3", "inst-3", nil, allowed)
+		require.NoError(t, err)
+		assert.Equal(t, []string{}, out)
+		assert.Equal(t, []string{}, installRepo.preferredModelsByID["inst-3"])
 	})
 }
 

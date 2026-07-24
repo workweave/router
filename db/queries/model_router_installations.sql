@@ -56,6 +56,17 @@ WHERE id = @id::uuid
   AND external_id = @external_id::varchar
   AND deleted_at IS NULL;
 
+-- Replaces the per-installation model priority ranking, scoped to an
+-- external_id to prevent cross-tenant updates. Empty array means no preference.
+-- Bumps updated_at so dashboards see the change.
+-- name: UpdateModelRouterInstallationPreferredModels :execrows
+UPDATE router.model_router_installations
+SET preferred_models = @preferred_models::text[],
+    updated_at = NOW()
+WHERE id = @id::uuid
+  AND external_id = @external_id::varchar
+  AND deleted_at IS NULL;
+
 -- Sets the routing preference quality weight (a normalized fraction in [0, 1]),
 -- scoped to an external_id to prevent cross-tenant updates. NULL clears the
 -- preference so the scorer reverts to its tuned defaults.

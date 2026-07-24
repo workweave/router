@@ -61,6 +61,31 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | `ROUTER_DEPLOYMENT_MODE` | `selfhosted` | `selfhosted` mounts `/ui/*` and `/admin/v1/*`. `managed` skips both (for SaaS deployments with a separate admin UI). |
 | `ROUTER_ADMIN_PASSWORD`  | `admin`      | Dashboard password. Defaults to `admin` with a startup warning when unset — **set this for any internet-facing deployment**. |
 
+## Model-selection API
+
+Self-hosted deployments expose installation-scoped model selection under
+`/admin/v1`. Authenticate with an admin dashboard cookie or an `rk_` bearer
+token. An `rk_` token can change only its own installation's settings.
+
+| Resource | Read | Replace | Add one | Remove one |
+|----------|------|---------|---------|------------|
+| Models | `GET /admin/v1/models` | — | — | — |
+| Model exclusions | `GET /admin/v1/excluded-models` | `PUT /admin/v1/excluded-models` | `POST /admin/v1/excluded-models` | `POST /admin/v1/excluded-models/remove` |
+| Preferred models | `GET /admin/v1/preferred-models` | `PUT /admin/v1/preferred-models` | `POST /admin/v1/preferred-models` | `POST /admin/v1/preferred-models/remove` |
+| Providers | `GET /admin/v1/providers` | — | — | — |
+| Provider exclusions | `GET /admin/v1/excluded-providers` | `PUT /admin/v1/excluded-providers` | `POST /admin/v1/excluded-providers` | `POST /admin/v1/excluded-providers/remove` |
+
+`GET /admin/v1/models` returns `[{model, provider, enabled}]`; providers return
+`[{provider, enabled}]`. Exclusion GET responses retain `available`, `excluded`,
+and `env_override_active` for compatibility with the dashboard. Preferred-model
+responses are `{preferred: [...]}` and preserve the supplied priority order.
+
+Replace bodies are `{excluded: [...]}` or `{preferred: [...]}`. Per-item
+requests use `{model: "..."}` or `{provider: "..."}`; this avoids path escaping
+for model IDs that include `/`. Item operations are idempotent. An active
+`ROUTER_EXCLUDED_MODELS` or `ROUTER_EXCLUDED_PROVIDERS` environment override
+makes the corresponding exclusion writes return 403.
+
 ## Routing
 
 | Variable                          | Default                      | Purpose |
