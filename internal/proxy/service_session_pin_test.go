@@ -1166,10 +1166,10 @@ func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
 		}
 	}
 	require.NotNil(t, forced, "header must write a user_forced pin upsert")
-	assert.Equal(t, "claude-opus-4-8", forced.Model, "alias 'opus' resolves to the canonical id")
+	assert.Equal(t, "claude-opus-5", forced.Model, "alias 'opus' resolves to the canonical id")
 	assert.Equal(t, providers.ProviderAnthropic, forced.Provider)
 	require.NotNil(t, fr.capturedReq)
-	assert.Equal(t, "claude-opus-4-8", fr.capturedReq.ForceModel, "valid force-model header must bypass router decorators")
+	assert.Equal(t, "claude-opus-5", fr.capturedReq.ForceModel, "valid force-model header must bypass router decorators")
 }
 
 // An unrecognized x-weave-force-model value must be ignored, so a typo

@@ -17,6 +17,7 @@ func TestLookup(t *testing.T) {
 	}{
 		// ── Anthropic ──────────────────────────────────────────
 		{name: "claude-fable-5", model: "claude-fable-5", wantInput: 10.00, wantOutput: 50.00},
+		{name: "claude-opus-5", model: "claude-opus-5", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-8", model: "claude-opus-4-8", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-7", model: "claude-opus-4-7", wantInput: 5.00, wantOutput: 25.00},
 		{name: "claude-opus-4-6", model: "claude-opus-4-6", wantInput: 5.00, wantOutput: 25.00},

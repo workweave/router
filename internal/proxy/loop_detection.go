@@ -16,7 +16,7 @@ import (
 )
 
 // escalateModel is the strong model a looping cheap/mid session is rescued onto.
-const escalateModel = "claude-opus-4-8"
+const escalateModel = "claude-opus-5"
 
 // LoopEscalationStore persists cyclic-loop detections (one row per
 // session+role); CountLoopEscalationEvents enforces the once-per-session budget.

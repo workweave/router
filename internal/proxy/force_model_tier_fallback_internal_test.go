@@ -105,11 +105,11 @@ func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 	const forced = "deepseek/deepseek-v4-pro"
 	require.Equal(t, catalog.TierHigh, catalog.TierFor(forced), "test premise: forced model is high-tier")
 	require.Equal(t, catalog.TierLow, catalog.TierFor("claude-haiku-4-5"), "test premise: haiku is low-tier")
-	require.Equal(t, catalog.TierHigh, catalog.TierFor("claude-opus-4-8"), "test premise: opus is high-tier")
+	require.Equal(t, catalog.TierHigh, catalog.TierFor("claude-opus-5"), "test premise: opus is high-tier")
 
 	fr := &tierProbeRouter{available: map[string]struct{}{
 		forced:             {},
-		"claude-opus-4-8":  {},
+		"claude-opus-5":    {},
 		"claude-haiku-4-5": {},
 	}}
 	store := &forcedPinStore{pin: sessionpin.Pin{
@@ -123,7 +123,7 @@ func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 		WithAvailableModels(fr.available).
 		WithPlannerEnabled(false)
 
-	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hello"}]}`))
+	env, err := translate.ParseAnthropic([]byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"hello"}]}`))
 	require.NoError(t, err)
 	feats := env.RoutingFeatures(false)
 
@@ -135,7 +135,7 @@ func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "claude-opus-4-8", res.Decision.Model,
+	assert.Equal(t, "claude-opus-5", res.Decision.Model,
 		"evicted high-tier force-model must reroute to the next-best same-tier model, not collapse to low-tier")
 	assert.Equal(t, catalog.TierHigh, catalog.TierFor(res.Decision.Model),
 		"replacement must share the forced model's tier")
@@ -145,7 +145,7 @@ func TestRunTurnLoop_ForcedModelContextOverflow_StaysInTier(t *testing.T) {
 	require.Len(t, fr.captured, 1, "exactly one (constrained) scorer call")
 	_, haikuExcluded := fr.captured[0].ExcludedModels["claude-haiku-4-5"]
 	assert.True(t, haikuExcluded, "tier constraint must exclude the low-tier model from the scorer pool")
-	_, opusExcluded := fr.captured[0].ExcludedModels["claude-opus-4-8"]
+	_, opusExcluded := fr.captured[0].ExcludedModels["claude-opus-5"]
 	assert.False(t, opusExcluded, "the same-tier replacement must remain eligible")
 }
 
@@ -230,7 +230,7 @@ func TestForceModelHeader_OverridesHardPin(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "claude-opus-4-8", res.Decision.Model,
+	assert.Equal(t, "claude-opus-5", res.Decision.Model,
 		"the x-weave-force-model pin must outrank the automatic compaction hard-pin")
 	assert.Equal(t, translate.ReasonUserForceModel, res.Decision.Reason)
 	assert.False(t, res.HardPinned)
@@ -255,7 +255,7 @@ func TestRestrictToTier_ExcludesOtherTiers(t *testing.T) {
 	svc := NewService(nil, nil, nil, false, nil, nil, false,
 		providers.ProviderAnthropic, "claude-haiku-4-5", nil).
 		WithAvailableModels(map[string]struct{}{
-			"claude-opus-4-8":   {}, // high
+			"claude-opus-5":     {}, // high
 			"claude-haiku-4-5":  {}, // low
 			"claude-sonnet-4-6": {}, // mid
 		})
@@ -264,7 +264,7 @@ func TestRestrictToTier_ExcludesOtherTiers(t *testing.T) {
 	require.True(t, ok)
 	_, haikuExcluded := out["claude-haiku-4-5"]
 	_, sonnetExcluded := out["claude-sonnet-4-6"]
-	_, opusExcluded := out["claude-opus-4-8"]
+	_, opusExcluded := out["claude-opus-5"]
 	assert.True(t, haikuExcluded, "low-tier excluded")
 	assert.True(t, sonnetExcluded, "mid-tier excluded")
 	assert.False(t, opusExcluded, "high-tier stays eligible")

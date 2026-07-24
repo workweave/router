@@ -136,6 +136,7 @@ var registry = map[string]ModelSpec{
 	// claude-fable-5 has adaptive thinking always on (disabled is rejected);
 	// 1M context is native, so CapExtendedContext's beta header is a no-op.
 	"claude-fable-5":  anthropicAdaptiveXhigh,
+	"claude-opus-5":   anthropicAdaptiveXhigh,
 	"claude-opus-4-8": anthropicAdaptiveXhigh,
 	"claude-opus-4-7": anthropicAdaptiveXhigh,
 	// claude-sonnet-5 mirrors sonnet-4-6: no xhigh, since Sonnet tops out at
