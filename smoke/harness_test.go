@@ -37,11 +37,8 @@ type Config struct {
 	// (default gpt-5.4-nano — cheapest reasoning-capable tier, bound solely to
 	// the direct OpenAI provider so it can't drift onto OpenRouter).
 	OpenAIPinModel string
-	// OpenAIEnabled gates the OpenAI-path scenarios (smoke/openai_test.go).
-	// False when SMOKE_OPENAI_ENABLED=0 — set by run.sh when recording without
-	// an OPENAI_API_KEY, so a local Anthropic-only session doesn't fail on a
-	// provider it never intended to record. Defaults to true (replay-only CI
-	// runs always have both providers' cassettes committed).
+	// OpenAIEnabled gates smoke/openai_test.go scenarios. Set SMOKE_OPENAI_ENABLED=0
+	// to skip when recording without an OPENAI_API_KEY. Defaults to true.
 	OpenAIEnabled bool
 }
 

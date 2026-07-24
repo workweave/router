@@ -4,16 +4,11 @@ package smoke
 
 import "testing"
 
-// TestCaching exercises the Anthropic prompt-cache path against the real API —
-// the surface #820/#821 broke (bad breakpoint injection producing 400s). These scenarios
-// assert the observable outcomes of a correct post-#821 implementation.
+// TestCaching exercises the Anthropic prompt-cache path — the surface the router's
+// cache-breakpoint injection broke. Asserts observable outcomes of a correct implementation.
 func TestCaching(t *testing.T) {
-	// Router injects its own breakpoint on the large stable prefix. Assert
-	// caching actually engages (cache_creation or cache_read > 0 on the first
-	// call — Anthropic's ~5-minute cache TTL means a rapid rerun against the
-	// same fixture text can find the prefix already warm from a prior run, so
-	// this does NOT assume a cold cache), and that a same-prefix follow-up
-	// reads it back.
+	// Router injects a breakpoint on the large stable prefix; first call warms (or reads
+	// if already warm — Anthropic TTL is ~5min), second same-prefix call must read.
 	t.Run("router-injected caching warms then reads", func(t *testing.T) {
 		uid := "smoke-cache-injected"
 		warm := call(t, newRequest(uid).tokens(32).text("Say: one").build(t))
@@ -60,9 +55,7 @@ func TestCaching(t *testing.T) {
 		}
 	})
 
-	// Five explicit client breakpoints exceed Anthropic's 4-cap. The router's
-	// own validator should reject this cleanly as a 4xx with an Anthropic-shaped
-	// error body — not pass it upstream to fail confusingly, and not 5xx.
+	// Five explicit breakpoints exceed Anthropic's 4-cap; router must reject with 4xx.
 	t.Run("overflow rejected cleanly by router", func(t *testing.T) {
 		body := newRequest("smoke-cache-overflow").tokens(32).
 			cachedTools(4).toolCache("5m").sysCache("5m").

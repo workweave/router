@@ -77,7 +77,9 @@ func assertServedByModel(t *testing.T, r response, wantModel, wantProvider strin
 	} else if !strings.Contains(gotModel, wantModel) && gotModel != wantModel {
 		t.Errorf("want %s header = %q (pinned), got %q", headerRouterModel, wantModel, gotModel)
 	}
-	if gotProvider := r.headers.Get(headerRouterProvider); gotProvider != "" && gotProvider != wantProvider {
+	if gotProvider := r.headers.Get(headerRouterProvider); gotProvider == "" {
+		t.Errorf("missing %s header", headerRouterProvider)
+	} else if gotProvider != wantProvider {
 		t.Errorf("want %s = %s, got %q", headerRouterProvider, wantProvider, gotProvider)
 	}
 }
