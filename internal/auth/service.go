@@ -284,6 +284,35 @@ func (s *Service) SetInstallationExcludedProviders(ctx context.Context, external
 	return out, nil
 }
 
+// SetInstallationPreferredModels replaces the per-installation model priority
+// ranking. allowed is the set of valid model IDs; passing nil skips validation.
+func (s *Service) SetInstallationPreferredModels(ctx context.Context, externalID, installationID string, models []string, allowed map[string]struct{}) ([]string, error) {
+	if models == nil {
+		models = []string{}
+	}
+	if allowed != nil {
+		for _, m := range models {
+			if _, ok := allowed[m]; !ok {
+				return nil, fmt.Errorf("%w: %q", ErrUnknownModel, m)
+			}
+		}
+	}
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if _, dup := seen[m]; dup {
+			continue
+		}
+		seen[m] = struct{}{}
+		out = append(out, m)
+	}
+	if err := s.installations.UpdatePreferredModels(ctx, externalID, installationID, out); err != nil {
+		return nil, err
+	}
+	s.invalidateInstallation(installationID)
+	return out, nil
+}
+
 // SetInstallationRoutingPreference persists the routing quality weight (a
 // normalized fraction in [0, 1]). Passing nil clears it so the scorer reverts
 // to its tuned per-cluster defaults. Invalidates the cache so the change

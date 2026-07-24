@@ -270,6 +270,38 @@ func (q *Queries) UpdateModelRouterInstallationExcludedProviders(ctx context.Con
 	return result.RowsAffected(), nil
 }
 
+const updateModelRouterInstallationPreferredModels = `-- name: UpdateModelRouterInstallationPreferredModels :execrows
+UPDATE router.model_router_installations
+SET preferred_models = $1::text[],
+    updated_at = NOW()
+WHERE id = $2::uuid
+  AND external_id = $3::varchar
+  AND deleted_at IS NULL
+`
+
+type UpdateModelRouterInstallationPreferredModelsParams struct {
+	PreferredModels []string
+	ID              uuid.UUID
+	ExternalID      string
+}
+
+// Replaces model priority ranking, scoped by external_id to prevent
+// cross-tenant writes.
+//
+//	UPDATE router.model_router_installations
+//	SET preferred_models = $1::text[],
+//	    updated_at = NOW()
+//	WHERE id = $2::uuid
+//	  AND external_id = $3::varchar
+//	  AND deleted_at IS NULL
+func (q *Queries) UpdateModelRouterInstallationPreferredModels(ctx context.Context, arg UpdateModelRouterInstallationPreferredModelsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateModelRouterInstallationPreferredModels, arg.PreferredModels, arg.ID, arg.ExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateModelRouterInstallationRoutingPreference = `-- name: UpdateModelRouterInstallationRoutingPreference :execrows
 UPDATE router.model_router_installations
 SET routing_quality_weight = $1,

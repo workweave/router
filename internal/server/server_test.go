@@ -71,8 +71,20 @@ func TestRegister_DeploymentMode(t *testing.T) {
 		"POST /admin/v1/provider-keys",
 		"DELETE /admin/v1/provider-keys/:id",
 		"GET /admin/v1/config",
+		"GET /admin/v1/models",
 		"GET /admin/v1/excluded-models",
 		"PUT /admin/v1/excluded-models",
+		"POST /admin/v1/excluded-models",
+		"POST /admin/v1/excluded-models/remove",
+		"GET /admin/v1/preferred-models",
+		"PUT /admin/v1/preferred-models",
+		"POST /admin/v1/preferred-models",
+		"POST /admin/v1/preferred-models/remove",
+		"GET /admin/v1/providers",
+		"GET /admin/v1/excluded-providers",
+		"PUT /admin/v1/excluded-providers",
+		"POST /admin/v1/excluded-providers",
+		"POST /admin/v1/excluded-providers/remove",
 	}
 
 	t.Run("selfhosted mounts dashboard and product routes", func(t *testing.T) {
