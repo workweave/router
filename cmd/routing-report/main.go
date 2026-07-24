@@ -45,10 +45,10 @@ var registers = []string{
 // opusModels and premiumModels classify the deployed pool for the summary
 // percentages; premium = tiers a chit-chat turn has no business reaching.
 var opusModels = map[string]struct{}{
-	"claude-opus-4-8": {}, "claude-opus-4-7": {},
+	"claude-opus-5": {}, "claude-opus-4-8": {}, "claude-opus-4-7": {},
 }
 var premiumModels = map[string]struct{}{
-	"claude-opus-4-8": {}, "claude-opus-4-7": {},
+	"claude-opus-5": {}, "claude-opus-4-8": {}, "claude-opus-4-7": {},
 	"gpt-5.5": {}, "gemini-3.1-pro-preview": {}, "claude-sonnet-4-6": {},
 }
 
@@ -289,7 +289,7 @@ func render(target, baseline string, topP int, embedderID string, deployChange b
 		fmt.Fprintf(&b, "Candidate **`%s`** vs deployed **`%s`** (`latest` unchanged — not deploying). ", target, baseline)
 	}
 	fmt.Fprintf(&b, "Routed %d labeled probes through the real Scorer at `top_p=%d`, embedder `%s`. "+
-		"Premium = opus-4-7/4-8, gpt-5.5, gemini-3.1-pro, sonnet-4-6.\n\n", len(probes), topP, embedderID)
+		"Premium = opus-5/4-7/4-8, gpt-5.5, gemini-3.1-pro, sonnet-4-6.\n\n", len(probes), topP, embedderID)
 
 	// Section 1: register -> model for the target.
 	tgtReg := byRegister(probes, tgt)

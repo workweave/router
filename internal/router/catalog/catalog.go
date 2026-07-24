@@ -201,7 +201,12 @@ var Models = []Model{
 	{ID: "claude-opus-4-7", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
-	{ID: "claude-opus-4-8", Tier: TierHigh, ContextWindow: 200_000, Providers: []ProviderBinding{
+	// Opus 4.8 retired from routing; kept as priced passthrough so lingering BYOK/direct pins bill at real cost.
+	{ID: "claude-opus-4-8", ContextWindow: 200_000, Providers: []ProviderBinding{
+		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
+	}},
+	// 1M context natively (no context-1m beta header), same $5/$25 as opus-4-8.
+	{ID: "claude-opus-5", Tier: TierHigh, ContextWindow: 1_000_000, Providers: []ProviderBinding{
 		{Provider: providers.ProviderAnthropic, Price: Pricing{InputUSDPer1M: 5.00, OutputUSDPer1M: 25.00, CacheReadMultiplier: 0.10}},
 	}},
 	// Ships 1M context by default (no beta header needed), unlike Opus 4.6+.

@@ -64,14 +64,14 @@ func TestResolveForceModel(t *testing.T) {
 		{
 			name:         "alias claude",
 			input:        "claude",
-			wantID:       "claude-opus-4-8",
+			wantID:       "claude-opus-5",
 			wantProvider: providers.ProviderAnthropic,
 			wantKnown:    true,
 		},
 		{
 			name:         "alias opus",
 			input:        "opus",
-			wantID:       "claude-opus-4-8",
+			wantID:       "claude-opus-5",
 			wantProvider: providers.ProviderAnthropic,
 			wantKnown:    true,
 		},

@@ -28,10 +28,16 @@ import (
 const ForceModelHeader = "x-weave-force-model"
 
 var forceModelAliases = map[string]string{
-	"anthropic":     "claude-opus-4-8",
-	"claude":        "claude-opus-4-8",
-	"opus":          "claude-opus-4-8",
-	"claude-opus":   "claude-opus-4-8",
+	"anthropic":   "claude-opus-5",
+	"claude":      "claude-opus-5",
+	"opus":        "claude-opus-5",
+	"claude-opus": "claude-opus-5",
+	"opus-5":      "claude-opus-5",
+	"opus-5.0":    "claude-opus-5",
+	"opus5":       "claude-opus-5",
+	"claude-5":    "claude-opus-5",
+	// Opus 4.8 is retired from routing but still servable as passthrough;
+	// keep its own-name aliases so direct pins resolve.
 	"opus-4-8":      "claude-opus-4-8",
 	"opus-4.8":      "claude-opus-4-8",
 	"claude-4-8":    "claude-opus-4-8",
@@ -323,9 +329,9 @@ func (s *Service) handleForceModelCommand(
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
 		)
-		msg = fmt.Sprintf("✦ **Weave Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model ID, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.\n\n", cmd.Model)
+		msg = fmt.Sprintf("✦ **Weave Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.\n\n", cmd.Model)
 		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model ID, e.g. claude-opus-4-8, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
+			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
 		}
 	} else {
 		if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
