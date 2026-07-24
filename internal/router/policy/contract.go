@@ -141,9 +141,8 @@ type PreviewResult struct {
 	ResolverExclusions    []Diagnostic       `json:"resolver_exclusions"`
 }
 
-// RosterSnapshot is the frozen artifact's per-cluster arm roster: a map from
-// classifier cluster label to the ordered roster arm IDs, plus the roster's
-// content hash. Used to seed the UI's default arm order.
+// RosterSnapshot is the frozen per-cluster arm roster from the sidecar artifact.
+// Used to seed the control plane's default arm-order UI.
 type RosterSnapshot struct {
 	Clusters     map[string][]string `json:"clusters"`
 	RosterSHA256 string              `json:"roster_sha256"`

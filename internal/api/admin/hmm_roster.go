@@ -23,10 +23,8 @@ type hmmRosterResponse struct {
 	RosterSHA256 string          `json:"roster_sha256"`
 }
 
-// HMMRosterHandler returns the frozen HMM roster with per-cluster arm lists
-// mapped from roster IDs back to catalog model IDs, so the control plane can
-// render the default arm order alongside the deployed-models universe. Unauthed
-// like /v1/router/models: read-only and non-sensitive.
+// HMMRosterHandler returns the frozen HMM roster mapped from roster IDs to
+// catalog model IDs. Unauthed — read-only and non-sensitive (same as /v1/router/models).
 func HMMRosterHandler(source policy.RosterSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		snapshot, err := source.ClusterRoster(c.Request.Context())
