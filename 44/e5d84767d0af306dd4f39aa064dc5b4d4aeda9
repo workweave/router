@@ -1,0 +1,24 @@
+smoke/openai_test.go
+  s_4e0c6c8f023723::t_2a0dad24e1d744 15-16
+smoke/harness_test.go
+  s_4e0c6c8f023723::t_04f59d360dbeef 32-33,35-36
+  s_4e0c6c8f023723::t_0f8227814b69a0 169-171
+smoke/mitmproxy/proxy.go
+  s_4e0c6c8f023723::t_e64c598a50cac1 197-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "44e5d84767d0af306dd4f39aa064dc5b4d4aeda9",
+  "prompts": {},
+  "sessions": {
+    "s_4e0c6c8f023723": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4018d120-f74f-40d5-83ed-814edec85067",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}
