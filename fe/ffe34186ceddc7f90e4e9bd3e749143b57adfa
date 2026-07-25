@@ -1,0 +1,68 @@
+internal/router/cluster/artifacts/v0.76/model_registry.json
+  s_72b323608bffca::t_ad29cef271595a 1-191
+internal/router/cluster/artifacts/v0.78/metadata.yaml
+  s_72b323608bffca::t_bd5a59517bea32 210
+  s_72b323608bffca::t_75f06067f6cecb 157-165,168-205
+  s_72b323608bffca::t_92207c814491e2 1-156,166-167,206-209
+internal/router/cluster/artifacts/v0.78/rankings.json
+  s_72b323608bffca::t_bd5a59517bea32 211-213,234-236,349-351,418-420
+  s_72b323608bffca::t_92207c814491e2 1-210,214-233,237-348,352-417,421-453
+internal/router/cluster/artifacts/v0.77/model_registry.json
+  s_72b323608bffca::t_9f72adab066c6e 1-202
+internal/router/cluster/artifacts/v0.77/model_features.json
+  s_72b323608bffca::t_9f72adab066c6e 1-319,321-322,324-327,330-346,348-349,351-354,357-550
+  s_72b323608bffca::t_bbd65fedb94b9f 320,323,328-329,347,350,355-356
+internal/router/cluster/artifacts/v0.78/model_registry.json
+  s_72b323608bffca::t_92207c814491e2 1-213
+internal/router/cluster/artifacts/v0.76/model_features.json
+  s_72b323608bffca::t_ad29cef271595a 1-319,321-322,324-327,330-523
+  s_72b323608bffca::t_360dc13a611027 320,323,328-329
+internal/router/cluster/artifacts/v0.77/quality_means.json
+  s_72b323608bffca::t_bbd65fedb94b9f 213-214,235-236,345-346,411-412
+  s_72b323608bffca::t_9f72adab066c6e 1-212,215-234,237-344,347-410,413-444
+internal/router/cluster/artifacts/v0.77/model_axes.json
+  s_72b323608bffca::t_9f72adab066c6e 1-220
+internal/router/cluster/artifacts/v0.78/quality_means.json
+  s_72b323608bffca::t_92207c814491e2 1-217,221-240,244-355,359-424,428-460
+  s_72b323608bffca::t_bd5a59517bea32 218-220,241-243,356-358,425-427
+internal/router/cluster/artifacts/v0.76/model_axes.json
+  s_72b323608bffca::t_ad29cef271595a 1-213
+internal/router/cluster/artifacts/v0.78/model_axes.json
+  s_72b323608bffca::t_92207c814491e2 1-227
+internal/router/cluster/artifacts/v0.78/model_features.json
+  s_72b323608bffca::t_92207c814491e2 1-319,321-322,324-327,330-346,348-349,351-354,357-373,375-376,378-381,384-577
+  s_72b323608bffca::t_bd5a59517bea32 320,323,328-329,347,350,355-356,374,377,382-383
+internal/router/cluster/artifacts/v0.77/metadata.yaml
+  s_72b323608bffca::t_bbd65fedb94b9f 209
+  s_72b323608bffca::t_9f72adab066c6e 1-156,165-166,205-208
+  s_72b323608bffca::t_75f06067f6cecb 157-164,167-204
+internal/router/cluster/artifacts/v0.76/rankings.json
+  s_72b323608bffca::t_360dc13a611027 201,222,327,390
+  s_72b323608bffca::t_ad29cef271595a 1-200,202-221,223-326,328-389,391-421
+internal/router/cluster/artifacts/v0.77/rankings.json
+  s_72b323608bffca::t_bbd65fedb94b9f 206-207,228-229,338-339,404-405
+  s_72b323608bffca::t_9f72adab066c6e 1-205,208-227,230-337,340-403,406-437
+internal/router/cluster/artifacts/v0.76/metadata.yaml
+  s_72b323608bffca::t_ad29cef271595a 1-156,171-172,211-214
+  s_72b323608bffca::t_75f06067f6cecb 157-170,173-210
+  s_72b323608bffca::t_360dc13a611027 215
+internal/router/cluster/artifacts/v0.76/quality_means.json
+  s_72b323608bffca::t_360dc13a611027 208,229,334,397
+  s_72b323608bffca::t_ad29cef271595a 1-207,209-228,230-333,335-396,398-428
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "feffe34186ceddc7f90e4e9bd3e749143b57adfa",
+  "prompts": {},
+  "sessions": {
+    "s_72b323608bffca": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8fca58ea-8a5e-4185-9043-6b23c85b07e7",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
