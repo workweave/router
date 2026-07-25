@@ -1,0 +1,27 @@
+install/README.md
+  s_49cc2d461f6d71::t_65a5007527f025 1,3-4,11,17,20-22,30,40,44-48,131-153,158,160,172,202-210,216,219
+install/uninstall.sh
+  s_49cc2d461f6d71::t_65a5007527f025 3,9-12,17,59-61,63-66,80-81,108-182
+README.md
+  s_49cc2d461f6d71::t_65a5007527f025 58-59,65-67,72-73,79-80,130-136
+install/install.sh
+  s_49cc2d461f6d71::t_65a5007527f025 3,5-13,15,18,21,26,29,32,57-64,110-112,487-563,666-668,670-672,702-703,708,732-736,780-782,800-805,876,891-918,1080-1125
+install/npm/README.md
+  s_49cc2d461f6d71::t_65a5007527f025 3,6,9-10,27,40,52-58,67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "66f861b224e674936d09a954a18a7ac9c45f4dd9",
+  "prompts": {},
+  "sessions": {
+    "s_49cc2d461f6d71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2256c35a-f8df-4567-a68a-94509f376c9b",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

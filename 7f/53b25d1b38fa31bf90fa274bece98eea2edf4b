@@ -1,0 +1,19 @@
+internal/translate/claudecode_tool_filter_internal_test.go
+  s_cb41f9ed9f68f5::t_9dd3639317695d 22-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "7f53b25d1b38fa31bf90fa274bece98eea2edf4b",
+  "prompts": {},
+  "sessions": {
+    "s_cb41f9ed9f68f5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0fd6fe7c-55f2-42d0-a78f-e6c1bf2c1d26",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

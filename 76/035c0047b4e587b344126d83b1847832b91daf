@@ -1,0 +1,47 @@
+internal/pubsub/autopay.go
+  s_486ba557716795::t_d7d7ff50feb0af 1-51
+internal/billing/repo.go
+  s_486ba557716795::t_2386b8b904ac7b 32-37
+  s_486ba557716795::t_2549b848078f7c 31
+internal/sqlc/autopay.sql.go
+  s_486ba557716795::t_bb670483fb6f45 1-38
+internal/billing/service_test.go
+  s_486ba557716795::t_de98285df68293 30-32
+  s_486ba557716795::t_61baf20fe0f085 327-382
+  s_486ba557716795::t_ea78583ad3e0fe 73-97
+db/migrations/0032_autopay-config.down.sql
+  s_486ba557716795::t_03939aed209c95 1-8
+internal/sqlc/models.go
+  s_486ba557716795::t_bb670483fb6f45 171-187,197-200
+internal/billing/service.go
+  s_486ba557716795::t_b09c4eabd79759 46-47,56-70
+  s_486ba557716795::t_f9ac49dbceee71 71,175,184-216
+  s_486ba557716795::t_03147bfc8db11c 7
+  s_486ba557716795::t_801c061b22f437 72
+cmd/router/main.go
+  s_486ba557716795::t_86939dd5feb75e 441-456
+internal/server/middleware/balance_check_test.go
+  s_486ba557716795::t_692f8650b01650 50-52
+db/migrations/0032_autopay-config.up.sql
+  s_486ba557716795::t_501e9770526861 1-45
+db/queries/autopay.sql
+  s_486ba557716795::t_742b77e8e848b1 1-10
+internal/postgres/billing_repo.go
+  s_486ba557716795::t_e07c7816221995 96-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "76035c0047b4e587b344126d83b1847832b91daf",
+  "prompts": {},
+  "sessions": {
+    "s_486ba557716795": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaa4cd31-c708-425a-9ad9-5ffa2e3855ac",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

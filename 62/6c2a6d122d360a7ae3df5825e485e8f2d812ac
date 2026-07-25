@@ -1,0 +1,69 @@
+internal/policyclient/client.go
+  s_d7c5c5bbb49c18::t_c3abea906b4a18 108,110-144
+  s_fd57aea8b9ccdf::t_ab3baa9103c5e3 109
+internal/api/admin/excluded_models.go
+  s_d7c5c5bbb49c18::t_dff58d97a08b83 47-52
+internal/policyclient/client_test.go
+  s_d7c5c5bbb49c18::t_4b501d382042c1 437-475
+internal/server/server_test.go
+  s_d7c5c5bbb49c18::t_65df8deccb1f7f 81
+  s_d7c5c5bbb49c18::t_57a0569bc66e73 108
+  s_d7c5c5bbb49c18::t_8e598205d4e966 120
+  s_d7c5c5bbb49c18::t_031511f8472bbc 96
+cmd/router/hmm_roster_source.go
+  s_d7c5c5bbb49c18::t_1a4094f8f42960 1-68
+cmd/router/hmm_roster_source_test.go
+  s_d7c5c5bbb49c18::t_53782771938104 1-62
+sidecars/hmm/hmm_sidecar/api.py
+  s_d7c5c5bbb49c18::t_a5a5b728d3194e 103-116
+internal/router/hmm/roster.go
+  s_d7c5c5bbb49c18::t_2b99c6564adb95 1-40
+internal/server/server.go
+  s_d7c5c5bbb49c18::t_6239a24bbe622e 58-61
+  s_d7c5c5bbb49c18::t_fab8f5ddf504fa 67
+  s_d7c5c5bbb49c18::t_ac28b846329962 98
+internal/api/admin/catalog_test.go
+  s_d7c5c5bbb49c18::t_54dd305a9451ba 4,6
+  s_d7c5c5bbb49c18::t_fc362febc87d63 37
+  s_d7c5c5bbb49c18::t_d57c32779d013d 63,74-153
+cmd/router/main.go
+  s_d7c5c5bbb49c18::t_b769ae76c71b59 856
+  s_d7c5c5bbb49c18::t_89909b5f7911cf 610
+  s_d7c5c5bbb49c18::t_77ff53347f690a 620
+internal/router/hmm/roster_test.go
+  s_d7c5c5bbb49c18::t_456aeb18d3c7d3 30-33
+  s_d7c5c5bbb49c18::t_645e2879b9799a 1-29,34-49
+sidecars/hmm/hmm_sidecar/policy.py
+  s_d7c5c5bbb49c18::t_eaa747d0a5494a 105-116
+sidecars/hmm/tests/test_api.py
+  s_d7c5c5bbb49c18::t_758264f95f09a9 119-140
+  s_d7c5c5bbb49c18::t_11620923709060 47-53
+sidecars/hmm/tests/test_policy.py
+  s_d7c5c5bbb49c18::t_5d93895a128259 25-39
+internal/api/admin/catalog.go
+  s_d7c5c5bbb49c18::t_d4c17501bf7aab 4,6-10,22-30,34-39,42,44-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "626c2a6d122d360a7ae3df5825e485e8f2d812ac",
+  "prompts": {},
+  "sessions": {
+    "s_d7c5c5bbb49c18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15055bfd-f65a-4383-bf0e-cde54b4807c5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    },
+    "s_fd57aea8b9ccdf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f81e6-752b-7830-bd09-1f978c8b8884",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

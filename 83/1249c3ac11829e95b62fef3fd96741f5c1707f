@@ -1,0 +1,27 @@
+internal/translate/claudecode_tool_filter_internal_test.go
+  s_cb41f9ed9f68f5::t_45a5a9344d2f3c 28-29,35
+internal/translate/claudecode_tool_filter.go
+  s_cb41f9ed9f68f5::t_637e9311c663e6 25-28
+  s_cb41f9ed9f68f5::t_76426861d97aa3 49-50
+  s_cb41f9ed9f68f5::t_76938194fb2439 90
+internal/translate/claudecode_tool_filter_test.go
+  s_cb41f9ed9f68f5::t_6ef9021f0e5f4f 89-90,98,109,112
+  s_cb41f9ed9f68f5::t_8cd08bba264b6c 240,242
+  s_cb41f9ed9f68f5::t_705b5c4853a136 189,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "831249c3ac11829e95b62fef3fd96741f5c1707f",
+  "prompts": {},
+  "sessions": {
+    "s_cb41f9ed9f68f5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0fd6fe7c-55f2-42d0-a78f-e6c1bf2c1d26",
+        "model": "grok-4.5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

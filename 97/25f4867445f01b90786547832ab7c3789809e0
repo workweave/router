@@ -1,0 +1,27 @@
+internal/api/admin/catalog.go
+  s_d5f89fe3103e42::t_673f84cb6a43fc 25
+  s_d5f89fe3103e42::t_faf30f88658d44 1-24,26-27
+internal/server/server.go
+  s_d5f89fe3103e42::t_f4ac453ea2ac1c 67-77
+internal/server/server_test.go
+  s_d5f89fe3103e42::t_abd8a47c5a4797 81-84,93-98
+  s_d5f89fe3103e42::t_e5673e842050b6 35
+internal/api/admin/catalog_test.go
+  s_d5f89fe3103e42::t_207a3ab817db18 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "9725f4867445f01b90786547832ab7c3789809e0",
+  "prompts": {},
+  "sessions": {
+    "s_d5f89fe3103e42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1c146411-de35-4a34-aa22-7dbd96c9b87d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "steventohme <steven@workweave.ai>"
+    }
+  }
+}

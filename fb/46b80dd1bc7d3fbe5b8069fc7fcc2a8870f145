@@ -1,0 +1,51 @@
+internal/auth/service_test.go
+  s_757dddc40babb4::t_f2d925a4fd63d3 111-112,163-174
+  s_757dddc40babb4::t_498fe119a6a230 176,795-823
+  s_03a443f4137fcc::t_6f3eda2ee0a72b 175
+internal/api/admin/model_selection.go
+  s_757dddc40babb4::t_e8ad2246869180 1-342
+internal/auth/service.go
+  s_757dddc40babb4::t_ad277b859213cd 287-315
+db/queries/model_router_installations.sql
+  s_757dddc40babb4::t_128cb9a9d8f393 59-69
+internal/postgres/repository.go
+  s_757dddc40babb4::t_831688ad02d3d5 141-163
+internal/auth/installation.go
+  s_757dddc40babb4::t_e526881698c252 93-95
+internal/server/server_test.go
+  s_757dddc40babb4::t_0d28c442681e77 74,77-87
+docs/CONFIGURATION.md
+  s_757dddc40babb4::t_f85940397426bb 64-88
+internal/api/admin/model_selection_test.go
+  s_757dddc40babb4::t_cc990240817cdd 1-169
+internal/sqlc/model_router_installations.sql.go
+  s_757dddc40babb4::t_b4ae00c4ee86aa 273-305
+internal/server/server.go
+  s_757dddc40babb4::t_f7be3f9d7c334a 156-172
+internal/server/middleware/auth_test.go
+  s_757dddc40babb4::t_57883df8417f6e 111-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "fb46b80dd1bc7d3fbe5b8069fc7fcc2a8870f145",
+  "prompts": {},
+  "sessions": {
+    "s_03a443f4137fcc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "68f37fed-f9c8-417d-8ce0-10e4a4d5693b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    },
+    "s_757dddc40babb4": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a1b67b99-82bf-420f-b92a-49a47afd282f",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

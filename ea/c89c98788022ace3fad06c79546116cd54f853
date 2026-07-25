@@ -1,0 +1,32 @@
+internal/auth/service.go
+  s_93097ba71072dc::t_c86b5a67f6d193 353,357-359,362,366-368
+internal/router/policy/sidecar_router_test.go
+  s_93097ba71072dc::t_7ff6738972bb11 491
+  s_93097ba71072dc::t_c713db3db1d669 454-456
+internal/router/policy/cluster_override_test.go
+  s_93097ba71072dc::t_b74afd6b620e87 114-133
+internal/auth/service_test.go
+  s_93097ba71072dc::t_b9b91683168391 931-965
+internal/router/policy/sidecar_router.go
+  s_93097ba71072dc::t_708a59a7cad9db 314-317,324-328
+internal/router/policy/cluster_override.go
+  s_93097ba71072dc::t_d848c37ed16edf 8-12,39,45-47,60,85-87
+internal/router/hmm/mapping.go
+  s_93097ba71072dc::t_cf1f92318d1594 37-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "eac89c98788022ace3fad06c79546116cd54f853",
+  "prompts": {},
+  "sessions": {
+    "s_93097ba71072dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "871ffeb7-914c-42f7-a49f-3a50ebb91f39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}

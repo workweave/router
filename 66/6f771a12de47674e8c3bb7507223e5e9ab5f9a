@@ -1,0 +1,100 @@
+sidecars/hmm/scripts/verify_artifact.py
+  s_a81d8efc38ee57::t_47df876e3742fe 1-26,28-45
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 27
+sidecars/hmm/docker-compose.yml
+  s_a81d8efc38ee57::t_711087180b0680 1-8
+sidecars/hmm/hmm_sidecar/api.py
+  s_a81d8efc38ee57::t_f20e71d28f7a6c 112-113
+  s_a81d8efc38ee57::t_a91427ff691f7c 1-111,114-124
+Makefile
+  s_a81d8efc38ee57::t_711087180b0680 145-148,191
+  s_a81d8efc38ee57::t_260be98d412565 155
+  s_a81d8efc38ee57::t_154a8f4a2d4d0f 12,152-154
+.env.example
+  s_a81d8efc38ee57::t_711087180b0680 82,85-100
+  s_a81d8efc38ee57::t_fe562e2cbf7502 101
+docs/CONFIGURATION.md
+  s_a81d8efc38ee57::t_711087180b0680 112-142
+sidecars/hmm/tests/test_embedding_contract.py
+  s_a81d8efc38ee57::t_b25ade2923b240 1-4,14-57,95
+  s_a81d8efc38ee57::t_6d50cf816416a2 5-13,58-94,96-100
+sidecars/hmm/hmm_sidecar/embeddings.py
+  s_a81d8efc38ee57::t_144d276ddc8b76 1-24,27-31,36,38-194
+  s_a81d8efc38ee57::t_0252181f275cf7 26
+  s_a81d8efc38ee57::t_314904c061c5ba 25,32-35,37
+sidecars/hmm/Dockerfile
+  s_a81d8efc38ee57::t_2bae3d5cd13758 1-32
+sidecars/hmm/poetry.lock
+  s_a81d8efc38ee57::t_843be17c4c1c9f 1-808
+sidecars/hmm/hmm_sidecar/hmm.py
+  s_a81d8efc38ee57::t_144d276ddc8b76 1-10,14-62,64-96
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 11-13,63
+sidecars/hmm/hmm_sidecar/__init__.py
+  s_a81d8efc38ee57::t_2bae3d5cd13758 1-4
+sidecars/hmm/README.md
+  s_a81d8efc38ee57::t_711087180b0680 1-18,21-59
+  s_a81d8efc38ee57::t_154a8f4a2d4d0f 19-20
+sidecars/hmm/hmm_sidecar/artifacts.py
+  s_a81d8efc38ee57::t_2bae3d5cd13758 1-61,65,68-166
+  s_a81d8efc38ee57::t_c87f47857c027e 66-67
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 62-64
+.github/workflows/test.yml
+  s_a81d8efc38ee57::t_b734773a6214e0 143
+  s_a81d8efc38ee57::t_c87f47857c027e 152
+  s_a81d8efc38ee57::t_711087180b0680 108-142,144-151,153-165
+README.md
+  s_a81d8efc38ee57::t_711087180b0680 113-126
+sidecars/hmm/hmm_sidecar/classifier.py
+  s_a81d8efc38ee57::t_144d276ddc8b76 1-25,27-35,38-55
+  s_a81d8efc38ee57::t_c9f360dbab1049 26,36-37
+sidecars/hmm/hmm_sidecar/policy.py
+  s_a81d8efc38ee57::t_a91427ff691f7c 1-26,28,30-34,36-42,46-129
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 27,29,35,43-45
+sidecars/hmm/tests/test_hmm.py
+  s_a81d8efc38ee57::t_b25ade2923b240 1-54
+sidecars/hmm/hmm_sidecar/features.py
+  s_a81d8efc38ee57::t_a91427ff691f7c 1-46,48-54,56-67,69-74,91-93,97-102,124-126,132,134,172-178,180,182,223-224,228-268,273-275,281-300,317-318,321-356,358-363
+  s_a81d8efc38ee57::t_cf7349a9ba864f 103-123,133,135,137-141,144-148,155-166,168-171,181,183,191-200,269-272,316,319-320
+  s_a81d8efc38ee57::t_64ded133195de9 357
+  s_a81d8efc38ee57::t_399a1815803fd7 47,55,75-90,136,142-143,149-154,167,179,184-190,201-206,213-222
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 68,94-96,127-131,212,225-227
+  s_a81d8efc38ee57::t_737814b14738a9 276-280,301-315
+  s_a81d8efc38ee57::t_237d4b025a85aa 207-211
+sidecars/hmm/scripts/export_artifact.py
+  s_a81d8efc38ee57::t_47df876e3742fe 1-33,57-85,87-88,102-166,170-221
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 93-97,167-169
+  s_a81d8efc38ee57::t_602d9336facf8c 34-56,86,89-92,98-101
+sidecars/hmm/hmm_sidecar/schemas.py
+  s_a81d8efc38ee57::t_345c3d4a20fe9d 59-61
+  s_a81d8efc38ee57::t_2bae3d5cd13758 1-58,62-95
+sidecars/hmm/tests/test_features.py
+  s_a81d8efc38ee57::t_64ded133195de9 48,60
+  s_a81d8efc38ee57::t_237d4b025a85aa 1-47,49-59
+sidecars/hmm/tests/test_artifacts.py
+  s_a81d8efc38ee57::t_7070273a10b017 1-46
+docker-compose.yml
+  s_a81d8efc38ee57::t_711087180b0680 137-162
+sidecars/hmm/pyproject.toml
+  s_a81d8efc38ee57::t_4e751c8dfe75a6 15-19
+  s_a81d8efc38ee57::t_6503cf3f88e524 33
+  s_a81d8efc38ee57::t_2bae3d5cd13758 1-14,20-32,34-38
+sidecars/hmm/tests/test_api.py
+  s_a81d8efc38ee57::t_b25ade2923b240 1-7,14-40
+  s_a81d8efc38ee57::t_f20e71d28f7a6c 8-13,41-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "666f771a12de47674e8c3bb7507223e5e9ab5f9a",
+  "prompts": {},
+  "sessions": {
+    "s_a81d8efc38ee57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d24-a314-7332-876a-e20e37d646b5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

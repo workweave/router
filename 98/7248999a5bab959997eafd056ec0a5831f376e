@@ -1,0 +1,29 @@
+internal/proxy/unified_limit_capture.go
+  s_78d861ce362aaa::t_43563c7e550a45 63-65
+  s_78d861ce362aaa::t_bd3d483003aa0a 17-19
+internal/proxy/service.go
+  s_78d861ce362aaa::t_3bcf9cc523f118 3003
+internal/proxy/unified_limit_capture_test.go
+  s_78d861ce362aaa::t_e75d92eb464a34 66
+  s_78d861ce362aaa::t_bfe2bac09e77b1 43
+db/migrations/0039_unified-limit-headers.up.sql
+  s_78d861ce362aaa::t_bf19959a829cd5 3-7
+internal/proxy/usage_bypass.go
+  s_78d861ce362aaa::t_339a36cd670b4f 364-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "987248999a5bab959997eafd056ec0a5831f376e",
+  "prompts": {},
+  "sessions": {
+    "s_78d861ce362aaa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d83bc4f-4a28-42de-bca5-de8b8180f5c6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "munir-weave <munir@workweave.ai>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+internal/translate/router_feedback.go
+  s_822a04e3969173::t_fe23a593839be9 135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3571e8101f376047c5d39d53dfcef64a68faacf3",
+  "prompts": {},
+  "sessions": {
+    "s_822a04e3969173": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8af687f-7198-40ff-8f1e-d272ebf132eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Samir Amin <aminsamir45@gmail.com>"
+    }
+  }
+}
