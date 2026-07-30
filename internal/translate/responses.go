@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1023,7 +1024,7 @@ func (t *ResponsesWriter) emitFailed() error {
 }
 
 func (t *ResponsesWriter) assembleOutput() []any {
-	out := make([]any, 0, len(t.toolItems))
+	out := make([]any, 0, 1+len(t.toolItems))
 	if t.textItem != nil {
 		out = append(out, map[string]any{
 			"id":     t.textItem.itemID,
@@ -1037,12 +1038,16 @@ func (t *ResponsesWriter) assembleOutput() []any {
 			}},
 		})
 	}
-	// Tool items in original index order.
-	for i := 0; i < len(t.toolItems); i++ {
-		item, ok := t.toolItems[i]
-		if !ok {
-			continue
-		}
+	// Tool items in upstream index order. Use sort-and-iterate rather than a
+	// len-bounded loop so non-contiguous upstream indices (e.g. {0, 2}) don't
+	// cause entries past the first gap to be silently dropped.
+	indices := make([]int, 0, len(t.toolItems))
+	for idx := range t.toolItems {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		item := t.toolItems[idx]
 		out = append(out, map[string]any{
 			"id":        item.itemID,
 			"type":      "function_call",
