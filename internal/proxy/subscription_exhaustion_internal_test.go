@@ -198,3 +198,59 @@ func TestAnthropicFallbackKeyAvailable(t *testing.T) {
 		assert.False(t, s.anthropicFallbackKeyAvailable(context.Background()))
 	})
 }
+
+// TestBaselineFailoverCtxSuppression tests the race condition where
+// claudeSubscriptionExhausted fires at the baseline check (line 2097) but
+// NOT at the pre-dispatch check (line 1794). In the baseline failover scenario,
+// the primary dispatch is to an OSS provider (OpenRouter, Fireworks, etc.), so
+// line 1797 does NOT stamp an Anthropic OAuth credential into ctx. When line
+// 2148 re-resolves ctx with finalProvider=ProviderAnthropic, it sees the
+// inbound OAuth bearer and must decide whether to inject it. Without the fix
+// (line 2098 absent), no suppression is on ctx and the bearer is injected —
+// servedOnSubscription returns true and billing is miscounted. With the fix,
+// ctx is suppressed before line 2148 runs and the bearer is dropped.
+func TestBaselineFailoverCtxSuppression(t *testing.T) {
+	// headers carries the subscription OAuth bearer exactly as Claude Code sends it.
+	// ctx starts with no Anthropic credential: the primary dispatch was to an OSS
+	// provider, so line 1797 resolved OSS credentials and left no Anthropic OAuth
+	// in ctx. This is the state of ctx arriving at line 2148 in the race scenario.
+	headers := http.Header{"Authorization": []string{"Bearer " + exhaustedSubToken}}
+	base := context.Background()
+
+	// fails_without_fix: simulates line 2148 when ctx has no suppression marker.
+	// Exhaustion was not detected at line 1794 (subscription was healthy), so
+	// withSuppressedClaudeSubscription was not applied. Line 2097 detects
+	// exhaustion for the baseline, but line 2098 (the fix) is absent, so ctx
+	// carries no suppression into line 2148. resolveAndInjectCredentials sees
+	// the inbound OAuth bearer and injects it — billing misfires.
+	t.Run("fails_without_fix", func(t *testing.T) {
+		// Simulate line 2148 with no suppression on ctx (line 2098 absent).
+		out := resolveAndInjectCredentials(base, providers.ProviderAnthropic, headers)
+		assert.True(t, servedOnSubscription(out),
+			"BUG: an unsuppressed ctx at line 2148 lets the OAuth bearer in; "+
+				"servedOnSubscription returns true and billing is charged to the subscription "+
+				"even though the Weave deployment key actually served the turn")
+	})
+
+	// passes_with_fix: simulates line 2148 after line 2098 applied suppression.
+	// claudeSubscriptionExhausted fires at line 2097, and line 2098 applies
+	// withSuppressedClaudeSubscription to ctx. Both guards in
+	// resolveAndInjectCredentials fire: the line-2694 OAuth block is skipped
+	// (suppressClaudeSub=true), and the line-2759 inbound-bearer nil-out drops
+	// the OAuth bearer from ExtractClientCredentials. No credential is set and
+	// ctx is returned unchanged with no Anthropic OAuth — servedOnSubscription
+	// returns false and billing correctly charges at full cost.
+	t.Run("passes_with_fix", func(t *testing.T) {
+		// Simulate line 2098: withSuppressedClaudeSubscription applied to ctx
+		// when claudeSubscriptionExhausted fires at the baseline check.
+		suppressed := withSuppressedClaudeSubscription(base)
+		// Simulate line 2148: re-resolve ctx for finalProvider=ProviderAnthropic.
+		out := resolveAndInjectCredentials(suppressed, providers.ProviderAnthropic, headers)
+		assert.False(t, servedOnSubscription(out),
+			"with suppression on ctx before line 2148, the OAuth bearer is dropped "+
+				"and servedOnSubscription correctly returns false")
+		creds := CredentialsFromContext(out)
+		assert.True(t, creds == nil || !creds.OAuth,
+			"no Anthropic OAuth credential must be present: deployment key serves the turn")
+	})
+}
