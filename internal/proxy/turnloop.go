@@ -552,6 +552,18 @@ func (s *Service) runTurnLoop(
 			// to it below rather than losing the intent entirely.
 			forcedTierFloor = catalog.TierFor(pin.Model)
 		}
+		if !providerEligible {
+			// The pinned provider became unavailable mid-session (exclusion
+			// changed, BYOK creds removed) — loud rather than silently falling
+			// through to automatic routing indistinguishable from "no pin"
+			// (#874). The pin row is left in storage; a later request with the
+			// provider re-enabled resumes serving it.
+			log.Warn("turnloop: forced pin's provider unavailable; falling through to automatic routing",
+				"pin_model", pin.Model,
+				"pin_provider", pin.Provider,
+				"pin_reason", pin.Reason,
+			)
+		}
 		if !imageCapable {
 			// The scorer's own image filter fails open when no image-capable
 			// candidate survives, so make the drop explicit here instead of

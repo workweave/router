@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,16 +112,26 @@ var forceModelAliases = map[string]string{
 }
 
 // resolveForceModel is the legacy two-return surface. New pin-and-effort
-// callers use resolveForceModelWithEffort.
-func resolveForceModel(model string) (canonicalID, provider string, known bool) {
-	canon, prov, kn, _ := resolveForceModelWithEffort(model)
+// callers use resolveForceModelWithEffort. available is the deployment's
+// live enabled-provider set (nil means "unrestricted": pick the primary
+// binding regardless of availability) — see resolveForceModelWithEffort.
+func resolveForceModel(model string, available map[string]struct{}) (canonicalID, provider string, known bool) {
+	canon, prov, kn, _ := resolveForceModelWithEffort(model, available)
 	return canon, prov, kn
 }
 
 // resolveForceModelWithEffort is like resolveForceModel but also strips a
 // `:level` suffix. `known` is true only for catalog matches; known=false +
-// effort!="" lets callers surface "model not found" without losing the effort.
-func resolveForceModelWithEffort(model string) (canonicalID, provider string, known bool, effort string) {
+// effort!="" lets callers surface "model not found" without losing the
+// effort. For a catalog match, provider is resolved via
+// catalog.ResolveBinding against `available` — the same binding walk
+// cluster.Scorer's resolveProviderFor does for automatic routing — rather
+// than unconditionally picking Providers[0]. If none of the model's bindings
+// are in available, provider is "" (known stays true: the model is real,
+// there's just nothing that can currently serve it). nil available skips the
+// walk and always returns the primary binding, matching pre-existing
+// behavior for callers that haven't threaded the enabled set through yet.
+func resolveForceModelWithEffort(model string, available map[string]struct{}) (canonicalID, provider string, known bool, effort string) {
 	effortLevel, stripped := stripEffortSuffix(model)
 	model = stripped
 	model = strings.ToLower(strings.TrimSpace(model))
@@ -135,21 +146,25 @@ func resolveForceModelWithEffort(model string) (canonicalID, provider string, kn
 	if alias, ok := forceModelAliases[model]; ok {
 		model = alias
 	}
-	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 && (requiredProvider == "" || m.Providers[0].Provider == requiredProvider) {
-		return m.ID, m.Providers[0].Provider, true, effort
+	if m, ok := catalog.ByID(model); ok && len(m.Providers) > 0 {
+		if bound, nativeMismatch := resolveForcedBinding(m, requiredProvider, available); !nativeMismatch {
+			return m.ID, bound, true, effort
+		}
 	}
 	if !strings.Contains(model, "/") {
 		suffix := "/" + model
 		var matched catalog.Model
 		var matches int
 		for _, m := range catalog.Models {
-			if strings.HasSuffix(m.ID, suffix) && len(m.Providers) > 0 && (requiredProvider == "" || m.Providers[0].Provider == requiredProvider) {
+			if strings.HasSuffix(m.ID, suffix) && len(m.Providers) > 0 {
 				matched = m
 				matches++
 			}
 		}
-		if matches == 1 && len(matched.Providers) > 0 {
-			return matched.ID, matched.Providers[0].Provider, true, effort
+		if matches == 1 {
+			if bound, nativeMismatch := resolveForcedBinding(matched, requiredProvider, available); !nativeMismatch {
+				return matched.ID, bound, true, effort
+			}
 		}
 	}
 	if requiredProvider != "" {
@@ -169,6 +184,57 @@ func resolveForceModelWithEffort(model string) (canonicalID, provider string, kn
 	default:
 		return model, providers.ProviderAnthropic, false, effort
 	}
+}
+
+// resolveForcedBinding picks the provider to pin a resolved catalog model to.
+// requiredProvider (set only for an explicit "openai/<id>" native prefix)
+// first narrows the model's bindings to that provider; nativeMismatch=true
+// means the model has no binding under that provider at all, distinct from
+// "has one, just not available right now". Given the (possibly narrowed)
+// binding list, it walks in catalog order for the first entry in available —
+// mirroring cluster.Scorer's resolveProviderFor, so /force-model can't pin a
+// binding the deployment can't actually serve. nil available (callers that
+// haven't threaded the enabled-provider set through yet) skips the
+// availability walk and returns the first (narrowed) binding, preserving
+// prior unconditional-Providers[0] behavior. A known model with no available
+// binding returns ("", false) — not a mismatch, just currently unservable.
+func resolveForcedBinding(m catalog.Model, requiredProvider string, available map[string]struct{}) (provider string, nativeMismatch bool) {
+	bindings := m.Providers
+	if requiredProvider != "" {
+		filtered := make([]catalog.ProviderBinding, 0, len(bindings))
+		for _, b := range bindings {
+			if b.Provider == requiredProvider {
+				filtered = append(filtered, b)
+			}
+		}
+		if len(filtered) == 0 {
+			return "", true
+		}
+		bindings = filtered
+	}
+	if available == nil {
+		return bindings[0].Provider, false
+	}
+	for _, b := range bindings {
+		if _, ok := available[b.Provider]; ok {
+			return b.Provider, false
+		}
+	}
+	return "", false
+}
+
+// sortedProviderKeys returns a deterministic sorted slice of a provider set,
+// for stable log output. nil input (unrestricted) returns nil.
+func sortedProviderKeys(m map[string]struct{}) []string {
+	if m == nil {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // stripEffortSuffix splits a `:level` suffix off model, canonicalizes it via
@@ -240,6 +306,9 @@ func (s *Service) setForceModelPin(
 // writing the same session pin the /force-model command writes. It's
 // (re)written on every request carrying the header. Unrecognized models are
 // ignored (routing proceeds automatically) rather than failing the request.
+// enabledProviders is the deployment's live enabled-provider set (nil =
+// unrestricted), threaded through to resolveForceModelWithEffort so the pin
+// can't land on an excluded/unregistered binding (#874).
 //
 // A `:level` suffix is stashed on context as router.Overrides.ForceEffort
 // so pin + effort land in one header.
@@ -249,13 +318,14 @@ func (s *Service) applyForceModelHeader(
 	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
+	enabledProviders map[string]struct{},
 ) string {
 	raw := strings.TrimSpace(r.Header.Get(ForceModelHeader))
 	if raw == "" {
 		return ""
 	}
 	log := observability.FromContext(ctx)
-	canonicalModel, provider, known, effortLevel := resolveForceModelWithEffort(raw)
+	canonicalModel, provider, known, effortLevel := resolveForceModelWithEffort(raw, enabledProviders)
 	if effortLevel != "" {
 		// Merge with any existing knobs so ForceEffort doesn't drop Alpha/QualityBias.
 		merged := router.Overrides{ForceEffort: effortLevel}
@@ -274,6 +344,18 @@ func (s *Service) applyForceModelHeader(
 	if !known {
 		log.Info("x-weave-force-model: ignoring unrecognized model; routing automatically",
 			"input_model", raw,
+			"session_key_hex", fmt.Sprintf("%x", sessionKey),
+		)
+		return ""
+	}
+	if provider == "" {
+		// Recognized model, but none of its bindings are available under this
+		// deployment's enabled-provider set — pinning would silently point at
+		// a dead provider (#874). Loud rather than falling through quietly.
+		log.Warn("x-weave-force-model: no available provider for model; routing automatically",
+			"input_model", raw,
+			"canonical_model", canonicalModel,
+			"enabled_providers", sortedProviderKeys(enabledProviders),
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 		)
 		return ""
@@ -301,7 +383,8 @@ func (s *Service) applyForceModelHeader(
 // writes (or expires) the session pin and returns a synthetic acknowledgment
 // response without dispatching upstream. inputTokens should be the request's
 // RoutingFeatures.Tokens so the token counter reflects actual turn input, not
-// just the synthetic response text.
+// just the synthetic response text. enabledProviders is the deployment's
+// live enabled-provider set (nil = unrestricted); see applyForceModelHeader.
 func (s *Service) handleForceModelCommand(
 	ctx context.Context,
 	w http.ResponseWriter,
@@ -310,6 +393,7 @@ func (s *Service) handleForceModelCommand(
 	installationID uuid.UUID,
 	sessionKey [sessionpin.SessionKeyLen]byte,
 	inputTokens int,
+	enabledProviders map[string]struct{},
 ) error {
 	log := observability.FromContext(ctx)
 	role := roleForTier(catalog.TierFor(env.Model()))
@@ -318,7 +402,8 @@ func (s *Service) handleForceModelCommand(
 	// StripRoutingMarkerFromMessages strips it from later inbound requests;
 	// otherwise it'd persist in history and leak router internals upstream.
 	var msg string
-	if cmd.Clear {
+	switch {
+	case cmd.Clear:
 		if s.pinStore != nil && installationID != uuid.Nil {
 			if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "user_unforced"); err != nil {
 				log.Error("/unforce-model: pin store upsert failed", "err", err)
@@ -334,34 +419,53 @@ func (s *Service) handleForceModelCommand(
 			"session_key_hex", fmt.Sprintf("%x", sessionKey),
 			"role", role,
 		)
-	} else if canonicalModel, provider, known := resolveForceModel(cmd.Model); !known {
-		// Not in the catalog (e.g. truncated "/force-model gpt-") — reject
-		// rather than pin something we can't honor; prior pin left untouched.
-		log.Info("/force-model: rejected unknown model",
-			"input_model", cmd.Model,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
-		)
-		msg = fmt.Sprintf("✦ **Weave Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.\n\n", cmd.Model)
-		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
+	default:
+		canonicalModel, provider, known := resolveForceModel(cmd.Model, enabledProviders)
+		switch {
+		case !known:
+			// Not in the catalog (e.g. truncated "/force-model gpt-") — reject
+			// rather than pin something we can't honor; prior pin left untouched.
+			log.Info("/force-model: rejected unknown model",
+				"input_model", cmd.Model,
+				"session_key_hex", fmt.Sprintf("%x", sessionKey),
+				"role", role,
+			)
+			msg = fmt.Sprintf("✦ **Weave Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.\n\n", cmd.Model)
+			if env.SourceFormat() == translate.FormatOpenAI {
+				msg = fmt.Sprintf("Weave Router: force-model: %q isn't a recognized model; keeping automatic routing. Use a full model ID, e.g. claude-opus-5, gpt-5.5, or gemini-3-pro-preview.", cmd.Model)
+			}
+		case provider == "":
+			// Recognized model, but no binding is available under this
+			// deployment's enabled-provider set (e.g. its only binding is
+			// excluded) — reject rather than pin a dead provider (#874).
+			log.Warn("/force-model: rejected model with no available provider",
+				"input_model", cmd.Model,
+				"canonical_model", canonicalModel,
+				"enabled_providers", sortedProviderKeys(enabledProviders),
+				"session_key_hex", fmt.Sprintf("%x", sessionKey),
+				"role", role,
+			)
+			msg = fmt.Sprintf("✦ **Weave Router** → force-model: %s has no available provider on this deployment · keeping automatic routing\n\n", canonicalModel)
+			if env.SourceFormat() == translate.FormatOpenAI {
+				msg = fmt.Sprintf("Weave Router: force-model: %s has no available provider on this deployment; keeping automatic routing.", canonicalModel)
+			}
+		default:
+			if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
+				log.Error("/force-model: pin store upsert failed", "err", err)
+				return err
+			}
+			msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · Use /unforce-model to clear\n\n", canonicalModel, provider)
+			if env.SourceFormat() == translate.FormatOpenAI {
+				msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", canonicalModel, provider)
+			}
+			log.Debug("/force-model: session pin set",
+				"input_model", cmd.Model,
+				"canonical_model", canonicalModel,
+				"provider", provider,
+				"session_key_hex", fmt.Sprintf("%x", sessionKey),
+				"role", role,
+			)
 		}
-	} else {
-		if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
-			log.Error("/force-model: pin store upsert failed", "err", err)
-			return err
-		}
-		msg = fmt.Sprintf("✦ **Weave Router** → force-model applied: %s (%s) · Use /unforce-model to clear\n\n", canonicalModel, provider)
-		if env.SourceFormat() == translate.FormatOpenAI {
-			msg = fmt.Sprintf("Weave Router: force-model applied: %s (%s). Use /unforce-model to clear.", canonicalModel, provider)
-		}
-		log.Debug("/force-model: session pin set",
-			"input_model", cmd.Model,
-			"canonical_model", canonicalModel,
-			"provider", provider,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
-		)
 	}
 
 	switch env.SourceFormat() {

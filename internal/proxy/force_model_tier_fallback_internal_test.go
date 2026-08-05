@@ -286,7 +286,7 @@ func TestForceModelHeader_OverridesHardPin(t *testing.T) {
 	headerReq, err := http.NewRequest(http.MethodPost, "/v1/messages", nil)
 	require.NoError(t, err)
 	headerReq.Header.Set(ForceModelHeader, "opus")
-	svc.applyForceModelHeader(context.Background(), headerReq, env, uuid.New(), key)
+	svc.applyForceModelHeader(context.Background(), headerReq, env, uuid.New(), key, nil)
 
 	feats := env.RoutingFeatures(false)
 	res, err := svc.runTurnLoop(context.Background(), env, feats, "key-1", uuid.New(), "", headerReq.Header, router.Request{

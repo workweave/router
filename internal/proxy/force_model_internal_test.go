@@ -12,6 +12,7 @@ func TestResolveForceModel(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
+		available    map[string]struct{}
 		wantID       string
 		wantProvider string
 		wantKnown    bool
@@ -171,11 +172,42 @@ func TestResolveForceModel(t *testing.T) {
 			wantProvider: providers.ProviderOpenAI,
 			wantKnown:    false,
 		},
+		// Availability-aware resolution (#874): a multi-binding model whose
+		// primary binding is excluded/unregistered must not silently resolve
+		// to it — the same binding walk the scorer's resolveProviderFor does.
+		{
+			name:         "deepseek-flash falls over to available fallback binding when primary excluded",
+			input:        "deepseek-flash",
+			available:    map[string]struct{}{providers.ProviderOpenRouter: {}},
+			wantID:       "deepseek/deepseek-v4-flash",
+			wantProvider: providers.ProviderOpenRouter,
+			wantKnown:    true,
+		},
+		{
+			name:         "deepseek-flash resolves to primary binding when it is available",
+			input:        "deepseek-flash",
+			available:    map[string]struct{}{providers.ProviderMakora: {}, providers.ProviderOpenRouter: {}},
+			wantID:       "deepseek/deepseek-v4-flash",
+			wantProvider: providers.ProviderMakora,
+			wantKnown:    true,
+		},
+		{
+			name:      "known model with no available provider resolves with empty provider",
+			input:     "deepseek-flash",
+			available: map[string]struct{}{providers.ProviderFireworks: {}},
+			wantID:    "deepseek/deepseek-v4-flash",
+			// Empty provider signals "recognized model, but no binding is
+			// available" — distinct from wantKnown=false (not a catalog model
+			// at all), so callers can reject with an accurate message instead
+			// of silently pinning an unservable provider.
+			wantProvider: "",
+			wantKnown:    true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotProvider, gotKnown := resolveForceModel(tt.input)
+			gotID, gotProvider, gotKnown := resolveForceModel(tt.input, tt.available)
 			assert.Equal(t, tt.wantID, gotID, "canonical id")
 			assert.Equal(t, tt.wantProvider, gotProvider, "provider")
 			assert.Equal(t, tt.wantKnown, gotKnown, "known")

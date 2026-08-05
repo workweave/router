@@ -2148,10 +2148,19 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// env.body so the upstream never sees it). Session key is derived before
 	// extraction: DeriveSessionKey can fall back to prompt text, and deriving
 	// after the strip would mismatch subsequent turns with the unstripped message.
+	//
+	// enabledProviders computed here (ahead of its usual spot below routing
+	// diagnostics) so a forced pin's provider is validated against the same
+	// live availability set the scorer uses (#874) — a pin can't land on an
+	// excluded/unregistered binding.
+	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
+	}
 	if !agentShadowMode && s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyMessages force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens, enabledProviders)
 		}
 	}
 	if !agentShadowMode {
@@ -2166,7 +2175,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// the pin up and serves the requested model on this same turn.
 	forceModel := ""
 	if !agentShadowMode {
-		forceModel = s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+		forceModel = s.applyForceModelHeader(ctx, r, env, installationID, sessionKey, enabledProviders)
 	}
 
 	// Tool-call loop break: catches runaway OSS-model tool-call cycles (qwen3
@@ -2195,18 +2204,6 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// Lets us audit whether a misbehaving turn was provoked by a malformed prior
 	// tool_result or an out-of-shape tool spec, without dumping the whole body.
 	logInboundRequestDiagnostics(log, env)
-
-	// Anthropic packs sub-agent identity into metadata.user_id; the
-	// x-weave-subagent-type header is for non-Anthropic ingress only.
-	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderAnthropic, r.Header)
-
-	// Subscription-only mode: restrict
-	// routing to the providers the caller's own subscription can serve, so the
-	// scorer can't pick a paid model. The post-routing guard below refuses if a
-	// turn (e.g. a hard-pin or force-model) still didn't resolve onto the sub.
-	if billing.SubscriptionOnlyFromContext(ctx) {
-		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
-	}
 
 	// Pre-filter models whose context window cannot fit this request.
 	// FullTokenEstimate uses raw body bytes (÷5) to capture tool definitions,
@@ -4300,10 +4297,18 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// env.body so the upstream never sees it). Session key is derived before
 	// extraction: DeriveSessionKey can fall back to prompt text, and deriving
 	// after the strip would mismatch subsequent turns with the unstripped message.
+	//
+	// enabledProviders computed here (ahead of its usual spot below routing
+	// diagnostics) so a forced pin's provider is validated against the same
+	// live availability set the scorer uses (#874).
+	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
+	if billing.SubscriptionOnlyFromContext(ctx) {
+		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
+	}
 	if s.pinStore != nil {
 		if cmd, hasCmd := env.ExtractForceModelCommand(); hasCmd {
 			log.Info("ProxyOpenAIChatCompletion force-model command", "force_model_cmd", cmd)
-			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens)
+			return s.handleForceModelCommand(ctx, w, env, cmd, installationID, sessionKey, feats.Tokens, enabledProviders)
 		}
 	}
 	if cmd, hasCmd := env.ExtractRouterFeedbackCommand(); hasCmd {
@@ -4314,7 +4319,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Honor the x-weave-force-model header (headless equivalent of /force-model).
 	// Writes the user-forced pin and falls through to normal routing, which picks
 	// the pin up and serves the requested model on this same turn.
-	forceModel := s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+	forceModel := s.applyForceModelHeader(ctx, r, env, installationID, sessionKey, enabledProviders)
 
 	// Wide cyclic re-read loop → escalate to opus (same path as the Anthropic
 	// ingress). See detectCyclicToolCallLoop / handleLoopEscalation.
@@ -4338,17 +4343,6 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	// OpenAI signals sub-agent identity via x-weave-subagent-type (no metadata.user_id).
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
-
-	enabledProviders := s.enabledProvidersForRequest(ctx, providers.ProviderOpenAI, r.Header)
-
-	// Subscription-only mode: restrict
-	// routing to the providers the caller's own subscription can serve, so the
-	// scorer can't pick a paid model. Mirrors the Anthropic path's forced
-	// usage-bypass; the post-routing guard below refuses if it still can't serve
-	// on the subscription.
-	if billing.SubscriptionOnlyFromContext(ctx) {
-		enabledProviders = restrictToSubscriptionProviders(ctx, r.Header, enabledProviders)
-	}
 
 	// Codex (ChatGPT) subscription passthrough: ProxyOpenAIResponses stashed the
 	// caller's original Responses body. Such turns skip the routing marker +
