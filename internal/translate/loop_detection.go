@@ -30,6 +30,8 @@ func (e *RequestEnvelope) AssistantToolCallArgsPreview(offset, maxLen int) []str
 		return assistantToolCallArgsPreview(anthropicAssistantToolCallEntries(e.body), offset, maxLen)
 	case FormatOpenAI:
 		return assistantToolCallArgsPreview(openAIAssistantToolCallEntries(e.body), offset, maxLen)
+	case FormatGemini:
+		return assistantToolCallArgsPreview(geminiAssistantToolCallEntries(e.body), offset, maxLen)
 	default:
 		return nil
 	}
@@ -54,14 +56,16 @@ func assistantToolCallArgsPreview(entries []assistantToolCallEntry, offset, maxL
 // the request body (message order, then content-block order). Used by the
 // loop detector: some OSS models (notably qwen3) fail to recognize task
 // completion and alternate/repeat calls indefinitely, which counting
-// signature occurrences in a recent window catches. Returns nil for
-// Gemini-format requests (unsupported) or no assistant tool calls.
+// signature occurrences in a recent window catches. Returns nil when the
+// body has no assistant tool calls.
 func (e *RequestEnvelope) AssistantToolCallSignatures() []ToolCallSig {
 	switch e.format {
 	case FormatAnthropic:
 		return anthropicAssistantToolCallSigs(e.body)
 	case FormatOpenAI:
 		return openAIAssistantToolCallSigs(e.body)
+	case FormatGemini:
+		return geminiAssistantToolCallSigs(e.body)
 	default:
 		return nil
 	}
@@ -70,9 +74,9 @@ func (e *RequestEnvelope) AssistantToolCallSignatures() []ToolCallSig {
 // assistantToolCallEntry is one filtered assistant tool invocation: a callee
 // name plus its raw argument JSON. AssistantToolCallSignatures and
 // AssistantToolCallArgsPreview both derive from the same
-// {anthropic,openAI}AssistantToolCallEntries walk, so they can never diverge
-// on which entries survive filtering — an index into one is always valid
-// against the other.
+// {anthropic,openAI,gemini}AssistantToolCallEntries walk, so they can never
+// diverge on which entries survive filtering — an index into one is always
+// valid against the other.
 type assistantToolCallEntry struct {
 	Name     string
 	InputRaw string
@@ -175,6 +179,81 @@ func anthropicAssistantToolCallSigs(body []byte) []ToolCallSig {
 
 func openAIAssistantToolCallSigs(body []byte) []ToolCallSig {
 	return sigsFromEntries(openAIAssistantToolCallEntries(body))
+}
+
+func geminiAssistantToolCallEntries(body []byte) []assistantToolCallEntry {
+	contents := gjson.GetBytes(body, "contents")
+	if !contents.IsArray() {
+		return nil
+	}
+	var entries []assistantToolCallEntry
+	contents.ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		// See anthropicAssistantToolCallEntries: a genuine user-typed prompt
+		// resets the window; functionResponse-only turns and Claude Code
+		// injected wrappers do not.
+		if role == "user" && geminiUserPromptTextForLoop(msg.Get("parts")) != "" {
+			entries = nil
+			return true
+		}
+		if role != "model" {
+			return true
+		}
+		parts := msg.Get("parts")
+		if !parts.IsArray() {
+			return true
+		}
+		parts.ForEach(func(_, part gjson.Result) bool {
+			call := part.Get("functionCall")
+			if !call.Exists() {
+				call = part.Get("function_call")
+			}
+			if !call.Exists() {
+				return true
+			}
+			name := call.Get("name").String()
+			if name == "" {
+				return true
+			}
+			args := call.Get("args")
+			if !args.Exists() {
+				args = call.Get("arguments")
+			}
+			if !isMeaningfulInput(args) {
+				return true
+			}
+			entries = append(entries, assistantToolCallEntry{Name: name, InputRaw: args.Raw})
+			return true
+		})
+		return true
+	})
+	return entries
+}
+
+// geminiUserPromptTextForLoop returns concatenated non-injected text parts from
+// a Gemini contents[] entry. functionResponse-only turns and Claude Code
+// wrapper tags yield "" so they do not reset the loop-detection window.
+func geminiUserPromptTextForLoop(parts gjson.Result) string {
+	if !parts.IsArray() {
+		return ""
+	}
+	var b strings.Builder
+	parts.ForEach(func(_, part gjson.Result) bool {
+		text := part.Get("text").String()
+		if text == "" || isClaudeCodeInjectedBlock(text) {
+			return true
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		return true
+	})
+	return b.String()
+}
+
+func geminiAssistantToolCallSigs(body []byte) []ToolCallSig {
+	return sigsFromEntries(geminiAssistantToolCallEntries(body))
 }
 
 func sigsFromEntries(entries []assistantToolCallEntry) []ToolCallSig {
