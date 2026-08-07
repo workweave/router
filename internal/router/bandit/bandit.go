@@ -109,8 +109,13 @@ func (b *Router) Route(ctx context.Context, req router.Request) (router.Decision
 	argmaxModel := dec.Model
 	pick := candidates[0]
 	b.annotate(&dec, pick.model, pick.provider, b.propensity(clusterIDs, candidates, pick.model), pick.sample)
-	if pick.model != argmaxModel && md.EffectiveKnobsHash != 0 {
-		md.EffectiveKnobsHash = mixModel(md.EffectiveKnobsHash, pick.model)
+	if pick.model != argmaxModel {
+		if md.EffectiveKnobsHash != 0 {
+			md.EffectiveKnobsHash = mixModel(md.EffectiveKnobsHash, pick.model)
+		}
+		// The scorer's runner-up was computed against the argmax and may now
+		// equal the served peer; recompute it against the served model.
+		repairBandPair(&md.PairedModel, &md.PairedProvider, &md.PairedScore, md.CandidateScores, candidates, pick.model)
 	}
 	return dec, nil
 }
@@ -183,6 +188,40 @@ func (b *Router) annotate(dec *router.Decision, model, provider string, propensi
 	if s, ok := dec.Metadata.CandidateScores[model]; ok {
 		dec.Metadata.ChosenScore = s
 	}
+}
+
+// repairBandPair recomputes the band pair's runner-up against the served
+// model. Picks the highest-scoring servable peer other than served (ties
+// broken by name); clears the pair if none remains. Providers come from the
+// live candidate list so peers resolved only via Decision.Provider stay eligible.
+func repairBandPair(outModel, outProvider *string, outScore *float32, scores map[string]float32, cands []candidate, served string) {
+	providers := make(map[string]string, len(cands))
+	for _, c := range cands {
+		providers[c.model] = c.provider
+	}
+	models := make([]string, 0, len(scores))
+	for m := range scores {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+
+	bestModel, bestProvider := "", ""
+	var bestScore float32
+	for _, m := range models {
+		if m == served {
+			continue
+		}
+		sc := scores[m]
+		if bestModel != "" && sc <= bestScore {
+			continue
+		}
+		provider, ok := providers[m]
+		if !ok || provider == "" {
+			continue
+		}
+		bestModel, bestProvider, bestScore = m, provider, sc
+	}
+	*outModel, *outProvider, *outScore = bestModel, bestProvider, bestScore
 }
 
 func mixModel(h uint64, model string) uint64 {
