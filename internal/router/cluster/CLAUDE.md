@@ -10,7 +10,7 @@ AvengersPro-derived primary router (arXiv 2508.12631, DAI 2025). **P0.** Full de
 
 Package compiles in **two layered modes via build tags**:
 
-- `embedder_onnx.go` vs `embedder_stub.go` — gated by `no_onnx`. Default builds compile the real hugot-backed embedder; `-tags=no_onnx` swaps in a stub `NewEmbedder` that always errors. Used by contributors without `libonnxruntime`.
+- `embedder_onnx.go` vs `embedder_stub.go` — gated by `no_onnx`. Default builds compile the real hugot-backed embedder; `-tags=no_onnx` swaps in a stub `NewEmbedder` that always errors. Used by contributors without `libonnxruntime`. `buildClusterScorer` warms the embedder at boot (5s cap) to burn ONNX's lazy graph-optimization cost. The cold-start / burst `EmbedTimeout` 503s seen in prod were timeout-bound (concurrent inferences just over the budget), so the lever is `EmbedTimeout`, default 2.5s (override: `ROUTER_CLUSTER_EMBED_TIMEOUT_MS`).
 - `-tags ORT` — required by **hugot v0.7+** to enable the ONNX Runtime backend. Without it, `hugot.NewORTSession` returns "to enable ORT, run `go build -tags ORT`" and `cluster.NewEmbedder` fails. Dockerfile builds with `-tags ORT`. **Do not drop this tag from any production-bound build.**
 - To run the parity integration test, combine: `-tags "onnx_integration ORT"`.
 
