@@ -242,6 +242,8 @@ const qualityBiasCalibrationGrid = 401
 // dialToAlpha interpolates across the breakpoints instead, so equal dial
 // travel crosses an equal number of mix changes.
 //
+// The sweep applies AlphaFloor via applyAlphaFloor (same as applyDialAlpha)
+// so breakpoints exclude unreachable low-alpha mix changes.
 // Returns nil when fewer than two distinct mixes exist, so dialToAlpha falls
 // back to the identity.
 func (s *Scorer) computeDialCalibration() []float64 {
@@ -249,15 +251,14 @@ func (s *Scorer) computeDialCalibration() []float64 {
 	centroidTopClusters := s.allCentroidTopClusters()
 
 	base := s.defaultActiveKnobs()
+	floor := base.AlphaFloor
 	breakpoints := make([]float64, 0, 32)
 	prevSig := ""
 	for g := 0; g < qualityBiasCalibrationGrid; g++ {
 		a := float64(g) / float64(qualityBiasCalibrationGrid-1)
 		knobs := base
 		knobs.Alpha = make([]float64, k)
-		for i := range knobs.Alpha {
-			knobs.Alpha[i] = a
-		}
+		applyAlphaFloor(knobs.Alpha, a, floor)
 		counts := make(map[string]int, len(s.models))
 		for c := 0; c < k; c++ {
 			scores := s.blendScoresV2(centroidTopClusters[c], knobs, s.models, nil, nil)
@@ -322,22 +323,26 @@ func (s *Scorer) dialToAlpha(t float64) float64 {
 	return bp[i] + frac*(bp[i+1]-bp[i])
 }
 
+// applyAlphaFloor writes alpha[i] = max(raw, floor[i]); nil floor disables
+// flooring.
+func applyAlphaFloor(alpha []float64, raw float64, floor []float64) {
+	for i := range alpha {
+		if floor != nil && floor[i] > raw {
+			alpha[i] = floor[i]
+		} else {
+			alpha[i] = raw
+		}
+	}
+}
+
 // applyDialAlpha resolves dial position t to per-cluster alpha in place:
 // alpha[i] = max(dialToAlpha(t), floor[i]). floor is the lowest quality
 // weight the bundle tolerates per cluster at max price-sensitivity, so a
 // price-leaning dial can't collapse the whole vector onto the cheapest model
 // (which stranded agentic turns on models that can't drive the harness).
-// floor==nil disables flooring. Single source of truth shared by Route and
-// RoutingDistribution; caller guarantees len(floor)==len(alpha) when non-nil.
+// floor==nil disables flooring. Shared by Route and RoutingDistribution.
 func (s *Scorer) applyDialAlpha(t float64, alpha, floor []float64) {
-	a := s.dialToAlpha(t)
-	for i := range alpha {
-		if floor != nil && floor[i] > a {
-			alpha[i] = floor[i]
-		} else {
-			alpha[i] = a
-		}
-	}
+	applyAlphaFloor(alpha, s.dialToAlpha(t), floor)
 }
 
 // resolveProviderFor walks the catalog's ordered ProviderBinding list for
