@@ -428,11 +428,13 @@ var Models = []Model{
 	// kimi-k3 is a separate price class from k2.7 ($3/$15 vs $0.95/$4), not its
 	// successor — both stay routable. First multimodal Kimi, so unlike k2.5-k2.7
 	// it carries no ImageInputUnsupported. Together has no K3 endpoint yet, so
-	// OpenRouter (identical list price) is the outage fallback.
+	// OpenRouter and TrustedRouter (identical list price) are the outage
+	// fallbacks.
 	{ID: "moonshotai/kimi-k3", Tier: TierHigh, ContextWindow: 1_048_576, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/kimi-k3",
 			Price: Pricing{InputUSDPer1M: 3.000, OutputUSDPer1M: 15.000, CacheReadMultiplier: 0.10}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 3.000, OutputUSDPer1M: 15.000, CacheReadMultiplier: 0.10}},
+		trustedRouterBinding(Pricing{InputUSDPer1M: 3.000, OutputUSDPer1M: 15.000, CacheReadMultiplier: 0.10}),
 	}},
 	// AA top-performer additions (2026-05-18): ranked by composite of quality
 	// (Intelligence Index v4.0), cost (blended 3:1), and effective time per
@@ -518,11 +520,13 @@ var Models = []Model{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
 			Price: Pricing{InputUSDPer1M: 0.900, OutputUSDPer1M: 2.700, CacheReadMultiplier: 0.1684}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
-		trustedRouterBinding(Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}),
+		{Provider: providers.ProviderTrustedRouter, UpstreamID: "qwen/qwen3-coder-480b-a35b-instruct",
+			Price: Pricing{InputUSDPer1M: 1.000, OutputUSDPer1M: 5.000, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "qwen/qwen3.5-flash-02-23", Tier: TierLow, ContextWindow: 1_000_000, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
-		trustedRouterBinding(Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}),
+		{Provider: providers.ProviderTrustedRouter, UpstreamID: "qwen/qwen3.5-flash-2026-02-23",
+			Price: Pricing{InputUSDPer1M: 0.050, OutputUSDPer1M: 0.150, CacheReadMultiplier: 0.10}},
 	}},
 	// Fireworks-only: the closed Alibaba API surface is deliberately avoided
 	// (Fireworks is SOC-2, keeps prompts off Alibaba); OpenRouter's route for
