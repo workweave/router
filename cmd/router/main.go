@@ -184,17 +184,22 @@ func main() {
 	if !byokOnly {
 		anthropicKey = config.GetOr("ANTHROPIC_API_KEY", "")
 	}
-	providerMap[providers.ProviderAnthropic] = anthropic.NewClient(anthropicKey, anthropic.DefaultBaseURL)
+	// Deliberately NOT named ANTHROPIC_BASE_URL, unlike its OPENAI_/OPENROUTER_
+	// siblings below: that name is what Anthropic clients set to point AT this
+	// router, so a router started from such a client's environment would inherit
+	// it and route to itself.
+	anthropicBaseURL := config.GetOr("ANTHROPIC_UPSTREAM_BASE_URL", anthropic.DefaultBaseURL)
+	providerMap[providers.ProviderAnthropic] = anthropic.NewClient(anthropicKey, anthropicBaseURL)
 	switch {
 	case byokOnly:
-		logger.Info("Anthropic provider enabled (BYOK only)", "base_url", anthropic.DefaultBaseURL)
+		logger.Info("Anthropic provider enabled (BYOK only)", "base_url", anthropicBaseURL)
 	case anthropicKey != "":
 		envKeyedProviders[providers.ProviderAnthropic] = struct{}{}
-		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropic.DefaultBaseURL)
+		logger.Info("Anthropic provider enabled (router key)", "base_url", anthropicBaseURL)
 	default:
 		// Selfhosted, no env key: passthrough-only, kept out of envKeyedProviders.
 		anthropicPassthroughEligible = true
-		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropic.DefaultBaseURL)
+		logger.Info("Anthropic provider enabled (client auth passthrough)", "base_url", anthropicBaseURL)
 	}
 
 	{
@@ -537,6 +542,11 @@ func main() {
 	// below can be overridden per deployment.
 	plannerEnabled := config.GetOr("ROUTER_PLANNER_ENABLED", "true") == "true"
 	scoreToolResultTurns := config.GetOr("ROUTER_SCORE_TOOL_RESULT_TURNS", "true") == "true"
+	// ROUTER_TOOL_RESULT_TIER_CEILING (default off): excludes above-tier models
+	// from ToolResult turns before the scorer runs, capping candidates at or
+	// below the turn's requested-model tier. Eval/debug lever — see
+	// Service.applyToolResultTierCeiling.
+	toolResultTierCeiling := config.GetOr("ROUTER_TOOL_RESULT_TIER_CEILING", "false") == "true"
 	// Defensive backstop for Anthropic's cyber safety classifier: re-pin a
 	// session off a model that returned a safety refusal. Default off; enabled
 	// on the defensive deploy. Fallback target when the pin has no runner-up.
@@ -771,6 +781,7 @@ func main() {
 		WithSubAgentOverride(subAgentProvider, subAgentModel).
 		WithPlannerEnabled(plannerEnabled).
 		WithScoreToolResultTurns(scoreToolResultTurns).
+		WithToolResultTierCeiling(toolResultTierCeiling).
 		WithCyberRefusalRepin(cyberRefusalRepin).
 		WithCyberRefusalFallbackModel(cyberRefusalFallbackModel).
 		WithPrefixTrimFreeSwitch(prefixTrimFreeSwitch).
@@ -844,6 +855,22 @@ func main() {
 		}
 		proxySvc = proxySvc.WithExcludedProvidersOverride(cleaned)
 		logger.Info("Provider exclusion override active", "excluded_providers", cleaned)
+	}
+
+	// ROUTER_RESPECT_REQUESTED_MODEL lists the models served verbatim when a client
+	// names one, so a skill or agent pinned by frontmatter keeps the model it asked
+	// for. Deliberately a list rather than a bool: clients send the same `model`
+	// field on ordinary turns, so honoring all of them would disable routing.
+	if respectRaw := strings.TrimSpace(config.GetOr("ROUTER_RESPECT_REQUESTED_MODEL", "")); respectRaw != "" {
+		parts := strings.Split(respectRaw, ",")
+		cleaned := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				cleaned = append(cleaned, trimmed)
+			}
+		}
+		proxySvc = proxySvc.WithRespectRequestedModel(cleaned)
+		logger.Info("Requested-model passthrough active", "honored_models", cleaned)
 	}
 
 	// The usage observer is always wired (cheap, side-effect-free) even though
@@ -1068,6 +1095,35 @@ func buildClusterScorer(availableProviders map[string]struct{}) (router.Router, 
 		} else {
 			cfg.TopP = n
 			logger.Info("Cluster top_p overridden", "top_p", n)
+		}
+	}
+	// ROUTER_STATIC_CLUSTER_PIN is "clusterID:model,clusterID:model,...": pins
+	// every request whose nearest cluster appears in the map to that model,
+	// skipping blendScoresV2 entirely (eval/debug lever, mirrors
+	// ROUTER_RESPECT_REQUESTED_MODEL's fail-open-on-bad-entry philosophy — a
+	// malformed pair is dropped and logged rather than failing boot).
+	if v := strings.TrimSpace(config.GetOr("ROUTER_STATIC_CLUSTER_PIN", "")); v != "" {
+		pins := make(map[int]string)
+		for _, pair := range strings.Split(v, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			clusterID, model, found := strings.Cut(pair, ":")
+			if !found {
+				logger.Warn("Invalid ROUTER_STATIC_CLUSTER_PIN entry; skipping", "entry", pair)
+				continue
+			}
+			id, parseErr := strconv.Atoi(strings.TrimSpace(clusterID))
+			if parseErr != nil {
+				logger.Warn("Invalid ROUTER_STATIC_CLUSTER_PIN cluster ID; skipping", "entry", pair)
+				continue
+			}
+			pins[id] = strings.TrimSpace(model)
+		}
+		if len(pins) > 0 {
+			cfg.StaticClusterPin = pins
+			logger.Info("Static cluster pin active", "pins", pins)
 		}
 	}
 	scorers := make(map[string]*cluster.Scorer, len(versions))

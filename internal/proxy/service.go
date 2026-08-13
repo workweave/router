@@ -94,6 +94,13 @@ type Service struct {
 	// classifier on the shared hard pin.
 	subAgentProvider string
 	subAgentModel    string
+	// respectRequestedModel is the set of canonical models a client may name and
+	// have served verbatim. An allowlist rather than a bool because a client sends
+	// the same `model` field for an ordinary turn and for a skill or sub-agent
+	// whose frontmatter pins one — honoring every requested model would disable
+	// routing outright. Listing only the models used as frontmatter pins keeps
+	// automatic routing on the session default. Empty disables the feature.
+	respectRequestedModel map[string]struct{}
 	// telemetry is an optional repository for persisting per-request telemetry.
 	telemetry TelemetryRepository
 	// captureMode controls whether high-fidelity `router.call` OTLP log
@@ -144,6 +151,12 @@ type Service struct {
 	// for MainLoop parity; when false, the pin is reused verbatim (#82 path).
 	// Runs the embedder on ToolResult traffic (majority of turns).
 	scoreToolResultTurns bool
+	// toolResultTierCeiling is ROUTER_TOOL_RESULT_TIER_CEILING (default false).
+	// When true, ToolResult turns are excluded from any model whose tier is
+	// above the turn's requested-model tier, before the scorer runs — unlike
+	// MainLoop, ToolResult carries no turn-type-specific routing constraint
+	// today, so the scorer can (and does) upshift it same as any other turn.
+	toolResultTierCeiling bool
 	// cyberRefusalRepin is the kill switch (ROUTER_CYBER_REFUSAL_REPIN, default
 	// false). When true, a safety refusal on the anthropic-native path re-pins
 	// the session off the refusing model (opus ~45% refusal rate; sonnet 0%).
@@ -507,6 +520,7 @@ const (
 	markerReasonSwitched      = "switched for positive EV after cache eviction"
 	markerReasonStayed        = "stayed on your last pick"
 	markerReasonTierUpgrade   = "upgraded to a stronger tier"
+	markerReasonRequested     = "served the model you asked for"
 	markerReasonBestPick      = "best pick for this turn"
 	markerReasonBaseline      = "fell back to baseline after provider outage"
 )
@@ -525,6 +539,9 @@ func baselineRoutingMarkerFor(res turnLoopResult, baselineModel string) string {
 // routingReasonShort returns a short user-facing reason for the routing
 // decision, or empty when the underlying code is internal recovery noise.
 func routingReasonShort(res turnLoopResult) string {
+	if res.Decision.Reason == reasonRequestedModelRespected {
+		return markerReasonRequested
+	}
 	if res.HardPinned {
 		return markerReasonHardPinned
 	}
@@ -884,6 +901,35 @@ func (s *Service) restrictToTier(excluded map[string]struct{}, tier catalog.Tier
 	return out, true
 }
 
+// applyToolResultTierCeiling excludes every model whose tier is above the
+// turn's requested-model tier, when ROUTER_TOOL_RESULT_TIER_CEILING is on and
+// this turn is ToolResult (a no-op otherwise). Reuses ExcludedModels so every
+// downstream consumer — scorer, hard-pin resolver, session-pin eligibility —
+// honors the ceiling uniformly instead of requiring a second check; in
+// particular a sticky session pin above the ceiling becomes ineligible and
+// the turn re-routes rather than silently exceeding the cap. An unknown
+// requested-model tier leaves exclusions unchanged rather than guessing.
+func (s *Service) applyToolResultTierCeiling(excluded map[string]struct{}, tt turntype.TurnType, requestedModel string) map[string]struct{} {
+	if !s.toolResultTierCeiling || tt != turntype.ToolResult {
+		return excluded
+	}
+	ceiling := catalog.TierFor(requestedModel)
+	if ceiling == catalog.TierUnknown {
+		return excluded
+	}
+	allowed := catalog.AllowedAtOrBelow(ceiling)
+	out := make(map[string]struct{}, len(excluded))
+	for k := range excluded {
+		out[k] = struct{}{}
+	}
+	for _, m := range catalog.Models {
+		if _, ok := allowed[m.ID]; !ok {
+			out[m.ID] = struct{}{}
+		}
+	}
+	return out
+}
+
 // CredentialsFromContext returns the resolved credentials stashed on ctx.
 func CredentialsFromContext(ctx context.Context) *Credentials {
 	v := ctx.Value(CredentialsContextKey{})
@@ -1084,6 +1130,12 @@ func (s *Service) WithPlannerEnabled(enabled bool) *Service {
 // WithScoreToolResultTurns sets ROUTER_SCORE_TOOL_RESULT_TURNS; see scoreToolResultTurns.
 func (s *Service) WithScoreToolResultTurns(enabled bool) *Service {
 	s.scoreToolResultTurns = enabled
+	return s
+}
+
+// WithToolResultTierCeiling sets ROUTER_TOOL_RESULT_TIER_CEILING; see toolResultTierCeiling.
+func (s *Service) WithToolResultTierCeiling(enabled bool) *Service {
+	s.toolResultTierCeiling = enabled
 	return s
 }
 
@@ -1326,6 +1378,27 @@ func (s *Service) WithDefaultBaselineModel(model string) *Service {
 func (s *Service) WithSubAgentOverride(provider, model string) *Service {
 	s.subAgentProvider = provider
 	s.subAgentModel = model
+	return s
+}
+
+// WithRespectRequestedModel installs the set of models served verbatim when the
+// client names one, bypassing planner and scorer. Unrecognized entries are
+// dropped at boot so a typo degrades to automatic routing rather than a hard
+// failure. Empty or nil disables the feature.
+func (s *Service) WithRespectRequestedModel(models []string) *Service {
+	honored := make(map[string]struct{}, len(models))
+	for _, m := range models {
+		canonical, _, known := resolveForceModel(strings.TrimSpace(m))
+		if !known {
+			continue
+		}
+		honored[canonical] = struct{}{}
+	}
+	if len(honored) == 0 {
+		s.respectRequestedModel = nil
+		return s
+	}
+	s.respectRequestedModel = honored
 	return s
 }
 
@@ -2293,6 +2366,21 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Info("gemini pre-filter: excluded gemini-3.x for unsigned tool-call history",
 			"excluded_models", strings.Join(geminiUnsigned, ","),
 		)
+	}
+	// Detected here (ahead of runTurnLoop's own classification) purely to key
+	// the tier ceiling; subAgentHint "" matches what runTurnLoop passes below,
+	// so this agrees with res.TurnType.
+	if s.toolResultTierCeiling {
+		preTt := turntype.DetectFromEnvelope(env, feats, "")
+		before := len(excluded)
+		excluded = s.applyToolResultTierCeiling(excluded, preTt, feats.Model)
+		if len(excluded) > before {
+			log.Info("tool_result tier ceiling: excluded above-tier models",
+				"requested_model", feats.Model,
+				"requested_tier", catalog.TierFor(feats.Model).String(),
+				"excluded_count", len(excluded)-before,
+			)
+		}
 	}
 
 	routeStart := time.Now()

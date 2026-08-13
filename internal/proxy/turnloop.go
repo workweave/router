@@ -253,6 +253,43 @@ func (s *Service) hasSubAgentOverride() bool {
 	return s.subAgentProvider != "" && s.subAgentModel != ""
 }
 
+// reasonRequestedModelRespected marks a decision that served the client's own
+// requested model instead of a routed one.
+const reasonRequestedModelRespected = "requested_model_respected"
+
+// honoredRequestedModel reports the provider/model to serve verbatim when the
+// client's requested model is on the operator's honor list. Exclusions and
+// provider eligibility are re-checked here because this path bypasses the
+// scorer, the only other place they are applied. An honored model that is
+// ineligible falls back to automatic routing rather than failing the request:
+// unlike x-weave-force-model, naming a model here is the client's routine
+// default rather than a deliberate per-request override.
+func (s *Service) honoredRequestedModel(ctx context.Context, req router.Request) (model, provider string, ok bool) {
+	if len(s.respectRequestedModel) == 0 || req.RequestedModel == "" {
+		return "", "", false
+	}
+	canonical, canonicalProvider, known := resolveForceModel(req.RequestedModel)
+	if !known {
+		return "", "", false
+	}
+	if _, honored := s.respectRequestedModel[canonical]; !honored {
+		return "", "", false
+	}
+	binding, reason := s.forcedModelBinding(ctx, canonical, canonicalProvider)
+	if reason != "" {
+		return "", "", false
+	}
+	if _, excluded := req.ExcludedModels[canonical]; excluded {
+		return "", "", false
+	}
+	if req.EnabledProviders != nil {
+		if _, enabled := req.EnabledProviders[binding]; !enabled {
+			return "", "", false
+		}
+	}
+	return canonical, binding, true
+}
+
 // isHardPinnedTurn reports whether a turn type bypasses pin lookup/write,
 // planner, and scorer entirely via the boot-time hard pin. These turns are
 // also skipped by proactive compaction: they are either tiny (probe/title-gen/
@@ -474,6 +511,30 @@ func (s *Service) runTurnLoop(
 		res.StickyHit = true
 		res.HardPinned = true
 		res.PinTier = string(res.TurnType) + "_hard_pin"
+		return res, nil
+	}
+
+	// A client naming a model on the operator's honor list gets it verbatim: a
+	// skill or sub-agent pinned by frontmatter has already made the model choice,
+	// and re-deciding it would serve something the caller never asked for. Placed
+	// after the automatic hard pins so probe/title-gen/compaction keep their cheap
+	// model even though the client sends the session model on those turns.
+	if model, provider, ok := s.honoredRequestedModel(ctx, req); ok {
+		log.Info("requested model respected; bypassing planner and scorer",
+			"requested_model", req.RequestedModel,
+			"served_model", model,
+			"provider", provider,
+		)
+		res.Decision = router.Decision{
+			Provider: provider,
+			Model:    model,
+			Reason:   reasonRequestedModelRespected,
+		}
+		res.StickyHit = true
+		// Bypasses pin lookup/write like the hard pins above: a per-request
+		// frontmatter pin must not anchor the session it happens to run inside.
+		res.HardPinned = true
+		res.PinTier = reasonRequestedModelRespected
 		return res, nil
 	}
 

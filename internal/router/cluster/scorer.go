@@ -30,6 +30,13 @@ type Config struct {
 	TopP           int
 	MaxPromptChars int
 	EmbedTimeout   time.Duration
+	// StaticClusterPin, keyed by cluster ID, pins every request whose nearest
+	// cluster (topClusters[0]) has an entry to that model, skipping
+	// blendScoresV2 entirely to test pinning against the scorer's own latency
+	// overhead. A cluster missing from the map, or a pinned model absent from
+	// the request's eligible set, falls through to normal cluster-scorer
+	// routing rather than failing the request. Nil/empty disables the feature.
+	StaticClusterPin map[int]string
 }
 
 // DefaultConfig returns production defaults.
@@ -645,8 +652,15 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 
 	var scores map[string]float32
 	var effectiveKnobsHash uint64
+	pinnedModel, pinApplied := s.staticClusterPinFor(topClusters, eligibleModels)
 
-	if s.isV2 {
+	switch {
+	case pinApplied:
+		// Skips blendScoresV2 (and its knobs validation) entirely: the point of
+		// a static pin is to measure pinning against the scorer's own latency
+		// overhead, so this path must not pay for the work it's replacing.
+		scores = map[string]float32{pinnedModel: 1}
+	case s.isV2:
 		// 1. Resolve Knobs and Validate
 		//
 		// defaultKnobs is kept alongside activeKnobs (both fresh clones from
@@ -765,7 +779,7 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		)
 
 		scores = s.blendScoresV2(topClusters, activeKnobs, eligibleModels, req.SubsidizedModelCostFactor, priorityBonus)
-	} else {
+	default:
 		// Legacy v1: static cluster rankings, no cost axis, so
 		// SubsidizedModelCostFactor doesn't apply. All deployed bundles run V2;
 		// this is a fallback.
@@ -849,12 +863,18 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 			pairedProvider = p
 		}
 	}
+	reasonPrefix := "cluster"
+	if pinApplied {
+		// Distinct prefix so router.model_router_request_telemetry can filter
+		// pinned-path decisions from scorer-argmax ones without a schema change.
+		reasonPrefix = "cluster-pin"
+	}
 	decision := router.Decision{
 		Provider: chosenProvider,
 		Model:    chosen.Model,
 		Reason: fmt.Sprintf(
-			"cluster:%s top_p=%s model=%s provider=%s",
-			s.version, clusterIDsString(topClusters), chosen.Model, chosenProvider,
+			"%s:%s top_p=%s model=%s provider=%s",
+			reasonPrefix, s.version, clusterIDsString(topClusters), chosen.Model, chosenProvider,
 		),
 		Metadata: &router.RoutingMetadata{
 			Embedding:            embedCopy,
@@ -896,6 +916,28 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		"has_images", req.HasImages,
 	)
 	return decision, nil
+}
+
+// staticClusterPinFor reports the pin for the request's nearest cluster
+// (topClusters[0]), if StaticClusterPin is configured, the nearest cluster has
+// an entry, and the pinned model is currently eligible. Any of those failing
+// falls through to normal cluster-scorer routing rather than pinning to a
+// model the request couldn't otherwise receive (excluded, wrong provider,
+// image-incapable, etc.) — same fail-open philosophy as honoredRequestedModel.
+func (s *Scorer) staticClusterPinFor(topClusters []int, eligibleModels []string) (model string, ok bool) {
+	if len(s.cfg.StaticClusterPin) == 0 || len(topClusters) == 0 {
+		return "", false
+	}
+	pinned, has := s.cfg.StaticClusterPin[topClusters[0]]
+	if !has {
+		return "", false
+	}
+	for _, m := range eligibleModels {
+		if m == pinned {
+			return pinned, true
+		}
+	}
+	return "", false
 }
 
 func (s *Scorer) lookupCandidate(model string) *DeployedEntry {
