@@ -102,6 +102,10 @@ func SubmitHandler(svc *proxy.Service) gin.HandlerFunc {
 			return
 		}
 
+		if req.Comment != nil && len(strings.TrimSpace(*req.Comment)) > maxCommentBytes {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "comment too long"})
+			return
+		}
 		err = svc.SubmitFeedback(c.Request.Context(), proxy.SubmitFeedbackParams{
 			InstallationID: claims.InstallationID,
 			ExternalID:     claims.ExternalID,
@@ -181,6 +185,12 @@ func toContextResponse(f proxy.FeedbackContext) contextResponse {
 	}
 	return resp
 }
+
+// maxCommentBytes is the maximum allowed comment length after whitespace
+// trimming. The HTTP body reader caps total body size at 64KB, but a comment
+// close to that limit represents unnecessary DB storage amplification for a
+// rating widget. Submissions exceeding this limit are rejected with 400.
+const maxCommentBytes = 2048
 
 // normalizeComment trims whitespace and collapses an empty comment to nil so
 // "" and "no comment" are indistinguishable downstream.
