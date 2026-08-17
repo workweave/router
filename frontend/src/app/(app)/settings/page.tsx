@@ -458,7 +458,7 @@ function RouterKeysPanel() {
 }
 
 
-const PROVIDERS = ["anthropic", "openai", "google", "openrouter", "anthropic_gateway"] as const;
+const PROVIDERS = ["anthropic", "openai", "google", "openrouter", "trustedrouter", "anthropic_gateway"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
 const PROVIDER_LABEL: Record<Provider, string> = {
@@ -466,6 +466,7 @@ const PROVIDER_LABEL: Record<Provider, string> = {
   openai: "OpenAI",
   google: "Google",
   openrouter: "OpenRouter",
+  trustedrouter: "TrustedRouter",
   anthropic_gateway: "Anthropic-compatible gateway",
 };
 
@@ -474,6 +475,7 @@ const PROVIDER_ENV_VAR: Record<Provider, string> = {
   openai: "OPENAI_API_KEY",
   google: "GOOGLE_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
+  trustedrouter: "TRUSTEDROUTER_API_KEY",
   anthropic_gateway: "ANTHROPIC_GATEWAY_TOKEN",
 };
 
