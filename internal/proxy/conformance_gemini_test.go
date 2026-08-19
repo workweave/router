@@ -89,13 +89,13 @@ func TestConformance_GeminiNative(t *testing.T) {
 			newClient: geminiClient,
 			inbound: `{"model":"gemini-3.1-pro-preview","stream":true,"max_tokens":1024,"tools":` + weatherTool + `,"messages":[` +
 				`{"role":"user","content":"Weather in NYC?"},` +
-				`{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"NYC"},"thought_signature":"SIG_ROUNDTRIP"}]},` +
+				`{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"NYC"},"thought_signature":"SIG_ROUNDTRIP000"}]},` +
 				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"sunny"}]}` +
 				`]}`,
 			stream:          true,
 			upstreamFixture: "gemini_native/basic_text.upstream.sse",
 			wantUpstream: func(t *testing.T, _ string, body []byte, _ http.Header) {
-				assert.Contains(t, string(body), `"thoughtSignature":"SIG_ROUNDTRIP"`,
+				assert.Contains(t, string(body), `"thoughtSignature":"SIG_ROUNDTRIP000"`,
 					"prior assistant tool_use signature must round-trip onto the Gemini functionCall part")
 			},
 		},

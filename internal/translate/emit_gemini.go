@@ -440,7 +440,7 @@ func openAIAssistantPartsGJSON(msg gjson.Result) ([]string, error) {
 		}
 		if sig != "" {
 			pw.Key("thoughtSignature")
-			pw.Str(sig)
+			pw.Str(encodeSignatureForJSON(sig))
 		}
 		pw.EndObj()
 		parts = append(parts, string(pw.Bytes()))
@@ -457,6 +457,29 @@ func geminiTextPart(text string) string {
 	jw.Str(text)
 	jw.EndObj()
 	return string(jw.Bytes())
+}
+
+// signatureWireEncodings are the base64 variants a wire-form thoughtSignature
+// may already be encoded in (Google emits std; the carrier uses raw URL).
+var signatureWireEncodings = []*base64.Encoding{
+	base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+}
+
+// encodeSignatureForJSON re-encodes non-base64 signature bytes as base64url
+// before JSON emit. A carrier-decoded value can be raw bytes — not valid
+// UTF-8 (Go's range loop would replace them with U+FFFD) or ASCII that is
+// not the required base64 wire form. Values already valid base64 (upstream-
+// delivered wire form) pass through unchanged.
+func encodeSignatureForJSON(sig string) string {
+	if sig == "" {
+		return sig
+	}
+	for _, enc := range signatureWireEncodings {
+		if _, err := enc.DecodeString(sig); err == nil {
+			return sig
+		}
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(sig))
 }
 
 // writeGeminiToolsFromOpenAI writes the tools array into jw from an OpenAI body.
@@ -918,7 +941,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				pw.Str(text)
 				if sig := block.Get("thought_signature").String(); sig != "" {
 					pw.Key("thoughtSignature")
-					pw.Str(sig)
+					pw.Str(encodeSignatureForJSON(sig))
 				}
 				pw.EndObj()
 				parts = append(parts, string(pw.Bytes()))
@@ -944,7 +967,7 @@ func anthropicAssistantPartsGJSON(content gjson.Result) []string {
 				}
 				if sig != "" {
 					pw.Key("thoughtSignature")
-					pw.Str(sig)
+					pw.Str(encodeSignatureForJSON(sig))
 				}
 				pw.EndObj()
 				parts = append(parts, string(pw.Bytes()))

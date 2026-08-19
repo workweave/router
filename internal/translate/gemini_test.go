@@ -274,7 +274,7 @@ func TestPrepareGemini_FromAnthropic_SystemAndToolUseRoundTripsSignature(t *test
 			{"role":"assistant","content":[
 				{"type":"tool_use","id":"toolu_x","name":"bash",
 				 "input":{"command":"ls"},
-				 "thought_signature":"ANTHROPIC_SIG"}
+				 "thought_signature":"ANTHROPIC_SIG_00"}
 			]},
 			{"role":"user","content":[
 				{"type":"tool_result","tool_use_id":"toolu_x","content":"f1"}
@@ -295,7 +295,7 @@ func TestPrepareGemini_FromAnthropic_SystemAndToolUseRoundTripsSignature(t *test
 	model := contents[1].(map[string]any)
 	parts := model["parts"].([]any)
 	p := parts[0].(map[string]any)
-	assert.Equal(t, "ANTHROPIC_SIG", p["thoughtSignature"])
+	assert.Equal(t, "ANTHROPIC_SIG_00", p["thoughtSignature"])
 	fc := p["functionCall"].(map[string]any)
 	assert.Equal(t, "bash", fc["name"])
 
@@ -429,7 +429,7 @@ func TestGeminiToOpenAIResponse_FinishReasonMapping(t *testing.T) {
 func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStripping(t *testing.T) {
 	// Turn 1: construct the tool_use block by hand, replicating what
 	// embedSignatureInID produces (id + "__thought__" + base64(sig)).
-	smuggledID := "toolu_test__thought__" + base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_GEMINI_SIG"))
+	smuggledID := "toolu_test__thought__" + base64.RawURLEncoding.EncodeToString([]byte("OPAQUE_GEMINI_SIG000"))
 	tu := map[string]any{
 		"type":  "tool_use",
 		"id":    smuggledID,
@@ -462,7 +462,7 @@ func TestPrepareGemini_FromAnthropic_ToolUseSignatureSurvivesUnknownFieldStrippi
 	parts := model["parts"].([]any)
 	p := parts[0].(map[string]any)
 	// The signature is what Gemini 3.x rejects requests for when missing.
-	assert.Equal(t, "OPAQUE_GEMINI_SIG", p["thoughtSignature"])
+	assert.Equal(t, "OPAQUE_GEMINI_SIG000", p["thoughtSignature"])
 	fc := p["functionCall"].(map[string]any)
 	assert.Equal(t, "bash", fc["name"])
 	// And the functionResponse must still resolve the name from the smuggled id.
