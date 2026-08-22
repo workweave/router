@@ -17,3 +17,4 @@ When the planner decides SWITCH, proxy asks a small model to summarize prior con
 
 - **`Summarizer` implementations MUST respect the context deadline.** On summarizer timeout or error, proxy keeps the full prior history unchanged (no trim) — a pricier switch action beats silently dropping context. Do not "fix" by waiting longer, and do not reintroduce a silent trim fallback.
 - **No I/O in this package.** All I/O lives in the proxy-side implementation.
+- **`Provider()`/`Model()` must report what the implementation will actually call.** Proxy keys credential resolution and exclusion checks off them; a stale or hardcoded answer sends a tenant's key, or their conversation, to the wrong upstream.

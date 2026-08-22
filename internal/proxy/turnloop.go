@@ -1189,11 +1189,10 @@ func (s *Service) runTurnLoop(
 	// summarizer failure keeps the full prior history rather than trimming —
 	// an expensive switch turn beats silently dropping context.
 	//
-	// Privacy guard: the summarizer runs on deployment-level creds by default,
-	// which would cross the tenant boundary for a BYOK/client request. Prefer
-	// the caller's own forwarded creds for the summarizer's provider when
-	// available; skip summarization (pass full history through) only when the
-	// request is BYOK/client-keyed with no matching creds forwarded.
+	// Privacy guard: a summary ships the whole prior conversation to the
+	// summarizer's own binding, so gateSummarizerCall withholds it from an
+	// excluded provider/model and keeps a BYOK/client request off the
+	// deployment key. A refusal passes the full history through.
 	if pinFound && prefixBroken {
 		// Client already trimmed its own history — summarizing again is pure
 		// cost, so forward unchanged.
@@ -1204,34 +1203,24 @@ func (s *Service) runTurnLoop(
 	}
 	if pinFound && !prefixBroken {
 		var (
-			sumProvider       string
-			sumCreds          *Credentials
-			canCallSummarizer bool
+			sumProvider string
+			gate        summarizerGate
 		)
 		if s.summarizer != nil {
 			sumProvider = s.summarizer.Provider()
-			sumCreds = resolveSummarizerCreds(ctx, sumProvider, reqHeaders)
-			nonDepCreds := s.requestUsesNonDeploymentCreds(ctx, reqHeaders)
-			canCallSummarizer = sumCreds != nil || !nonDepCreds
+			gate = s.gateSummarizerCall(ctx, sumProvider, s.summarizer.Model(), reqHeaders)
 		}
 		switch {
 		case s.summarizer == nil:
 			res.Handover.Invoked = true
 			res.Handover.FallbackToFullHistory = true
 			log.Info("Handover summarizer not wired; preserved full history instead", "pin_model", pin.Model, "fresh_model", fresh.Model)
-		case !canCallSummarizer:
+		case !gate.Allowed:
 			res.Handover.Invoked = true
 			res.Handover.FallbackToFullHistory = true
-			log.Info("Handover summarizer skipped to preserve tenant boundary; preserved full history instead", "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
+			log.Info("Handover summarizer skipped by policy; preserved full history instead", "skip_reason", gate.SkipReason, "pin_model", pin.Model, "fresh_model", fresh.Model, "sum_provider", sumProvider)
 		default:
-			summCtx := ctx
-			if sumCreds != nil {
-				summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
-			} else {
-				// Strip any request credential (e.g. subscription OAuth token)
-				// so this synthetic call doesn't inherit it and 401/cross tenants.
-				summCtx = clearCredentials(ctx)
-			}
+			summCtx := gate.summarizerContext(ctx)
 			start := time.Now()
 			summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
 			res.Handover.Invoked = true

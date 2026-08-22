@@ -90,12 +90,17 @@ func (s *Service) maxEligibleContextWindow(policyExcluded map[string]struct{}, s
 	return maxWindow
 }
 
-// selectCompactionSummarizer returns the cheapest configured summarizer model
+// selectCompactionSummarizer returns the cheapest permitted summarizer model
 // whose context window can ingest historyTokens plus summary headroom, or ""
-// when none can (caller falls back to trimming).
-func (s *Service) selectCompactionSummarizer(historyTokens int) string {
+// when none can (caller falls back to trimming). Excluded models are skipped:
+// the summary call would ship the whole history to a banned model.
+func (s *Service) selectCompactionSummarizer(ctx context.Context, historyTokens int) string {
 	need := historyTokens + compactionSummaryOutputReserve
+	excluded := s.excludedModelsForRequest(ctx)
 	for _, m := range compactionSummarizerModels {
+		if _, banned := excluded[m]; banned {
+			continue
+		}
 		if catalog.ContextWindowFor(m) >= need {
 			return m
 		}
@@ -184,33 +189,27 @@ func (s *Service) billCompactionSummary(ctx context.Context, requestID, external
 }
 
 // runCompactionSummary picks a window-aware summarizer model and dispatches the
-// structured summary call, honoring the tenant-boundary credential rules used
-// by the switch-handover path. Returns ok=false (and logs) when no summarizer
-// fits the history, the tenant boundary forbids the call, or the call fails —
-// in every such case the caller falls through to trimming.
+// structured summary call, honoring the exclusion and tenant-boundary rules
+// used by the switch-handover path. Returns ok=false (and logs) when no
+// permitted summarizer fits the history, policy forbids the call, or the call
+// fails — in every such case the caller falls through to trimming.
 func (s *Service) runCompactionSummary(ctx context.Context, env *translate.RequestEnvelope, reqHeaders http.Header) (string, handover.Usage, string, bool) {
 	log := observability.FromContext(ctx)
 
-	model := s.selectCompactionSummarizer(env.ContextOverflowTokenEstimate())
+	model := s.selectCompactionSummarizer(ctx, env.ContextOverflowTokenEstimate())
 	if model == "" {
-		log.Info("Compaction Tier-3 skipped: history exceeds every summarizer window", "history", env.ContextOverflowTokenEstimate())
+		log.Info("Compaction Tier-3 skipped: no permitted summarizer window fits the history", "history", env.ContextOverflowTokenEstimate())
 		return "", handover.Usage{}, "", false
 	}
 
 	sumProvider := s.compactionSummarizer.Provider()
-	sumCreds := resolveSummarizerCreds(ctx, sumProvider, reqHeaders)
-	if sumCreds == nil && s.requestUsesNonDeploymentCreds(ctx, reqHeaders) {
-		log.Info("Compaction Tier-3 skipped: would cross tenant boundary", "sum_provider", sumProvider)
+	gate := s.gateSummarizerCall(ctx, sumProvider, model, reqHeaders)
+	if !gate.Allowed {
+		log.Info("Compaction Tier-3 skipped by policy", "skip_reason", gate.SkipReason, "sum_provider", sumProvider, "summary_model", model)
 		return "", handover.Usage{}, "", false
 	}
-	summCtx := ctx
-	if sumCreds != nil {
-		summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
-	} else {
-		summCtx = clearCredentials(ctx)
-	}
 
-	summary, usage, err := s.compactionSummarizer.SummarizeForCompaction(summCtx, env, model, DefaultCompactionMaxTokens)
+	summary, usage, err := s.compactionSummarizer.SummarizeForCompaction(gate.summarizerContext(ctx), env, model, DefaultCompactionMaxTokens)
 	if err != nil {
 		log.Warn("Compaction summarizer failed; falling back to trim", "err", err, "model", model)
 		return "", handover.Usage{}, "", false

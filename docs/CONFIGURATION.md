@@ -295,6 +295,9 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 | `ROUTER_SUBAGENT_MODEL`           | *(none)*                     | Route Claude Code Task-tool sub-agent turns to a distinct model, independent of `ROUTER_HARD_PIN_MODEL` — e.g. a local/self-hosted OpenAI-compatible model (point `OPENROUTER_BASE_URL` at your local server) while the main loop keeps using Anthropic/whatever the scorer picks. Requires `ROUTER_SUBAGENT_PROVIDER`; either alone is ignored. Takes effect regardless of `ROUTER_HARD_PIN_EXPLORE`, but the HMM strategy keeps its own sub-agent handling and isn't affected. |
 | `ROUTER_SUBAGENT_PROVIDER`        | *(none)*                     | Pair with `ROUTER_SUBAGENT_MODEL`. |
 | `ROUTER_TRANSLATION_COMPATIBILITY_MODE` | `shadow` | Translation representability rollout: `off` disables broad filtering, `shadow` records candidate exclusions without changing routes, and `enforce` makes declared semantic requirements hard routing constraints. Native-only safety paths (such as unsupported Responses tool unions and native Gemini ingress) remain protected unless mode is `off`. |
+| `ROUTER_HANDOVER_PROVIDER`        | `anthropic`                  | Provider that summarizes prior history when the planner switches models, and for the compaction cascade's structured summary. Must be registered and speak the Anthropic Messages format, or summarization stays off and switch turns forward full history. |
+| `ROUTER_HANDOVER_MODEL`           | `claude-haiku-4-5`           | Model used for that summary. |
+| `ROUTER_HANDOVER_TIMEOUT_MS`      | `8000`                       | Deadline for the summary call. On timeout the full prior history is forwarded unchanged. |
 | `ROUTER_COMPACTION_PCT`           | `0.85`                       | Fraction of the largest eligible model's context window at which the proactive compaction cascade engages (clear old tool results → structured summary → trim). Range `(0,1]`; `0` disables compaction (over-window requests then 413). Mirrors Claude Code's ~0.85 auto-compact trigger. |
 | `ROUTER_ONNX_ASSETS_DIR`          | `/opt/router/assets`         | Directory containing `model.onnx` + `tokenizer.json`. |
 | `ROUTER_ONNX_LIBRARY_DIR`         | *(system default)*           | Path to `libonnxruntime` (e.g. `/opt/homebrew/lib` on Apple Silicon). |
@@ -339,6 +342,13 @@ quietly reverting to automatic routing — clear it with `/unforce-model`. The
 same holds a level up: exclusions that empty a forced routing cluster fail the
 request too (see [Forcing a model or a routing
 cluster](#forcing-a-model-or-a-routing-cluster)).
+
+The router's own synthetic calls obey the same lists. The handover and
+compaction summarizers ship the entire prior conversation upstream, so an
+excluded `ROUTER_HANDOVER_PROVIDER` (or `ROUTER_HANDOVER_MODEL`) means no
+summary is requested at all: a switch turn forwards full history and
+compaction falls through to trimming, exactly as on a summarizer error.
+Compaction's window-aware model choice skips excluded models too.
 
 Excluding every provider that serves the models you route to leaves requests
 with nowhere to go (HTTP 503 from the scorer), so exclude deliberately.

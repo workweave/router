@@ -625,13 +625,20 @@ func main() {
 	// registered, so the Service's nil-check disables Tier-3 correctly (a
 	// typed-nil concrete pointer would defeat it).
 	var compactionSz proxy.CompactionSummarizer
-	if client, ok := providerMap[handoverProviderName]; ok {
-		ps := proxy.NewProviderSummarizer(client, handoverModel, handoverTimeout)
+	client, handoverProviderRegistered := providerMap[handoverProviderName]
+	// The summarizer emits Anthropic Messages bodies directly, with no
+	// translator in front of it.
+	handoverFamilyOK := providers.FamilyFor(handoverProviderName) == providers.FamilyAnthropic
+	switch {
+	case !handoverProviderRegistered:
+		logger.Info("Handover summarizer disabled (provider not registered); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
+	case !handoverFamilyOK:
+		logger.Warn("Handover summarizer disabled (provider does not speak the Anthropic Messages format); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
+	default:
+		ps := proxy.NewProviderSummarizer(client, handoverProviderName, handoverModel, handoverTimeout)
 		summarizer = ps
 		compactionSz = ps
 		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds())
-	} else {
-		logger.Info("Handover summarizer disabled (provider not registered); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
 	}
 	compactionPct := parseEnvFloat("ROUTER_COMPACTION_PCT", proxy.DefaultCompactionTriggerPct)
 

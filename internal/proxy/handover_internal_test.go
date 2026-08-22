@@ -89,7 +89,7 @@ func TestProviderSummarizer_SuccessReturnsAssistantText(t *testing.T) {
 		respBody:   canonicalAnthropicResponse,
 		respStatus: http.StatusOK,
 	}
-	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+	s := NewProviderSummarizer(fake, providers.ProviderAnthropic, "", 200*time.Millisecond)
 
 	got, _, err := s.Summarize(context.Background(), env)
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestProviderSummarizer_TimeoutReturnsError(t *testing.T) {
 		// Sleep longer than the summarizer's timeout.
 		sleep: 200 * time.Millisecond,
 	}
-	s := NewProviderSummarizer(fake, "", 25*time.Millisecond)
+	s := NewProviderSummarizer(fake, providers.ProviderAnthropic, "", 25*time.Millisecond)
 
 	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
@@ -127,7 +127,7 @@ func TestProviderSummarizer_Non2xxReturnsError(t *testing.T) {
 		respBody:   `{"error":"oops"}`,
 		respStatus: http.StatusInternalServerError,
 	}
-	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+	s := NewProviderSummarizer(fake, providers.ProviderAnthropic, "", 200*time.Millisecond)
 
 	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
@@ -147,7 +147,7 @@ func TestProviderSummarizer_EmptyContentReturnsErrEmptySummary(t *testing.T) {
 		respBody:   `{"id":"msg_empty","content":[]}`,
 		respStatus: http.StatusOK,
 	}
-	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+	s := NewProviderSummarizer(fake, providers.ProviderAnthropic, "", 200*time.Millisecond)
 
 	got, _, err := s.Summarize(context.Background(), env)
 	require.Error(t, err)
@@ -159,7 +159,7 @@ func TestProviderSummarizer_NilEnvelopeReturnsError(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeHandoverProvider{}
-	s := NewProviderSummarizer(fake, "", 200*time.Millisecond)
+	s := NewProviderSummarizer(fake, providers.ProviderAnthropic, "", 200*time.Millisecond)
 
 	_, _, err := s.Summarize(context.Background(), nil)
 	require.Error(t, err)

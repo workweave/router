@@ -65,16 +65,23 @@ const compactionInstruction = "The conversation is being compacted to fit the mo
 
 // ProviderSummarizer adapts a providers.Client to handover.Summarizer by
 // building a small Anthropic Messages request from the prior conversation.
+// The client must speak the Anthropic Messages format natively; provider names
+// the upstream it dispatches to so credential resolution, exclusion policy and
+// billing attribution all key off the same identity.
 type ProviderSummarizer struct {
 	client    providers.Client
+	provider  string
 	model     string
 	timeout   time.Duration
 	maxTokens int
 }
 
-// NewProviderSummarizer constructs a summarizer adapter. Empty/zero args
-// fall back to defaults.
-func NewProviderSummarizer(client providers.Client, model string, timeout time.Duration) *ProviderSummarizer {
+// NewProviderSummarizer constructs a summarizer adapter dispatching to the
+// named provider. Empty/zero args fall back to defaults.
+func NewProviderSummarizer(client providers.Client, provider, model string, timeout time.Duration) *ProviderSummarizer {
+	if provider == "" {
+		provider = providers.ProviderAnthropic
+	}
 	if model == "" {
 		model = DefaultHandoverModel
 	}
@@ -83,6 +90,7 @@ func NewProviderSummarizer(client providers.Client, model string, timeout time.D
 	}
 	return &ProviderSummarizer{
 		client:    client,
+		provider:  provider,
 		model:     model,
 		timeout:   timeout,
 		maxTokens: DefaultHandoverMaxTokens,
@@ -100,7 +108,12 @@ func (s *ProviderSummarizer) WithMaxTokens(n int) *ProviderSummarizer {
 
 // Provider returns the upstream provider this summarizer dispatches to.
 func (s *ProviderSummarizer) Provider() string {
-	return providers.ProviderAnthropic
+	return s.provider
+}
+
+// Model returns the model the switch-handover summary is dispatched to.
+func (s *ProviderSummarizer) Model() string {
+	return s.model
 }
 
 // ErrEmptySummary is returned when the upstream call succeeded but no
@@ -162,7 +175,7 @@ func (s *ProviderSummarizer) summarize(ctx context.Context, env *translate.Reque
 	prep.Headers.Set("anthropic-version", "2023-06-01")
 
 	decision := router.Decision{
-		Provider: providers.ProviderAnthropic,
+		Provider: s.provider,
 		Model:    model,
 		Reason:   kind + "_summary",
 	}
@@ -193,7 +206,7 @@ func (s *ProviderSummarizer) summarize(ctx context.Context, env *translate.Reque
 	}
 	usage := extractAnthropicUsage(respBody)
 	usage.Model = model
-	usage.Provider = providers.ProviderAnthropic
+	usage.Provider = s.provider
 	return text, usage, nil
 }
 
@@ -309,34 +322,23 @@ func (s *Service) runCompactionHandover(ctx context.Context, env *translate.Requ
 	out.Invoked = true
 
 	var (
-		sumProvider       string
-		sumCreds          *Credentials
-		canCallSummarizer bool
+		sumProvider string
+		gate        summarizerGate
 	)
 	if s.summarizer != nil {
 		sumProvider = s.summarizer.Provider()
-		sumCreds = resolveSummarizerCreds(ctx, sumProvider, reqHeaders)
-		nonDepCreds := s.requestUsesNonDeploymentCreds(ctx, reqHeaders)
-		canCallSummarizer = sumCreds != nil || !nonDepCreds
+		gate = s.gateSummarizerCall(ctx, sumProvider, s.summarizer.Model(), reqHeaders)
 	}
 
 	switch {
 	case s.summarizer == nil:
 		out.FallbackToFullHistory = true
 		log.Info("Compaction handover: summarizer not wired; preserved compacted body instead", "decision_model", decisionModel)
-	case !canCallSummarizer:
+	case !gate.Allowed:
 		out.FallbackToFullHistory = true
-		log.Info("Compaction handover: summarizer skipped (tenant boundary); preserved compacted body instead", "decision_model", decisionModel)
+		log.Info("Compaction handover: summarizer skipped by policy; preserved compacted body instead", "skip_reason", gate.SkipReason, "sum_provider", sumProvider, "decision_model", decisionModel)
 	default:
-		summCtx := ctx
-		if sumCreds != nil {
-			summCtx = context.WithValue(ctx, CredentialsContextKey{}, sumCreds)
-		} else {
-			// Strip any request credential (e.g. subscription OAuth token) so
-			// this synthetic call runs on the deployment key instead of
-			// inheriting one that could 401 or cross a tenant boundary.
-			summCtx = clearCredentials(ctx)
-		}
+		summCtx := gate.summarizerContext(ctx)
 		start := time.Now()
 		summary, summaryUsage, sumErr := s.summarizer.Summarize(summCtx, env)
 		out.LatencyMS = time.Since(start).Milliseconds()

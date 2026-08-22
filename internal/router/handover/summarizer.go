@@ -33,12 +33,14 @@ type Usage struct {
 // Implementations SHOULD respect the context deadline; on timeout or error,
 // callers keep the full prior history unchanged instead of dropping it.
 //
-// Provider identifies the upstream this summarizer dispatches to (e.g.
-// "anthropic"), so the orchestrator can plumb matching BYOK creds through
-// and keep tenant data from crossing the deployment key boundary.
+// Provider and Model identify the upstream this summarizer dispatches to (e.g.
+// "anthropic"), so the orchestrator can plumb matching BYOK creds through, keep
+// tenant data from crossing the deployment key boundary, and withhold the
+// conversation from a binding the installation excluded.
 type Summarizer interface {
 	Summarize(ctx context.Context, env *translate.RequestEnvelope) (summary string, usage Usage, err error)
 	Provider() string
+	Model() string
 }
 
 // RewriteEnvelope mutates env in-place: keeps system blocks, replaces

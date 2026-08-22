@@ -28,6 +28,7 @@ import (
 // or errOnCall if set. calls counts invocations.
 type fakeSummarizer struct {
 	summary   string
+	provider  string
 	errOnCall error
 	calls     atomic.Int32
 }
@@ -40,7 +41,14 @@ func (f *fakeSummarizer) Summarize(ctx context.Context, env *translate.RequestEn
 	return f.summary, handover.Usage{}, nil
 }
 
-func (f *fakeSummarizer) Provider() string { return providers.ProviderAnthropic }
+func (f *fakeSummarizer) Provider() string {
+	if f.provider != "" {
+		return f.provider
+	}
+	return providers.ProviderAnthropic
+}
+
+func (f *fakeSummarizer) Model() string { return proxy.DefaultHandoverModel }
 
 // usageProvider writes an Anthropic response with the configured token
 // usage so the OTel UsageExtractor surfaces it to the cache-stats writeback.
@@ -746,6 +754,35 @@ func TestTurnLoop_HandoverSkippedWhenClientCredsCrossProvider(t *testing.T) {
 
 	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT run when client creds are for a different provider than the summarizer")
 	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen with full history passed through")
+}
+
+// An excluded summarizer provider must not receive the conversation even when
+// the routed model is permitted and the deployment holds a key for it.
+func TestTurnLoop_HandoverSkippedWhenSummarizerProviderExcluded(t *testing.T) {
+	store := newFakePinStore()
+	store.hasPin = true
+	store.pin = sessionpin.Pin{
+		Provider:        providers.ProviderAnthropic,
+		Model:           "claude-opus-4-7",
+		Reason:          "cluster:v0.2",
+		PinnedUntil:     time.Now().Add(time.Hour),
+		LastInputTokens: 5000,
+		LastTurnEndedAt: time.Now().Add(-30 * time.Second),
+	}
+	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAnthropic, Model: "claude-haiku-4-5", Reason: "cluster:v0.2"}}
+	sz := &fakeSummarizer{summary: "Should not be invoked.", provider: providers.ProviderOpenAI}
+	svc, provider := newPinSvcCapturing(fr, store)
+	svc.WithSummarizer(sz)
+
+	ctx := context.WithValue(authedCtx(uuid.New().String()),
+		proxy.InstallationExcludedProvidersContextKey{}, []string{providers.ProviderOpenAI})
+	rec := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
+	require.NoError(t, svc.ProxyMessages(ctx, largeMultiTurnBody(t), rec, httpReq))
+
+	assert.Equal(t, int32(0), sz.calls.Load(), "summarizer must NOT receive the conversation when its provider is excluded")
+	assert.Equal(t, "claude-haiku-4-5", rec.Header().Get(proxy.HeaderRouterModel), "switch must still happen")
+	assert.Equal(t, 6, forwardedMessageCount(t, provider), "refused summary must preserve full history, not trim it")
 }
 
 // ROUTER_PLANNER_ENABLED kill switch: an existing pin wins outright without

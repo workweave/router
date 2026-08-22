@@ -190,9 +190,10 @@ func TestWithCompaction_ZeroPctDisables(t *testing.T) {
 
 func TestSelectCompactionSummarizer_WindowAware(t *testing.T) {
 	s := &Service{}
-	assert.Equal(t, DefaultHandoverModel, s.selectCompactionSummarizer(1_000), "small history → cheap model")
-	assert.Equal(t, largeWindowSummarizerModel, s.selectCompactionSummarizer(300_000), "history over the cheap model's window → large-window model")
-	assert.Equal(t, "", s.selectCompactionSummarizer(5_000_000), "history over every window → none")
+	ctx := context.Background()
+	assert.Equal(t, DefaultHandoverModel, s.selectCompactionSummarizer(ctx, 1_000), "small history → cheap model")
+	assert.Equal(t, largeWindowSummarizerModel, s.selectCompactionSummarizer(ctx, 300_000), "history over the cheap model's window → large-window model")
+	assert.Equal(t, "", s.selectCompactionSummarizer(ctx, 5_000_000), "history over every window → none")
 }
 
 func TestMaxEligibleContextWindow(t *testing.T) {

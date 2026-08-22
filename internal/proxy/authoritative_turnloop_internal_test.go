@@ -45,6 +45,10 @@ func (s *authoritativeHandoverSummarizer) Provider() string {
 	return providers.ProviderAnthropic
 }
 
+func (s *authoritativeHandoverSummarizer) Model() string {
+	return DefaultHandoverModel
+}
+
 func TestAuthoritativePolicySelectsEveryEligibleTurn(t *testing.T) {
 	strategy := router.Strategy("authoritative-test")
 	tests := []struct {
