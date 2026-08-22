@@ -138,6 +138,33 @@ For fixes to `internal/billing` + `internal/server/middleware/balance_check.go` 
 - **Deterministic mock that branches on the requested model** is the cleanest way to drive both the serve path and the refusal path from one server: return 200 SSE for one model and 429 for another (the usage-bypass path forwards the requested model verbatim, so branching on `model` in the request body is reliable).
 - **What good looks like:** header `X-Router-Decision: usage_bypass`, the depleted-credits warning injected as content-block index 0 (real content re-indexed to 1), log `Balance past subscription overdraft floor: serving subscription-only`. Retryable upstream error → log `Subscription-only bypass hit retryable error; refusing instead of paid reroute` → HTTP 402. No subscription header below floor → `insufficient_credits` 402 that never logs `ProxyMessages start`.
 
+## Testing a new upstream provider with a fake Anthropic-shaped gateway
+
+For a provider that has no account/credential available (or that you must not call for real), stand up a local fake instead of a mock-of-a-mock. This is how the `anthropic_gateway` (Bearer-auth) provider was verified end-to-end.
+
+- **`claude` may not be installed on the box.** `which claude` first. If it's absent, drive `/v1/messages` with `curl` + a seeded `rk_` key. You then lose `/force-model`, so pin routing by *catalog ordering* instead: leave `ANTHROPIC_API_KEY` unset, which makes Anthropic passthrough-only and drops it from the enabled set on router-key-authed requests (`enabledProvidersForRequest` in `internal/proxy/service.go`), so `resolveProviderFor` falls through to the trailing binding for your new provider. Confirm with the `X-Router-Provider` response header on every turn — don't assume.
+- **Write the fake to record, not just respond.** Append `{path, headers (lower-cased), body}` as JSONL per request and 404 anything at an unexpected path. That JSONL is the actual evidence for wire-contract assertions: exact path, `authorization` vs `x-api-key`, and that no caller credential leaked upstream. A fake that only returns a canned body proves almost nothing.
+- **Assert the exact upstream path.** If the provider does (or deliberately does not) rewrite the base URL, the fake's recorded `path` is the discriminator. Serve only the path the config implies and let anything else 404 loudly.
+- **Blackhole real endpoints for fallback tests.** To prove a client with an empty base URL does not silently fall back to a vendor default, pin the vendor host to loopback inside the container so a fallback is a loud on-box failure rather than real egress:
+  ```yaml
+  services:
+    server:
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+        - "api.anthropic.com:127.0.0.1"
+  ```
+  Verify it actually applied with `docker inspect <container> --format '{{json .HostConfig.ExtraHosts}}'` — the compose images are distroless, so `exec … cat /etc/hosts` and `getent` are not available. The pass signal is an error naming the *empty* URL (`unsupported protocol scheme ""`), plus zero unexpected mentions of the vendor host in the log.
+- **BYOK `base_url` is not settable through the admin API.** `POST /admin/v1/provider-keys` passes `nil` for `base_url` and returns 409 while the provider's env var is set. To test BYOK precedence: boot with the token env var **unset** → create the row via the admin API (this also exercises any migration provider-CHECK widening, expect 201) → `UPDATE router.model_router_external_api_keys SET base_url='…'` via psql → restart **with** the deployment token set, so both credentials are live and "BYOK wins" is a real assertion. Run two fakes on different ports (deployment vs BYOK) and assert the deployment fake sees **zero** requests.
+
+## Verifying content-capture / OTLP attributes without a collector UI
+
+- Point `OTEL_EXPORTER_OTLP_ENDPOINT` at a tiny local HTTP sink that dumps each `/v1/logs` and `/v1/traces` body to a file. The payloads are protobuf, but attribute keys and string values are plainly greppable (`router.call`, `io.request_body`, `io.request_sha256`, `io.truncated`), which is enough for presence/absence assertions and for pulling 64-hex hashes out with a regex.
+- **Give every turn a unique `SENTINEL-…` string in the user message.** It defeats the semantic cache (so a cache hit can't masquerade as an upstream call) and lets you attribute one OTLP record to exactly one turn.
+- **When asserting an absence, always capture a live control.** For "capture off emits no log record", snapshot the sink directory before/after and show that **trace** payloads still arrived in the same window — otherwise you've only proven the sink was dead.
+- Admin-only routes (`WithAdminOnly`, e.g. `/admin/v1/content-capture`) reject `rk_` keys in either the `authorization` or `X-Weave-Router-Key` header with `401 admin_session_required`. Use a cookie jar: `POST /admin/v1/auth/login {"password": "$ROUTER_ADMIN_PASSWORD"}` with `ROUTER_COOKIE_INSECURE=true` for plain HTTP.
+- `cmd/seed` puts its `rk_` key on the `__router_admin__` installation — the same one the admin cookie resolves to — so one seeded key plus an admin login is enough for an installation-scoped override to affect your data-plane turns. Re-seed after any `docker compose down -v`.
+- Wipe the DB volume (`docker compose down -v`) before testing a migration that was renamed or renumbered, otherwise the sidecar considers it already applied and you test nothing. Round-trip with `docker compose run --rm --entrypoint migrate migrate -path=/migrations "-database=…&search_path=router" down 1`, and assert the *reverted* state (column absent, CHECK narrowed, version decremented, `dirty=false`) — a no-op down passes any assertion that only checks the final up.
+
 ## Notes
 
 - Local cluster version comes from `ROUTER_CLUSTER_VERSION` in `.env.local`; it may differ from prod, which is why `/force-model` (not the scorer) is the reliable way to hit one model.
