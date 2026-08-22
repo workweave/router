@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -456,6 +457,56 @@ func TestScorer_ReturnsErrOnDimMismatch(t *testing.T) {
 	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrClusterUnavailable))
+}
+
+// poisonedVec returns a valid Opus-aligned vector with idx overwritten.
+func poisonedVec(idx int, val float32) []float32 {
+	v := makeOpusVec()
+	v[idx] = val
+	return v
+}
+
+// A dimensionally valid but numerically meaningless embedding must fail
+// closed: cosine similarities against every centroid either all tie at
+// zero or have no strict ordering, so routing on them would select on
+// centroid order rather than on the prompt.
+func TestScorer_ReturnsErrOnInvalidEmbedding(t *testing.T) {
+	nan := float32(math.NaN())
+	tests := []struct {
+		name       string
+		vec        []float32
+		wantReason string
+	}{
+		{"all zero", make([]float32, EmbedDim), rejectZeroNorm},
+		{"NaN at beginning", poisonedVec(0, nan), rejectNaN},
+		{"NaN in middle", poisonedVec(EmbedDim/2, nan), rejectNaN},
+		{"NaN at end", poisonedVec(EmbedDim-1, nan), rejectNaN},
+		{"positive Inf", poisonedVec(0, float32(math.Inf(1))), rejectPositiveInf},
+		{"negative Inf", poisonedVec(EmbedDim-1, float32(math.Inf(-1))), rejectNegativeInf},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newScorerForTest(t, &fakeEmbedder{vec: tt.vec}, cfgForTest())
+
+			_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrClusterUnavailable))
+
+			reason, verr := validateEmbedding(tt.vec, EmbedDim)
+			require.Error(t, verr)
+			assert.Equal(t, tt.wantReason, reason)
+		})
+	}
+}
+
+// The zero-norm gate is an exact test, not an epsilon: a tiny but finite
+// vector still orders centroids meaningfully and must keep routing.
+func TestScorer_RoutesTinyNonZeroEmbedding(t *testing.T) {
+	s := newScorerForTest(t, &fakeEmbedder{vec: poisonedVec(0, 1e-20)}, cfgForTest())
+
+	got, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-7", got.Model)
 }
 
 func TestScorer_TailTruncatesBeforeEmbed(t *testing.T) {

@@ -487,14 +487,18 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 		)
 		return router.Decision{}, fmt.Errorf("embed failed after %dms: %w (cause: %v)", embedMs, ErrClusterUnavailable, err)
 	}
-	if len(vec) != s.centroids.Dim {
+	if reason, verr := validateEmbedding(vec, s.centroids.Dim); verr != nil {
 		log.Error(
-			"Cluster scorer: embedding dim mismatch; returning ErrClusterUnavailable",
+			"Cluster scorer: invalid embedding; returning ErrClusterUnavailable",
+			"reason", reason,
+			"err", verr,
+			"embedder", s.embed.ID(),
 			"got_dim", len(vec),
 			"want_dim", s.centroids.Dim,
 			"embed_ms", embedMs,
+			"requested_model", req.RequestedModel,
 		)
-		return router.Decision{}, fmt.Errorf("embedding dim %d != expected %d: %w", len(vec), s.centroids.Dim, ErrClusterUnavailable)
+		return router.Decision{}, fmt.Errorf("%v: %w", verr, ErrClusterUnavailable)
 	}
 
 	// Re-walk multi-binding rows under the per-request EnabledProviders set: a
@@ -926,6 +930,50 @@ func (s *Scorer) lookupCandidate(model string) *DeployedEntry {
 		}
 	}
 	return nil
+}
+
+// Rejection reasons for validateEmbedding, emitted as the "reason" log
+// attribute so rejections are countable by category.
+const (
+	rejectWrongDimension = "wrong_dimension"
+	rejectNaN            = "nan"
+	rejectPositiveInf    = "positive_inf"
+	rejectNegativeInf    = "negative_inf"
+	rejectZeroNorm       = "zero_norm"
+)
+
+// validateEmbedding enforces the Embedder contract — a successful Embed
+// returns a dimensionally correct, finite, L2-normed vector — at the one
+// point a runtime-produced vector enters the package. hugot's
+// normalization floors the denominator at 1e-12, so a zero vector stays
+// zero and NaNs stay NaN rather than surfacing as an Embed error.
+//
+// Zero and non-finite vectors carry no cosine ordering: every centroid
+// similarity ties at zero, or the comparator has no strict ordering at
+// all, so topPNearest would select on artifact order instead of on
+// semantics. The norm test is therefore exact zero, not an epsilon — a
+// tiny but finite vector still orders centroids meaningfully.
+func validateEmbedding(vec []float32, wantDim int) (string, error) {
+	if len(vec) != wantDim {
+		return rejectWrongDimension, fmt.Errorf("embedding dim %d != expected %d", len(vec), wantDim)
+	}
+	var normSq float64
+	for i, v := range vec {
+		x := float64(v)
+		switch {
+		case math.IsNaN(x):
+			return rejectNaN, fmt.Errorf("embedding contains NaN at index %d", i)
+		case math.IsInf(x, 1):
+			return rejectPositiveInf, fmt.Errorf("embedding contains +Inf at index %d", i)
+		case math.IsInf(x, -1):
+			return rejectNegativeInf, fmt.Errorf("embedding contains -Inf at index %d", i)
+		}
+		normSq += x * x
+	}
+	if normSq == 0 {
+		return rejectZeroNorm, errors.New("embedding has zero norm")
+	}
+	return "", nil
 }
 
 // topPNearest returns indices of the p centroids closest to vec by
