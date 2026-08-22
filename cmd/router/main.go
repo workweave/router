@@ -81,11 +81,16 @@ func main() {
 	// 6 conns covers MarkUsed writes plus session-pin traffic (auth-cache and
 	// the in-proc LRU absorb most reads). If pgxpool wait p95 climbs above 1ms
 	// with pinning on, that's the migrate-to-Memorystore signal, not a bigger pool.
-	cfg.MaxConns = 6
+	// ROUTER_POSTGRES_MAX_CONNS overrides for high-concurrency deploys.
+	cfg.MaxConns = parseEnvInt32("ROUTER_POSTGRES_MAX_CONNS", 6)
 	cfg.MinConns = 1
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 10 * time.Minute
 	cfg.HealthCheckPeriod = 1 * time.Minute
+
+	// Tracks async billing debits so graceful shutdown can drain them before
+	// pool.Close (see the drain Wait call after srv.Shutdown).
+	billingInflight := observability.NewTrackedGroup()
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
@@ -845,7 +850,8 @@ func main() {
 		WithCompaction(compactionSz, compactionPct).
 		WithAvailableModels(routingTargets).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
-		WithBillingService(billingSvc)
+		WithBillingService(billingSvc).
+		WithBillingDrainGroup(billingInflight)
 	for _, spec := range configuredPolicySpecs {
 		proxySvc = proxySvc.WithPolicyStrategy(spec)
 		logger.Info("Generic policy sidecar wired", "strategy", spec.Strategy, "candidate_models", len(routingTargets))
@@ -991,8 +997,15 @@ func main() {
 	select {
 	case err := <-serverErr:
 		logger.Error("Server exited with error", "err", err)
-		// A ListenAndServe failure bypasses the SIGTERM path below, so flush
-		// APM here too or the traces describing the failure never reach SigNoz.
+		// A ListenAndServe failure bypasses the SIGTERM path below, so drain
+		// billing here too (pool.Close runs via defer) or in-flight debits are
+		// dropped.
+		serverErrDrainCtx, serverErrDrainCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer serverErrDrainCancel()
+		billingInflight.Cancel()
+		billingInflight.WaitWithContext(serverErrDrainCtx)
+		// Flush APM here too or the traces describing the failure never reach
+		// SigNoz (same reason it's after the drain: drain first, then flush).
 		apmFailCtx, apmFailCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		defer apmFailCancel()
 		apm.ShutdownWithContext(apmFailCtx)
@@ -1001,15 +1014,24 @@ func main() {
 		logger.Info("Received shutdown signal; draining", "signal", sig.String())
 	}
 
-	// Cloud Run gives 10s between SIGTERM and SIGKILL; budget across three
+	// Cloud Run gives 10s between SIGTERM and SIGKILL; budget across four
 	// flush stages (defer on apm.Shutdown would never run in time):
-	//   srv.Shutdown 6.0s + emitter.Shutdown 1.5s + apm.Shutdown 1.5s = 9.0s,
-	//   leaving ~1s slack.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	//   srv.Shutdown 4.5s + billing drain 1.5s + emitter.Shutdown 1.5s
+	//   + apm.Shutdown 1.5s = 9.0s, leaving ~1s slack.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 4500*time.Millisecond)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Graceful shutdown failed", "err", err)
 	}
+	// srv.Shutdown only waits for handler goroutines; billing debits run in
+	// SafeGoTracked goroutines it doesn't know about. Drain before pool.Close
+	// so a deploy or scale-to-zero can't SIGKILL an in-flight debit. Cancel
+	// aborts overruns at their next context check; the bounded wait keeps the
+	// drain inside the 1.5s budget above.
+	billingDrainCtx, billingDrainCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer billingDrainCancel()
+	billingInflight.Cancel()
+	billingInflight.WaitWithContext(billingDrainCtx)
 	emitterCtx, emitterCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer emitterCancel()
 	if err := emitter.Shutdown(emitterCtx); err != nil {
@@ -1319,6 +1341,23 @@ func parseEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// parseEnvInt32 reads an env var as a positive int32. Parses at bit size 32 so
+// the value is int32-width at the source — no int->int32 narrowing on the
+// returned value. Returns fallback when the var is unset, empty, out of
+// int32 range, or unparseable.
+func parseEnvInt32(key string, fallback int32) int32 {
+	raw := config.GetOr(key, "")
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n <= 0 {
+		observability.Get().Warn("Invalid env var; using default", "key", key, "value", raw, "default", fallback)
+		return fallback
+	}
+	return int32(n)
 }
 
 // parseEnvFloat reads an env var as a float64, falling back on unset/empty/

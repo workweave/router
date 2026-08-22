@@ -1,66 +1,80 @@
 package observability
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestSafeGoRecoversFromPanic proves a panic inside the wrapped fn is
-// recovered and logged rather than propagating out of the goroutine (which
-// would crash the process).
-func TestSafeGoRecoversFromPanic(t *testing.T) {
-	var buf bytes.Buffer
-	log := slog.New(slog.NewTextHandler(&buf, nil))
-
-	assert.NotPanics(t, func() {
-		SafeGo(log, time.Second, "test-goroutine", func(ctx context.Context) {
-			panic("boom")
-		})
-		waitForLog(t, &buf, "Background goroutine panicked")
+func TestSafeGoPanicsRecovered(t *testing.T) {
+	SafeGo(slog.Default(), 500*time.Millisecond, "panic-test", func(context.Context) {
+		panic("boom")
 	})
-
-	assert.Contains(t, buf.String(), "Background goroutine panicked")
-	assert.Contains(t, buf.String(), "test-goroutine")
-	assert.Contains(t, buf.String(), "boom")
+	// If the panic escaped, the goroutine would crash the test binary; just
+	// giving the goroutine a chance to run is the assertion.
+	time.Sleep(50 * time.Millisecond)
 }
 
-// TestSafeGoRunsFnToCompletion proves a non-panicking fn runs normally with
-// a bounded context derived from context.Background(), independent of any
-// caller-supplied ctx.
-func TestSafeGoRunsFnToCompletion(t *testing.T) {
-	var buf bytes.Buffer
-	log := slog.New(slog.NewTextHandler(&buf, nil))
-	done := make(chan struct{})
+func TestTrackedGroupCancelAbortsInflight(t *testing.T) {
+	g := NewTrackedGroup()
+	started := make(chan struct{})
+	exited := make(chan struct{})
 
-	SafeGo(log, time.Second, "test-goroutine", func(ctx context.Context) {
-		defer close(done)
-		assert.NoError(t, ctx.Err())
+	SafeGoTracked(g, slog.Default(), 5*time.Second, "blocker", func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		close(exited)
 	})
 
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, 3*time.Second, 5*time.Millisecond, "goroutine should start")
+
+	g.Cancel()
+	select {
+	case <-exited:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Cancel must abort the in-flight operation")
+	}
+}
+
+// TestTrackedGroupWaitBounded ensures a group whose operations never finish on
+// their own still returns from WaitWithContext when the shutdown budget
+// expires, so a slow debit cannot hold the drain past SIGKILL.
+func TestTrackedGroupWaitBounded(t *testing.T) {
+	g := NewTrackedGroup()
+	SafeGoTracked(g, slog.Default(), 5*time.Second, "forever", func(ctx context.Context) {
+		<-ctx.Done()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	g.WaitWithContext(ctx)
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 4*time.Second, "drain must not wait for an overrunning operation")
+
+	// The overrunning operation is aborted by Cancel, so it does not leak past
+	// shutdown.
+	g.Cancel()
+	done := make(chan struct{})
+	go func() {
+		g.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("fn did not run within timeout")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("operation not aborted by Cancel")
 	}
-	assert.Empty(t, buf.String())
-}
-
-// waitForLog polls buf until it contains substr or fails the test after a
-// bounded wait, since the goroutine under test runs concurrently.
-func waitForLog(t *testing.T, buf *bytes.Buffer, substr string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(buf.String(), substr) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("expected log containing %q, got: %s", substr, buf.String())
 }

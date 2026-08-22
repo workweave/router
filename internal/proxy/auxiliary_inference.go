@@ -59,7 +59,7 @@ func (s *Service) billAuxiliaryInference(ctx context.Context, requestID, request
 	// the turn's resolved credential.
 	byokServed := byokServedForProvider(ctx, usage.Provider)
 
-	s.fireBilling(ctx, billing.DebitInferenceParams{
+	s.fireBilling(billing.DebitInferenceParams{
 		OrganizationID:  externalID,
 		RouterRequestID: auxRequestID,
 		Model:           usage.Model,
