@@ -89,6 +89,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 
 	logInboundRequestDiagnostics(log, env)
 
+	// Honor x-weave-force-model: writes a user-forced pin for the current turn.
+	s.applyForceModelHeader(ctx, r, env, installationID, sessionKey)
+
 	subAgentHint := r.Header.Get("x-weave-subagent-type")
 
 	forceCluster, forceErr := applyForceClusterHeader(ctx, r)
@@ -305,6 +308,10 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	if proxyErr == nil {
 		s.emitBilling(ctx, requestID, externalID, decision, actPricing, routeRes, in, out, cacheCreation, cacheRead)
 	}
+
+	// Two-strike eviction: a pin stuck on a non-retryable 4xx wedges until
+	// manually /force-model'd out; this call expires it after the threshold.
+	s.maybeEvictPinAfterUpstreamErr(ctx, stickyHit, proxyErr, decision.Reason, installationID, routeRes.SessionKey, stickyStateRole(routeRes))
 
 	// Two-strike provider disable: see ProxyMessages. Gemini rarely produces a
 	// real 529, but covers a future translate-layer path that might synthesize one.
