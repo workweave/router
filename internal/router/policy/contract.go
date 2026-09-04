@@ -32,7 +32,10 @@ type Capabilities struct {
 	HonorsQualityPriceBias   bool   `json:"honors_quality_price_bias"`
 	SupportsDebugRouteDetail bool   `json:"supports_debug_route_detail"`
 	SupportsPreview          bool   `json:"supports_preview"`
-	SupportsShadow           bool   `json:"supports_shadow"`
+	// SupportsRoutingDistribution means the Go router can project the same
+	// quality/price scorer used by live serving across the dashboard dial.
+	SupportsRoutingDistribution bool `json:"supports_routing_distribution"`
+	SupportsShadow              bool `json:"supports_shadow"`
 	// ReportsRankedFallback declares that the sidecar returns ranked_fallback on
 	// the serving /route response. When false, cluster arm overrides fail open.
 	ReportsRankedFallback bool `json:"reports_ranked_fallback"`

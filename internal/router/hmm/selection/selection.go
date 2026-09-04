@@ -4,6 +4,8 @@
 package selection
 
 import (
+	"math"
+	"sort"
 	"strings"
 
 	"weave-os/router/internal/router/hmm"
@@ -59,6 +61,21 @@ func Select(roster *rosterdata.Roster, rankedGroups []string, harness string, ca
 // SelectGroups is Select with each group's sidecar arm allowlist applied on top
 // of the router's candidate set.
 func SelectGroups(roster *rosterdata.Roster, groups []Group, harness string, candidates map[string]struct{}) (Pick, bool) {
+	pick, _, ok := SelectGroupsWithPreference(roster, groups, harness, candidates, nil)
+	return pick, ok
+}
+
+// SelectGroupsWithPreference applies quality/price ranking inside each
+// classifier group after all hard eligibility filters. The classifier's group
+// order is never changed. Returned score maps are grouped because a later
+// force-cluster or key override may change the final group.
+func SelectGroupsWithPreference(roster *rosterdata.Roster, groups []Group, harness string, candidates map[string]struct{}, qualityBias *float64) (Pick, map[string]map[string]float32, bool) {
+	scoresByGroup := make(map[string]map[string]float32, len(groups))
+	for _, group := range groups {
+		if cluster, ok := roster.Clusters[group.Label]; ok {
+			scoresByGroup[group.Label] = Scores(roster, group.Label, cluster, qualityBias)
+		}
+	}
 	depth := 0
 	for _, group := range groups {
 		cluster, ok := roster.Clusters[group.Label]
@@ -81,6 +98,7 @@ func SelectGroups(roster *rosterdata.Roster, groups []Group, harness string, can
 		}
 		restricted := len(allowedArms)+len(allowedBases) > 0
 		order, harnessSpecific := ArmOrder(cluster, harness)
+		order = preferenceOrder(roster, group.Label, cluster, harness, order, qualityBias)
 		for _, arm := range order {
 			// Candidates carry base roster IDs, so effort-suffixed arms
 			// (model:high) match on their base ID.
@@ -95,9 +113,106 @@ func SelectGroups(roster *rosterdata.Roster, groups []Group, harness string, can
 					continue
 				}
 			}
-			return Pick{Group: group.Label, Arm: arm, FallbackDepth: depth, HarnessOrder: harnessSpecific}, true
+			return Pick{Group: group.Label, Arm: arm, FallbackDepth: depth, HarnessOrder: harnessSpecific}, scoresByGroup, true
 		}
 		depth++
 	}
-	return Pick{}, false
+	return Pick{}, scoresByGroup, false
+}
+
+// Scores returns the fixed neutral scores or preference-adjusted WII/WPI score
+// for every indexed arm in a cluster.
+func Scores(roster *rosterdata.Roster, label string, cluster rosterdata.Cluster, qualityBias *float64) map[string]float32 {
+	neutral := roster.Ranking.QualityBiasNeutral
+	if qualityBias == nil || *qualityBias == neutral || !isDynamicRoster(roster) {
+		scores := make(map[string]float32, len(cluster.ArmScores))
+		for arm, score := range cluster.ArmScores {
+			scores[arm] = float32(score)
+		}
+		return scores
+	}
+	alpha := EffectiveAlpha(roster, label, *qualityBias)
+	scores := make(map[string]float32, len(cluster.ArmIndices))
+	for arm, indices := range cluster.ArmIndices {
+		scores[arm] = float32(alpha*indices.WII - (1-alpha)*indices.WPI)
+	}
+	return scores
+}
+
+// EffectiveAlpha maps the user dial piecewise around the neutral point so the
+// neutral UI setting reproduces each cluster's independently tuned alpha.
+func EffectiveAlpha(roster *rosterdata.Roster, label string, qualityBias float64) float64 {
+	qualityBias = math.Max(0, math.Min(1, qualityBias))
+	neutral := roster.Ranking.QualityBiasNeutral
+	defaultAlpha := roster.Ranking.Alpha[label]
+	if qualityBias <= neutral {
+		return roster.Ranking.AlphaMin[label] + (defaultAlpha-roster.Ranking.AlphaMin[label])*(qualityBias/neutral)
+	}
+	return defaultAlpha + (roster.Ranking.AlphaMax[label]-defaultAlpha)*((qualityBias-neutral)/(1-neutral))
+}
+
+func preferenceOrder(roster *rosterdata.Roster, label string, cluster rosterdata.Cluster, harness string, order []string, qualityBias *float64) []string {
+	if qualityBias == nil || *qualityBias == roster.Ranking.QualityBiasNeutral || !isDynamicRoster(roster) {
+		return order
+	}
+	scores := Scores(roster, label, cluster, qualityBias)
+	pins := append([]string(nil), cluster.ManualPinsByHarness["*"]...)
+	pins = append(pins, harnessList(cluster.ManualPinsByHarness, harness)...)
+	preferredVendors := harnessList(cluster.PreferredVendorsByHarness, harness)
+	pinPosition := make(map[string]int, len(pins))
+	for index, arm := range pins {
+		pinPosition[arm] = index
+	}
+	positions := make(map[string]int, len(order))
+	for index, arm := range order {
+		positions[arm] = index
+	}
+	ranked := append([]string(nil), order...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		left, right := ranked[i], ranked[j]
+		leftPin, leftPinned := pinPosition[left]
+		rightPin, rightPinned := pinPosition[right]
+		if leftPinned != rightPinned {
+			return leftPinned
+		}
+		if leftPinned && leftPin != rightPin {
+			return leftPin < rightPin
+		}
+		leftVendor := vendorRank(left, preferredVendors)
+		rightVendor := vendorRank(right, preferredVendors)
+		if leftVendor != rightVendor {
+			return leftVendor < rightVendor
+		}
+		leftScore, leftScored := scores[left]
+		rightScore, rightScored := scores[right]
+		if leftScored != rightScored {
+			return leftScored
+		}
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		return positions[left] < positions[right]
+	})
+	return ranked
+}
+
+func harnessList(values map[string][]string, harness string) []string {
+	if list := values[harness]; len(list) > 0 {
+		return list
+	}
+	return values[strings.ReplaceAll(harness, "-", "_")]
+}
+
+func vendorRank(arm string, preferred []string) int {
+	vendor := strings.SplitN(arm, "/", 2)[0]
+	for index, candidate := range preferred {
+		if vendor == candidate {
+			return index
+		}
+	}
+	return len(preferred)
+}
+
+func isDynamicRoster(roster *rosterdata.Roster) bool {
+	return roster.SchemaVersion == rosterdata.SchemaVersionV7 || roster.SchemaVersion == rosterdata.SchemaVersionV75C
 }

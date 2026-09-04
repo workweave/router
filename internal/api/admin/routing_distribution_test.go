@@ -9,6 +9,7 @@ import (
 
 	"weave-os/router/internal/api/admin"
 	"weave-os/router/internal/router/cluster"
+	"weave-os/router/internal/router/hmm/rosterdata"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -124,4 +125,34 @@ func TestRoutingDistributionHandler_EmptyPoolIs400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestRoutingDistributionHandler_UsesHMMRosterForHMMStrategy(t *testing.T) {
+	src := &fakeDistributionSource{err: errors.New("legacy cluster source must not run")}
+	roster := &rosterdata.Roster{
+		SchemaVersion: rosterdata.SchemaVersionV7,
+		Ranking: rosterdata.Ranking{
+			Alpha: map[string]float64{"low": 0.4}, AlphaMin: map[string]float64{"low": 0.05},
+			AlphaMax: map[string]float64{"low": 0.8}, QualityBiasNeutral: 0.7,
+		},
+		Clusters: map[string]rosterdata.Cluster{
+			"low": {
+				Arms:      []string{"openai/gpt-5.6-luna"},
+				ArmScores: map[string]float64{"openai/gpt-5.6-luna": 20},
+				ArmIndices: map[string]rosterdata.ArmIndices{
+					"openai/gpt-5.6-luna": {WII: 50, WPI: 0},
+				},
+			},
+		},
+	}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.GET("/v1/router/routing-distribution", admin.RoutingDistributionHandler(src, roster))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/router/routing-distribution?strategy=hmm_embedding&grid=2", nil)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Zero(t, src.lastGrid)
 }

@@ -13,8 +13,8 @@ const effortHysteresisThreshold = 1.0
 const effortHysteresisReason = "effort_hysteresis"
 
 // effortHysteresisHold returns the incumbent effort to keep serving, or "" to
-// let the challenger through. Both sides are looked up in the sidecar's
-// per-arm WMI map, which is keyed by effort-qualified roster arm ID
+// let the challenger through. Both sides are looked up in the router's
+// preference-adjusted per-arm WII/WPI score map, keyed by roster arm ID
 // ("anthropic/claude-opus-5:xhigh") rather than by catalog serving identity.
 func effortHysteresisHold(fresh router.Decision, prevServedModel, chosenModel, chosenEffort string) string {
 	if fresh.Metadata == nil || len(fresh.Metadata.ArmScores) == 0 {

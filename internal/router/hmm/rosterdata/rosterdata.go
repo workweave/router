@@ -6,6 +6,7 @@ package rosterdata
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -13,10 +14,18 @@ import (
 	"weave-os/router/internal/router/hmm"
 )
 
+type SchemaVersion string
+
+const (
+	SchemaVersionV6   SchemaVersion = "hmm_router_cluster_roster_v6"
+	SchemaVersionV7   SchemaVersion = "hmm_router_cluster_roster_v7"
+	SchemaVersionV75C SchemaVersion = "hmm_router_cluster_roster_v7_5c"
+)
+
 // Roster is the parsed generated roster document. Unknown top-level fields
 // are tolerated; the fields here are the ones the router consumes.
 type Roster struct {
-	SchemaVersion string             `json:"schema_version"`
+	SchemaVersion SchemaVersion      `json:"schema_version"`
 	Ranking       Ranking            `json:"ranking"`
 	Clusters      map[string]Cluster `json:"clusters"`
 }
@@ -24,18 +33,35 @@ type Roster struct {
 // Ranking carries the ranking metadata the roster builder used; Alpha is the
 // per-cluster WMI blend weight.
 type Ranking struct {
-	Alpha map[string]float64 `json:"alpha"`
+	Alpha                  map[string]float64 `json:"alpha"`
+	AlphaMin               map[string]float64 `json:"alpha_min"`
+	AlphaMax               map[string]float64 `json:"alpha_max"`
+	QualityBiasNeutral     float64            `json:"quality_bias_neutral"`
+	WIIScoreVersion        string             `json:"wii_score_version"`
+	WIINormalizationSHA256 string             `json:"wii_normalization_sha256"`
+	WPIScoreVersion        string             `json:"wpi_score_version"`
+	WPINormalizationSHA256 string             `json:"wpi_normalization_sha256"`
+}
+
+// ArmIndices are the immutable quality and price axes used to dynamically
+// rank an arm. Both are absolute 0-100 indices; WPI is not a serving price.
+type ArmIndices struct {
+	WII float64 `json:"wii_v1"`
+	WPI float64 `json:"wpi_v1"`
 }
 
 // Cluster is one complexity cluster's ordered arm roster and reference costs.
 type Cluster struct {
-	ComplexityLabel     string              `json:"complexity_label"`
-	Arms                []string            `json:"arms"`
-	ArmsByHarness       map[string][]string `json:"arms_by_harness"`
-	MembershipByHarness map[string][]string `json:"membership_by_harness"`
-	CostRefUSD          float64             `json:"cost_ref_usd"`
-	LatencyRefMS        float64             `json:"latency_ref_ms"`
-	ArmScores           map[string]float64  `json:"arm_scores"`
+	ComplexityLabel           string                `json:"complexity_label"`
+	Arms                      []string              `json:"arms"`
+	ArmsByHarness             map[string][]string   `json:"arms_by_harness"`
+	MembershipByHarness       map[string][]string   `json:"membership_by_harness"`
+	CostRefUSD                float64               `json:"cost_ref_usd"`
+	LatencyRefMS              float64               `json:"latency_ref_ms"`
+	ArmScores                 map[string]float64    `json:"arm_scores"`
+	ArmIndices                map[string]ArmIndices `json:"arm_indices"`
+	ManualPinsByHarness       map[string][]string   `json:"manual_pins_by_harness"`
+	PreferredVendorsByHarness map[string][]string   `json:"preferred_vendors_by_harness"`
 }
 
 // AllArms returns every distinct arm ID referenced by the roster — cluster
@@ -124,6 +150,73 @@ func validateSchema(r *Roster) error {
 		if _, ok := r.Ranking.Alpha[label]; !ok {
 			return fmt.Errorf("cluster %q has no ranking.alpha entry", label)
 		}
+		if r.SchemaVersion == SchemaVersionV7 || r.SchemaVersion == SchemaVersionV75C {
+			if err := validateDynamicCluster(r, label, cluster); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func validateDynamicCluster(r *Roster, label string, cluster Cluster) error {
+	if r.Ranking.WIIScoreVersion == "" || r.Ranking.WIINormalizationSHA256 == "" ||
+		r.Ranking.WPIScoreVersion == "" || r.Ranking.WPINormalizationSHA256 == "" {
+		return fmt.Errorf("v7 roster has incomplete WII/WPI provenance")
+	}
+	neutral := r.Ranking.QualityBiasNeutral
+	defaultAlpha := r.Ranking.Alpha[label]
+	minAlpha, hasMin := r.Ranking.AlphaMin[label]
+	maxAlpha, hasMax := r.Ranking.AlphaMax[label]
+	if !finiteUnit(neutral) || neutral <= 0 || neutral >= 1 {
+		return fmt.Errorf("ranking.quality_bias_neutral must be inside (0,1)")
+	}
+	if !hasMin || !hasMax || !finiteUnit(minAlpha) || !finiteUnit(defaultAlpha) || !finiteUnit(maxAlpha) || minAlpha > defaultAlpha || defaultAlpha > maxAlpha {
+		return fmt.Errorf("cluster %q has invalid alpha calibration", label)
+	}
+	globalPins := armSet(cluster.ManualPinsByHarness["*"])
+	for _, arm := range cluster.Arms {
+		indices, ok := cluster.ArmIndices[arm]
+		if !ok {
+			if _, globallyPinned := globalPins[arm]; globallyPinned {
+				continue
+			}
+			return fmt.Errorf("cluster %q arm %q has no arm_indices entry", label, arm)
+		}
+		if !finiteRange(indices.WII, 0, 100) || !finiteRange(indices.WPI, 0, 100) {
+			return fmt.Errorf("cluster %q arm %q has invalid WII/WPI indices", label, arm)
+		}
+	}
+	for harness, arms := range cluster.ArmsByHarness {
+		harnessPins := armSet(cluster.ManualPinsByHarness[harness])
+		for _, arm := range arms {
+			indices, ok := cluster.ArmIndices[arm]
+			if !ok {
+				_, globallyPinned := globalPins[arm]
+				_, pinnedForHarness := harnessPins[arm]
+				if globallyPinned || pinnedForHarness {
+					continue
+				}
+				return fmt.Errorf("cluster %q harness %q arm %q has no arm_indices entry", label, harness, arm)
+			}
+			if !finiteRange(indices.WII, 0, 100) || !finiteRange(indices.WPI, 0, 100) {
+				return fmt.Errorf("cluster %q harness %q arm %q has invalid WII/WPI indices", label, harness, arm)
+			}
+		}
+	}
+	return nil
+}
+
+func armSet(arms []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(arms))
+	for _, arm := range arms {
+		set[arm] = struct{}{}
+	}
+	return set
+}
+
+func finiteUnit(value float64) bool { return finiteRange(value, 0, 1) }
+
+func finiteRange(value, minimum, maximum float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= minimum && value <= maximum
 }

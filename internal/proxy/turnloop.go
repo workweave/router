@@ -265,8 +265,8 @@ type authorityCacheShadow struct {
 	// StayModel carries ":effort" while decision_model is a bare catalog ID, so a
 	// string compare reports a false divergence on every effort-bearing pin.
 	Sticky bool
-	// StayScore/FreshScore are the sidecar's candidate scores. Nil when the sidecar
-	// reported no score; the nil rate is a measurement result in itself.
+	// StayScore/FreshScore are the router's preference-adjusted candidate scores.
+	// Nil when the active roster cannot score the arm; that nil rate is useful.
 	StayScore  *float64
 	FreshScore *float64
 }

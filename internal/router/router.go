@@ -355,8 +355,8 @@ type RoutingMetadata struct {
 	PairedModel    string
 	PairedProvider string
 	PairedScore    float32
-	// ArmScores is per-arm WMI scores for the cluster this decision was drawn
-	// from. Populated from a B1+ sidecar; absent on older sidecars.
+	// ArmScores is the router-selected preference-adjusted score map for the
+	// cluster this decision was drawn from. Absent on fixed/legacy rosters.
 	ArmScores map[string]float32
 }
 

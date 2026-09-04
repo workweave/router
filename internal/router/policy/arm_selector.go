@@ -2,9 +2,14 @@ package policy
 
 import (
 	"context"
+	"errors"
 
 	"weave-os/router/internal/router"
 )
+
+// ErrNoEligibleArm is returned when deterministic selection exhausts every
+// eligible arm reported by the policy sidecar.
+var ErrNoEligibleArm = errors.New("no eligible arm in any ranked group")
 
 // SelectionInput is the content-free classification the router selects an arm from.
 type SelectionInput struct {
@@ -15,12 +20,14 @@ type SelectionInput struct {
 	ClassifierGroup    string
 	RankedFallback     []PreviewGroup
 	CandidateRosterIDs []string
+	QualityBias        *float64
 }
 
 // SelectionPick is the router's selected arm.
 type SelectionPick struct {
-	Group string
-	Arm   string
+	Group            string
+	Arm              string
+	ArmScoresByGroup map[string]map[string]float32
 }
 
 // ArmSelector picks the served arm from a sidecar classification. An error
@@ -33,7 +40,7 @@ func selectionInputFor(strategy router.Strategy, executionMode string, req route
 	for _, candidate := range resolved.Candidates {
 		candidateRosterIDs = append(candidateRosterIDs, candidate.RosterID)
 	}
-	return SelectionInput{
+	input := SelectionInput{
 		Strategy:           strategy,
 		ExecutionMode:      executionMode,
 		RouteID:            res.RouteID,
@@ -42,4 +49,20 @@ func selectionInputFor(strategy router.Strategy, executionMode string, req route
 		RankedFallback:     res.RankedFallback,
 		CandidateRosterIDs: candidateRosterIDs,
 	}
+	if req.RoutingKnobs != nil && req.RoutingKnobs.QualityBias != nil {
+		qualityBias := *req.RoutingKnobs.QualityBias
+		input.QualityBias = &qualityBias
+	}
+	if req.ForceCluster != "" {
+		if _, hasOverride := req.ClusterArmOverrides[req.ForceCluster]; !hasOverride {
+			for _, group := range res.RankedFallback {
+				if group.Group == req.ForceCluster && len(group.EligibleArms) > 0 {
+					input.ClassifierGroup = req.ForceCluster
+					input.RankedFallback = []PreviewGroup{group}
+					break
+				}
+			}
+		}
+	}
+	return input
 }

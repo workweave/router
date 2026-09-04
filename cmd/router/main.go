@@ -868,6 +868,9 @@ func main() {
 		var capabilityErr error
 		hmmCapabilities, capabilityErr = hmmClient.Capabilities(capabilityCtx)
 		cancelCapabilityDiscovery()
+		dynamicHMMRoster := declarativeRoster != nil && (declarativeRoster.SchemaVersion == rosterdata.SchemaVersionV7 || declarativeRoster.SchemaVersion == rosterdata.SchemaVersionV75C)
+		hmmCapabilities.HonorsQualityPriceBias = dynamicHMMRoster
+		hmmCapabilities.SupportsRoutingDistribution = dynamicHMMRoster
 		if capabilityErr != nil {
 			logger.Warn("HMM policy sidecar capabilities unavailable at boot; optional behavior remains disabled", "sidecar_url", hmmSidecarURL, "err", capabilityErr)
 		}
@@ -887,6 +890,8 @@ func main() {
 					hmmTimeout,
 					hmmCapabilityRetryInterval,
 					func(capabilities policy.Capabilities) {
+						capabilities.HonorsQualityPriceBias = dynamicHMMRoster
+						capabilities.SupportsRoutingDistribution = dynamicHMMRoster
 						hmmPolicyRouter.WithCapabilities(capabilities)
 						hmmEmbeddingPolicyRouter.WithCapabilities(capabilities)
 					},
@@ -1264,7 +1269,7 @@ func main() {
 	deployedModels, _ := rtr.(*cluster.Multiversion)
 	analyticsSvc := analytics.NewService(repo.Analytics, time.Now)
 	readinessChecker := newReadinessChecker(pool, hmmReadinessChecker)
-	server.Register(engine, authSvc, proxySvc, deployedModels, hmmRosterModels, deploymentMode, billingSvc, readinessChecker, hmmRosterSource, analyticsSvc)
+	server.Register(engine, authSvc, proxySvc, deployedModels, hmmRosterModels, deploymentMode, billingSvc, readinessChecker, hmmRosterSource, analyticsSvc, declarativeRoster)
 
 	srv := &http.Server{
 		Addr:    ":" + config.GetOr("PORT", "8080"),

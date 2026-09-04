@@ -22,7 +22,7 @@ func candidateSet(ids ...string) map[string]struct{} {
 
 func testRoster() *rosterdata.Roster {
 	return &rosterdata.Roster{
-		SchemaVersion: "hmm_router_cluster_roster_v6",
+		SchemaVersion: rosterdata.SchemaVersionV6,
 		Clusters: map[string]rosterdata.Cluster{
 			"low": {
 				Arms: []string{"vendor-a/cheap", "vendor-b/cheap"},
@@ -45,6 +45,94 @@ func testRoster() *rosterdata.Roster {
 			},
 		},
 	}
+}
+
+func dynamicRoster() *rosterdata.Roster {
+	return &rosterdata.Roster{
+		SchemaVersion: rosterdata.SchemaVersionV7,
+		Ranking: rosterdata.Ranking{
+			Alpha:              map[string]float64{"low": 0.4},
+			AlphaMin:           map[string]float64{"low": 0.05},
+			AlphaMax:           map[string]float64{"low": 0.8},
+			QualityBiasNeutral: 0.7,
+		},
+		Clusters: map[string]rosterdata.Cluster{
+			"low": {
+				Arms: []string{"vendor-a/quality", "vendor-b/cheap"},
+				ArmScores: map[string]float64{
+					"vendor-a/quality": 30,
+					"vendor-b/cheap":   25,
+				},
+				ArmIndices: map[string]rosterdata.ArmIndices{
+					"vendor-a/quality": {WII: 90, WPI: 10},
+					"vendor-b/cheap":   {WII: 55, WPI: 0},
+				},
+			},
+		},
+	}
+}
+
+func TestSelectGroupsWithPreferenceReweightsWithinClassifierBand(t *testing.T) {
+	roster := dynamicRoster()
+	candidates := candidateSet("vendor-a/quality", "vendor-b/cheap")
+	groups := []selection.Group{{Label: "low"}}
+
+	neutral := 0.7
+	pick, scores, ok := selection.SelectGroupsWithPreference(roster, groups, "", candidates, &neutral)
+	require.True(t, ok)
+	assert.Equal(t, "vendor-a/quality", pick.Arm)
+	assert.Equal(t, float32(30), scores["low"]["vendor-a/quality"])
+
+	priceHeavy := 0.0
+	pick, _, ok = selection.SelectGroupsWithPreference(roster, groups, "", candidates, &priceHeavy)
+	require.True(t, ok)
+	assert.Equal(t, "vendor-b/cheap", pick.Arm)
+
+	qualityHeavy := 1.0
+	pick, _, ok = selection.SelectGroupsWithPreference(roster, groups, "", candidates, &qualityHeavy)
+	require.True(t, ok)
+	assert.Equal(t, "vendor-a/quality", pick.Arm)
+}
+
+func TestSelectGroupsWithPreferencePreservesPolicyTiers(t *testing.T) {
+	roster := dynamicRoster()
+	cluster := roster.Clusters["low"]
+	cluster.ManualPinsByHarness = map[string][]string{"pi": {"vendor-b/cheap"}}
+	cluster.PreferredVendorsByHarness = map[string][]string{"codex": {"vendor-b"}}
+	roster.Clusters["low"] = cluster
+	qualityHeavy := 1.0
+	candidates := candidateSet("vendor-a/quality", "vendor-b/cheap")
+
+	pick, _, ok := selection.SelectGroupsWithPreference(roster, []selection.Group{{Label: "low"}}, "pi", candidates, &qualityHeavy)
+	require.True(t, ok)
+	assert.Equal(t, "vendor-b/cheap", pick.Arm, "manual pin must outrank the dynamic score")
+
+	pick, _, ok = selection.SelectGroupsWithPreference(roster, []selection.Group{{Label: "low"}}, "codex", candidates, &qualityHeavy)
+	require.True(t, ok)
+	assert.Equal(t, "vendor-b/cheap", pick.Arm, "vendor affinity must outrank the dynamic score")
+}
+
+func TestSelectGroupsWithPreferenceKeepsFallbackOrder(t *testing.T) {
+	roster := dynamicRoster()
+	high := roster.Clusters["low"]
+	high.Arms = []string{"vendor-c/high"}
+	high.ArmScores = map[string]float64{"vendor-c/high": 80}
+	high.ArmIndices = map[string]rosterdata.ArmIndices{"vendor-c/high": {WII: 100, WPI: 100}}
+	roster.Clusters["high"] = high
+	roster.Ranking.Alpha["high"] = 0.85
+	roster.Ranking.AlphaMin["high"] = 0.6
+	roster.Ranking.AlphaMax["high"] = 0.98
+	qualityHeavy := 1.0
+
+	pick, _, ok := selection.SelectGroupsWithPreference(
+		roster,
+		[]selection.Group{{Label: "low"}, {Label: "high"}},
+		"",
+		candidateSet("vendor-a/quality", "vendor-c/high"),
+		&qualityHeavy,
+	)
+	require.True(t, ok)
+	assert.Equal(t, "low", pick.Group)
 }
 
 func TestArmOrder(t *testing.T) {

@@ -6,7 +6,10 @@ import (
 	"strconv"
 	"strings"
 
+	"weave-os/router/internal/router"
 	"weave-os/router/internal/router/cluster"
+	"weave-os/router/internal/router/hmm/rosterdata"
+	hmmselection "weave-os/router/internal/router/hmm/selection"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +44,7 @@ type routingDistributionResponse struct {
 // the eligible pool so the preview matches what Route would do for an
 // installation with those exclusions — the control plane passes the requesting
 // org's lists, keeping the endpoint unauthed/global while still org-correct.
-func RoutingDistributionHandler(dist RoutingDistributionSource) gin.HandlerFunc {
+func RoutingDistributionHandler(dist RoutingDistributionSource, hmmRosters ...*rosterdata.Roster) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		gridN := 0 // 0 -> scorer default
 		if raw := c.Query("grid"); raw != "" {
@@ -54,7 +57,18 @@ func RoutingDistributionHandler(dist RoutingDistributionSource) gin.HandlerFunc 
 		}
 		excludedModels := parseCSVSet(c.Query("excluded_models"))
 		excludedProviders := parseCSVSet(c.Query("excluded_providers"))
-		points, err := dist.DefaultRoutingDistribution(gridN, excludedModels, excludedProviders)
+		strategy := router.Strategy(strings.ToLower(strings.TrimSpace(c.Query("strategy"))))
+		var points []cluster.DistributionPoint
+		var err error
+		if router.IsHMMStrategy(strategy) {
+			if len(hmmRosters) == 0 || hmmRosters[0] == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "hmm routing distribution unavailable"})
+				return
+			}
+			points, err = hmmselection.RoutingDistribution(hmmRosters[0], gridN, excludedModels, excludedProviders)
+		} else {
+			points, err = dist.DefaultRoutingDistribution(gridN, excludedModels, excludedProviders)
+		}
 		if err != nil {
 			// An exclusion set that empties the eligible pool is a client
 			// configuration error (4xx), not a server outage — same sentinel
