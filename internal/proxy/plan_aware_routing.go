@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"weave-os/router/internal/auth"
+	"weave-os/router/internal/flags"
 	"weave-os/router/internal/providers"
 	"weave-os/router/internal/router/catalog"
 	"weave-os/router/internal/subscriptions"
@@ -200,8 +201,12 @@ func managedSubscriptionPlansAllExhausted(ctx context.Context) bool {
 	return allSubscriptionPlansExhausted(managedSubscriptionPlanStatesFromContext(ctx))
 }
 
+func subscriptionPlanAwareRoutingEnabled(ctx context.Context) bool {
+	return !subscriptionRoutingDisabledForRequest(ctx) && flags.BoolOr(ctx, flags.KeySubscriptionPlanAwareRouting, false)
+}
+
 func (s *Service) withPlanAwareSubscriptionModels(ctx context.Context, headers http.Header) context.Context {
-	if !s.planAwareSubscriptionRouting {
+	if !subscriptionPlanAwareRoutingEnabled(ctx) {
 		return ctx
 	}
 	states := subscriptionPlanStatesForRequest(s, ctx, headers)

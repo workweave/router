@@ -154,7 +154,6 @@ func TestRegistryIsWellFormed(t *testing.T) {
 	seenEnv := map[string]struct{}{}
 	for _, def := range flags.Registry {
 		assert.NotEmpty(t, def.Key, "every definition needs a key")
-		assert.NotEmpty(t, def.EnvVar, "flag %q needs an env var", def.Key)
 		assert.NotEmpty(t, def.Description, "flag %q needs a description for the admin UI", def.Key)
 		assert.Contains(t,
 			[]flags.Kind{flags.KindBool, flags.KindInt, flags.KindFloat, flags.KindString},
@@ -166,9 +165,11 @@ func TestRegistryIsWellFormed(t *testing.T) {
 
 		// Two flags sharing an env var would make the published deployment
 		// default ambiguous in the admin UI.
-		_, dupEnv := seenEnv[def.EnvVar]
-		assert.False(t, dupEnv, "duplicate env var %q", def.EnvVar)
-		seenEnv[def.EnvVar] = struct{}{}
+		if def.EnvVar != "" {
+			_, dupEnv := seenEnv[def.EnvVar]
+			assert.False(t, dupEnv, "duplicate env var %q", def.EnvVar)
+			seenEnv[def.EnvVar] = struct{}{}
+		}
 
 		def, ok := flags.Lookup(def.Key)
 		require.True(t, ok, "flag %q must be resolvable via Lookup", def.Key)
@@ -178,6 +179,23 @@ func TestRegistryIsWellFormed(t *testing.T) {
 func TestLookupUnknownKey(t *testing.T) {
 	_, ok := flags.Lookup(flags.Key("not_a_flag"))
 	assert.False(t, ok)
+}
+
+func TestSubscriptionPlanAwareRoutingIsAnOrganizationOnlyBoolean(t *testing.T) {
+	def, ok := flags.Lookup(flags.KeySubscriptionPlanAwareRouting)
+	require.True(t, ok)
+	assert.Equal(t, flags.KindBool, def.Kind)
+	assert.True(t, def.OrgOverridable)
+	assert.Empty(t, def.EnvVar)
+	for _, enabled := range []bool{false, true} {
+		overrides := flags.Overrides{Bools: map[flags.Key]bool{flags.KeySubscriptionPlanAwareRouting: enabled}}
+		require.NoError(t, flags.ValidateOverrides(overrides))
+		stored, err := json.Marshal(overrides)
+		require.NoError(t, err)
+		loaded, err := flags.ParseOverrides(stored)
+		require.NoError(t, err)
+		assert.Equal(t, overrides, loaded)
+	}
 }
 
 func TestKeysIsSortedAcrossKinds(t *testing.T) {

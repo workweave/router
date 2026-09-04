@@ -1050,28 +1050,29 @@ func main() {
 	// effort: the table is never read on the request path, so a failure here
 	// degrades that UI and nothing else.
 	publishFlagRegistry(logger, repo.FlagDefinitions, map[flags.Key]string{
-		flags.KeyStruggleShadowEnabled:     boolDefault(struggleShadowEnabled),
-		flags.KeyStruggleEscalationEnabled: boolDefault(struggleEscalationEnabled),
-		flags.KeyStruggleEscalationHoldout: strconv.Itoa(struggleEscalationHoldoutPct),
-		flags.KeyStruggleEvidenceArming:    boolDefault(struggleEvidenceArming),
-		flags.KeySpiralShadowEnabled:       boolDefault(spiralShadowEnabled),
-		flags.KeyTurnSignalCapture:         boolDefault(turnSignalCaptureEnabled),
-		flags.KeyLoopEscalationEnabled:     boolDefault(loopEscalationEnabled),
-		flags.KeyLoopEscalationHoldoutPct:  strconv.Itoa(loopEscalationHoldoutPct),
-		flags.KeyTextRepetitionBreak:       boolDefault(textRepetitionBreakEnabled),
-		flags.KeyPlannerEnabled:            boolDefault(plannerEnabled),
-		flags.KeyScoreToolResultTurns:      boolDefault(scoreToolResultTurns),
-		flags.KeyPrefixTrimFreeSwitch:      boolDefault(prefixTrimFreeSwitch),
-		flags.KeyAuthoritativeUpgradeGate:  boolDefault(authoritativeUpgradeGate),
-		flags.KeyAuthorityCacheShadow:      boolDefault(authorityCacheShadow),
-		flags.KeySiblingFailover:           boolDefault(siblingFailover),
-		flags.KeyOpenAIResponsesBroad:      boolDefault(openAIResponsesBroad),
-		flags.KeyAllowedModelsHeader:       boolDefault(allowedModelsHeader),
-		flags.KeyEffortEscalation:          boolDefault(effortEscalation),
-		flags.KeyCyberRefusalRepin:         boolDefault(cyberRefusalRepin),
-		flags.KeyCyberRefusalFallback:      cyberRefusalFallbackModel,
-		flags.KeyAnthropicServerFallback:   boolDefault(anthropicServerSideFallback),
-		flags.KeyEmbedOnlyUserMessage:      boolDefault(embedOnlyUser),
+		flags.KeySubscriptionPlanAwareRouting: boolDefault(false),
+		flags.KeyStruggleShadowEnabled:        boolDefault(struggleShadowEnabled),
+		flags.KeyStruggleEscalationEnabled:    boolDefault(struggleEscalationEnabled),
+		flags.KeyStruggleEscalationHoldout:    strconv.Itoa(struggleEscalationHoldoutPct),
+		flags.KeyStruggleEvidenceArming:       boolDefault(struggleEvidenceArming),
+		flags.KeySpiralShadowEnabled:          boolDefault(spiralShadowEnabled),
+		flags.KeyTurnSignalCapture:            boolDefault(turnSignalCaptureEnabled),
+		flags.KeyLoopEscalationEnabled:        boolDefault(loopEscalationEnabled),
+		flags.KeyLoopEscalationHoldoutPct:     strconv.Itoa(loopEscalationHoldoutPct),
+		flags.KeyTextRepetitionBreak:          boolDefault(textRepetitionBreakEnabled),
+		flags.KeyPlannerEnabled:               boolDefault(plannerEnabled),
+		flags.KeyScoreToolResultTurns:         boolDefault(scoreToolResultTurns),
+		flags.KeyPrefixTrimFreeSwitch:         boolDefault(prefixTrimFreeSwitch),
+		flags.KeyAuthoritativeUpgradeGate:     boolDefault(authoritativeUpgradeGate),
+		flags.KeyAuthorityCacheShadow:         boolDefault(authorityCacheShadow),
+		flags.KeySiblingFailover:              boolDefault(siblingFailover),
+		flags.KeyOpenAIResponsesBroad:         boolDefault(openAIResponsesBroad),
+		flags.KeyAllowedModelsHeader:          boolDefault(allowedModelsHeader),
+		flags.KeyEffortEscalation:             boolDefault(effortEscalation),
+		flags.KeyCyberRefusalRepin:            boolDefault(cyberRefusalRepin),
+		flags.KeyCyberRefusalFallback:         cyberRefusalFallbackModel,
+		flags.KeyAnthropicServerFallback:      boolDefault(anthropicServerSideFallback),
+		flags.KeyEmbedOnlyUserMessage:         boolDefault(embedOnlyUser),
 	})
 
 	// Always wire even when beta is unavailable: existing beta sessions fail
@@ -1145,8 +1146,7 @@ func main() {
 		WithCompactionHardPin(config.GetOr("ROUTER_HARD_PIN_MODEL", "") == "").
 		WithAvailableModels(proxyRoutableModels(routingTargets, availableProviders, hmmRouter != nil)).
 		WithDefaultBaselineModel(resolveDefaultBaselineModel()).
-		WithBillingService(billingSvc).
-		WithPlanAwareSubscriptionRouting(config.GetOr("ROUTER_SUBSCRIPTION_PLAN_AWARE_ROUTING", "false") == "true")
+		WithBillingService(billingSvc)
 	if subscriptionRuntime != nil {
 		proxySvc.WithManagedSubscriptions(subscriptionRuntime)
 	}
@@ -1246,9 +1246,6 @@ func main() {
 	} else {
 		logger.Info("Usage observer wired; subscription-aware cost discount disabled", "observation_ttl", subscriptionTTL)
 	}
-	logger.Info("Subscription plan-aware routing configured",
-		"enabled", config.GetOr("ROUTER_SUBSCRIPTION_PLAN_AWARE_ROUTING", "false") == "true")
-
 	engine := gin.New()
 	engine.UnescapePathValues = true
 	engine.UseRawPath = true

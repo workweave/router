@@ -1,8 +1,8 @@
 // Package flags resolves per-organization overrides for the router's behavioral
 // feature flags.
 //
-// Every behavioral flag has a deployment-wide default read once at boot from an
-// env var in cmd/router/main.go and held as a *proxy.Service field. This package
+// Behavioral flags have deployment-wide defaults resolved at boot, or fixed
+// defaults for settings that require explicit organization opt-in. This package
 // layers a sparse per-organization override on top of that default, so a flag can
 // be piloted (or disabled) for one installation without a global rollout.
 //
@@ -44,35 +44,37 @@ const (
 
 // Registered flag keys. Each corresponds to exactly one entry in Registry.
 const (
-	KeyStruggleShadowEnabled     Key = "struggle_shadow_enabled"
-	KeyStruggleEscalationEnabled Key = "struggle_escalation_enabled"
-	KeyStruggleEscalationHoldout Key = "struggle_escalation_holdout_pct"
-	KeyStruggleEvidenceArming    Key = "struggle_evidence_arming"
-	KeySpiralShadowEnabled       Key = "spiral_shadow_enabled"
-	KeyTurnSignalCapture         Key = "turn_signal_capture_enabled"
-	KeyLoopEscalationEnabled     Key = "loop_escalation_enabled"
-	KeyLoopEscalationHoldoutPct  Key = "loop_escalation_holdout_pct"
-	KeyTextRepetitionBreak       Key = "text_repetition_break_enabled"
-	KeyPlannerEnabled            Key = "planner_enabled"
-	KeyScoreToolResultTurns      Key = "score_tool_result_turns"
-	KeyPrefixTrimFreeSwitch      Key = "prefix_trim_free_switch"
-	KeyAuthoritativeUpgradeGate  Key = "authoritative_upgrade_gate"
-	KeyAuthorityCacheShadow      Key = "authority_cache_shadow"
-	KeySiblingFailover           Key = "sibling_failover"
-	KeyEffortEscalation          Key = "effort_escalation"
-	KeyCyberRefusalRepin         Key = "cyber_refusal_repin"
-	KeyCyberRefusalFallback      Key = "cyber_refusal_fallback_model"
-	KeyAnthropicServerFallback   Key = "anthropic_server_side_fallback"
-	KeyEmbedOnlyUserMessage      Key = "embed_only_user_message"
-	KeyOpenAIResponsesBroad      Key = "openai_responses_broad"
-	KeyAllowedModelsHeader       Key = "allowed_models_header"
+	KeyStruggleShadowEnabled        Key = "struggle_shadow_enabled"
+	KeyStruggleEscalationEnabled    Key = "struggle_escalation_enabled"
+	KeyStruggleEscalationHoldout    Key = "struggle_escalation_holdout_pct"
+	KeyStruggleEvidenceArming       Key = "struggle_evidence_arming"
+	KeySpiralShadowEnabled          Key = "spiral_shadow_enabled"
+	KeyTurnSignalCapture            Key = "turn_signal_capture_enabled"
+	KeyLoopEscalationEnabled        Key = "loop_escalation_enabled"
+	KeyLoopEscalationHoldoutPct     Key = "loop_escalation_holdout_pct"
+	KeyTextRepetitionBreak          Key = "text_repetition_break_enabled"
+	KeyPlannerEnabled               Key = "planner_enabled"
+	KeyScoreToolResultTurns         Key = "score_tool_result_turns"
+	KeyPrefixTrimFreeSwitch         Key = "prefix_trim_free_switch"
+	KeyAuthoritativeUpgradeGate     Key = "authoritative_upgrade_gate"
+	KeyAuthorityCacheShadow         Key = "authority_cache_shadow"
+	KeySiblingFailover              Key = "sibling_failover"
+	KeyEffortEscalation             Key = "effort_escalation"
+	KeyCyberRefusalRepin            Key = "cyber_refusal_repin"
+	KeyCyberRefusalFallback         Key = "cyber_refusal_fallback_model"
+	KeyAnthropicServerFallback      Key = "anthropic_server_side_fallback"
+	KeyEmbedOnlyUserMessage         Key = "embed_only_user_message"
+	KeyOpenAIResponsesBroad         Key = "openai_responses_broad"
+	KeyAllowedModelsHeader          Key = "allowed_models_header"
+	KeySubscriptionPlanAwareRouting Key = "subscription_plan_aware_routing_enabled"
 )
 
 // Definition describes one overridable flag. DeploymentDefault is not stored
-// here: it lives in the env var and is resolved at boot, then published to
+// here: it is resolved at boot, then published to
 // router.flag_definitions for the admin UI to display.
 type Definition struct {
-	Key         Key
+	Key Key
+	// EnvVar is empty for settings controlled only by organization overrides.
 	EnvVar      string
 	Kind        Kind
 	Description string
@@ -85,7 +87,7 @@ type Definition struct {
 // RegistryVersion changes whenever Registry's membership changes. Publish uses
 // it to make pruning safe during rolling deploys: a revision with an older
 // registry version may not delete definitions published by a newer revision.
-const RegistryVersion = 6
+const RegistryVersion = 7
 
 // Registry is the curated allowlist of flags that may carry a per-organization
 // override. It is deliberately explicit rather than derived from the env var
@@ -93,6 +95,12 @@ const RegistryVersion = 6
 // are already per-installation columns on model_router_installations, or are
 // consumed at construction time and have no per-request read site to override.
 var Registry = []Definition{
+	{
+		Key:            KeySubscriptionPlanAwareRouting,
+		Kind:           KindBool,
+		Description:    "Avoid models covered only by exhausted Claude/Codex plans while another plan has headroom. Off by default; ignored when subscription routing is disabled.",
+		OrgOverridable: true,
+	},
 	{
 		Key:            KeyStruggleShadowEnabled,
 		EnvVar:         "ROUTER_STRUGGLE_SHADOW_ENABLED",

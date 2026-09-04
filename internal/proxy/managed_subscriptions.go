@@ -102,7 +102,7 @@ func (s *Service) leaseManagedSubscription(ctx context.Context, provider, model 
 	if !managedSubscriptionEnrolled(ctx, poolProvider) || (currentCredentials != nil && currentCredentials.OAuth) {
 		return ctx, subscriptions.Lease{}, false, nil
 	}
-	if s.planAwareSubscriptionRouting && managedSubscriptionPlansAllExhausted(ctx) {
+	if subscriptionPlanAwareRoutingEnabled(ctx) && managedSubscriptionPlansAllExhausted(ctx) {
 		if billing.SubscriptionOnlyFromContext(ctx) {
 			return ctx, subscriptions.Lease{}, true, ErrSubscriptionPoolExhausted
 		}

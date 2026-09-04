@@ -85,7 +85,7 @@ func TestInstallationFlagOverridesRoundTrip(t *testing.T) {
 	assert.True(t, created.FlagOverrides.IsEmpty(), "new installation should carry no overrides")
 
 	want := flags.Overrides{
-		Bools:   map[flags.Key]bool{flags.KeyStruggleShadowEnabled: false},
+		Bools:   map[flags.Key]bool{flags.KeyStruggleShadowEnabled: false, flags.KeySubscriptionPlanAwareRouting: true},
 		Ints:    map[flags.Key]int{flags.KeyLoopEscalationHoldoutPct: 42},
 		Strings: map[flags.Key]string{flags.KeyCyberRefusalFallback: "claude-opus-5"},
 	}

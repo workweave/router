@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"weave-os/router/internal/feedback"
+	"weave-os/router/internal/flags"
 	"weave-os/router/internal/providers"
 	"weave-os/router/internal/proxy"
 	"weave-os/router/internal/router"
@@ -169,10 +170,10 @@ func TestService_Cache_PlanAwareRoutingBypasses(t *testing.T) {
 	}
 	fr := &fakeRouter{decision: decisionWithEmbedding(emb, []int{0, 1})}
 	c := cache.New(cache.DefaultConfig())
-	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil).
-		WithPlanAwareSubscriptionRouting(true)
+	svc := proxy.NewService(fr, map[string]providers.Client{providers.ProviderAnthropic: provider}, nil, false, c, nil, false, providers.ProviderAnthropic, "claude-haiku-4-5", nil)
 
 	ctx := proxyContextWithExternalID(t, "tenant-plan-aware")
+	ctx = flags.WithOverrides(ctx, flags.Overrides{Bools: map[flags.Key]bool{flags.KeySubscriptionPlanAwareRouting: true}})
 	ctx = context.WithValue(ctx, proxy.ManagedSubscriptionPlanStatesContextKey{}, map[subscriptions.Provider]proxy.SubscriptionPlanState{
 		subscriptions.ProviderClaude: proxy.SubscriptionPlanStateExhausted,
 		subscriptions.ProviderCodex:  proxy.SubscriptionPlanStateActive,

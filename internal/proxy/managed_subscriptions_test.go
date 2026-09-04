@@ -12,6 +12,7 @@ import (
 
 	"weave-os/router/internal/auth"
 	"weave-os/router/internal/billing"
+	"weave-os/router/internal/flags"
 	"weave-os/router/internal/providers"
 	"weave-os/router/internal/router"
 	"weave-os/router/internal/router/catalog"
@@ -132,9 +133,9 @@ func TestManagedSubscriptionEnrollmentFailureFailsClosedAtLease(t *testing.T) {
 func TestManagedSubscriptionAllPlansExhaustedFallsThroughToNormalRouting(t *testing.T) {
 	leaser := &scriptedSubscriptionLeaser{}
 	svc := newServiceWithProviders(t, nil).
-		WithManagedSubscriptions(leaser).
-		WithPlanAwareSubscriptionRouting(true)
+		WithManagedSubscriptions(leaser)
 	ctx := managedSubscriptionTestContext()
+	ctx = flags.WithOverrides(ctx, flags.Overrides{Bools: map[flags.Key]bool{flags.KeySubscriptionPlanAwareRouting: true}})
 	ctx = context.WithValue(ctx, ManagedSubscriptionPlanStatesContextKey{}, map[subscriptions.Provider]SubscriptionPlanState{
 		subscriptions.ProviderClaude: SubscriptionPlanStateExhausted,
 	})
@@ -154,9 +155,9 @@ func TestManagedSubscriptionAllPlansExhaustedFallsThroughToNormalRouting(t *test
 func TestManagedSubscriptionAllPlansExhaustedPreservesSubscriptionOnly(t *testing.T) {
 	leaser := &scriptedSubscriptionLeaser{}
 	svc := newServiceWithProviders(t, nil).
-		WithManagedSubscriptions(leaser).
-		WithPlanAwareSubscriptionRouting(true)
+		WithManagedSubscriptions(leaser)
 	ctx := billing.WithSubscriptionOnly(managedSubscriptionTestContext())
+	ctx = flags.WithOverrides(ctx, flags.Overrides{Bools: map[flags.Key]bool{flags.KeySubscriptionPlanAwareRouting: true}})
 	ctx = context.WithValue(ctx, ManagedSubscriptionPlanStatesContextKey{}, map[subscriptions.Provider]SubscriptionPlanState{
 		subscriptions.ProviderClaude: SubscriptionPlanStateExhausted,
 	})
@@ -171,6 +172,27 @@ func TestManagedSubscriptionAllPlansExhaustedPreservesSubscriptionOnly(t *testin
 	require.True(t, managed)
 	require.Same(t, ctx, out)
 	require.Empty(t, leaser.providers)
+}
+
+func TestManagedSubscriptionAllPlansExhaustedRequiresOrgOptInForPaidFallback(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		leaser := &scriptedSubscriptionLeaser{}
+		svc := newServiceWithProviders(t, nil).WithManagedSubscriptions(leaser)
+		ctx := flags.WithOverrides(managedSubscriptionTestContext(), flags.Overrides{
+			Bools: map[flags.Key]bool{flags.KeySubscriptionPlanAwareRouting: enabled},
+		})
+		ctx = context.WithValue(ctx, ManagedSubscriptionPlanStatesContextKey{}, map[subscriptions.Provider]SubscriptionPlanState{
+			subscriptions.ProviderClaude: SubscriptionPlanStateExhausted,
+		})
+		_, _, managed, err := svc.leaseManagedSubscription(ctx, providers.ProviderAnthropic, "claude-opus-4-8")
+		if enabled {
+			require.NoError(t, err)
+			require.False(t, managed)
+		} else {
+			require.ErrorIs(t, err, ErrSubscriptionPoolExhausted)
+			require.True(t, managed)
+		}
+	}
 }
 
 func TestInferenceFailsClosedWhenSubscriptionEnrollmentIsUnknown(t *testing.T) {

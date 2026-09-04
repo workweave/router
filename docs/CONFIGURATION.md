@@ -1,6 +1,7 @@
 # Configuration reference
 
-All router configuration is via environment variables ([12-factor](https://12factor.net/config)).
+Deployment configuration uses environment variables ([12-factor](https://12factor.net/config));
+organization settings are stored in Postgres.
 This page is the exhaustive reference; the [README](../README.md) has the
 60-second quickstart.
 
@@ -12,6 +13,7 @@ This page is the exhaustive reference; the [README](../README.md) has the
 - [Postgres](#postgres)
 - [Server](#server)
 - [Routing](#routing)
+- [Plan-aware subscription routing](#plan-aware-subscription-routing)
 - [Provider and model exclusions](#provider-and-model-exclusions)
 - [Policy sidecars](#policy-sidecars)
 - [BYOK encryption](#byok-encryption)
@@ -35,7 +37,6 @@ Claude Code keep using the user's logged-in plan.
 | `OPENAI_BASE_URL`     | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI). |
 | `ROUTER_CODEX_BASE_URL` | `https://chatgpt.com/backend-api/codex`                  | Local-testing override for the ChatGPT subscription Responses backend; leave unset in production. |
 | `ROUTER_SUBSCRIPTION_POOLS_ENABLED` | `false`                                         | Enables encrypted server-side subscription enrollment and account-management endpoints. Set `false` as the emergency pool-disable switch. |
-| `ROUTER_SUBSCRIPTION_PLAN_AWARE_ROUTING` | `false`                                | Removes models covered only by exhausted Claude/Codex plans from automatic routing per user; restores the normal roster when every linked plan is exhausted. |
 | `WEAVE_CODEX_OAUTH_ISSUER` | `https://auth.openai.com` | Optional Codex OAuth issuer override for self-hosted testing. |
 | `WEAVE_ANTHROPIC_OAUTH_AUTHORIZE` | `https://claude.ai/oauth/authorize` | Optional Claude OAuth authorization endpoint override used by the enrollment CLI. |
 | `WEAVE_ANTHROPIC_OAUTH_TOKEN` | `https://console.anthropic.com/v1/oauth/token` | Optional Claude OAuth token endpoint override used by enrollment and server-side refresh. |
@@ -420,6 +421,25 @@ Set `DATABASE_URL` directly, or compose it from the individual vars:
 If the cluster scorer can't run (missing model, embed timeout, etc.), the
 router returns HTTP 503 — it does *not* silently fall back to a default
 model. Failures are loud by design.
+
+## Plan-aware subscription routing
+
+`subscription_plan_aware_routing_enabled` is an organization-only boolean in
+`router.model_router_installations.flag_overrides`. It defaults to `false`;
+clearing the override also turns it off. The former
+`ROUTER_SUBSCRIPTION_PLAN_AWARE_ROUTING` environment variable is no longer read.
+
+In the managed control plane, open **Admin → Router → Flags**, select the
+organization, and use **On**, **Off**, or **Clear** for this flag. This is the
+internal-admin UI, not a customer-facing settings control. The router publishes
+the definition at startup; saving uses the existing installation-cache
+invalidation path, so a setting change does not require a redeploy.
+
+When enabled, models covered only by an exhausted Claude/Codex plan are excluded
+while another linked plan has headroom. Unknown or all-exhausted states restore
+normal eligibility. `subscription_routing_disabled` suppresses this feature even
+when the org flag is on. This setting does not enable subscription-account
+enrollment or change how quota is observed.
 
 ## Provider and model exclusions
 
