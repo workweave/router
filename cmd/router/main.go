@@ -83,6 +83,12 @@ func main() {
 		logger.Error("Failed to parse postgres DSN", "err", err)
 		panic(err)
 	}
+	dbTracer, err := postgres.NewPGXTracer(cfg.ConnConfig.Database)
+	if err != nil {
+		logger.Error("Failed to construct postgres tracer", "err", err)
+		panic(err)
+	}
+	cfg.ConnConfig.Tracer = dbTracer
 	// Defense-in-depth: pin every connection to the router schema so a missing
 	// `?search_path=router` in DATABASE_URL can't leak into public.*.
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {

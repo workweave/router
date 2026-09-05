@@ -167,7 +167,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		ClusterArmOverrides:          clusterArmOverridesForRequest(ctx),
 	}
 	routeStart := time.Now()
-	routeRes, err := s.runTurnLoop(ctx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)
+	routeCtx, routeSpan := startRoutingSpan(ctx, routeRequest)
+	routeRes, err := s.runTurnLoop(routeCtx, env, feats, apiKeyID, installationID, subAgentHint, r.Header, routeRequest)
+	finishRoutingSpan(routeSpan, routeRes.Decision, err)
 	routeMs := time.Since(routeStart).Milliseconds()
 	if err != nil {
 		log.Error("Routing failed for Gemini request", "err", err, "route_ms", routeMs, "requested_model", feats.Model, "total_input_tokens", feats.Tokens)
@@ -253,6 +255,9 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	}
 
 	proxyStart := time.Now()
+	inferenceParentCtx := ctx
+	ctx, inferenceSpan := startInferenceSpan(ctx, decision)
+	defer inferenceSpan.End()
 	var extractor *otel.UsageExtractor
 	// Append the one-click feedback thumbs as a trailing part on streaming
 	// answers (see ProxyMessages for the rationale). The Gemini path resolves no
@@ -303,6 +308,8 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 	if winnerIdx >= 0 && winnerIdx < len(bindings) {
 		finalProvider = bindings[winnerIdx].Provider
 	}
+	finishInferenceSpan(inferenceSpan, decision, finalProvider, winnerIdx, proxyErr)
+	ctx = restoreParentSpan(ctx, inferenceParentCtx)
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()

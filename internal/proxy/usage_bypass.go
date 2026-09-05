@@ -335,7 +335,11 @@ func (s *Service) bypassToAnthropic(
 	}
 
 	proxyStart := time.Now()
+	inferenceParentCtx := ctx
+	ctx, inferenceSpan := startInferenceSpan(ctx, decision)
 	proxyErr := p.Proxy(ctx, decision, prep, respW, r)
+	finishInferenceSpan(inferenceSpan, decision, decision.Provider, 0, proxyErr)
+	ctx = restoreParentSpan(ctx, inferenceParentCtx)
 	// The Anthropic adapter returns a buffered *UpstreamErrorResponse on 4xx/5xx
 	// without writing to w (the routed path flushes it via dispatchWithFallback).
 	// When the proxy error is retryable (429 weekly-limit, or a raw transport
