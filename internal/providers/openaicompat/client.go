@@ -28,6 +28,10 @@ const (
 	// providers; pair with NewClientWithModelIDMap to rewrite slugs to Makora's
 	// upstream IDs.
 	MakoraBaseURL = "https://inference.makora.com/v1"
+	// MiniMaxGlobalBaseURL is MiniMax's global OpenAI-compatible endpoint.
+	MiniMaxGlobalBaseURL = "https://api.minimax.io/v1"
+	// MiniMaxCNBaseURL is MiniMax's mainland-China OpenAI-compatible endpoint.
+	MiniMaxCNBaseURL = "https://api.minimaxi.com/v1"
 	// TogetherBaseURL serves the OSS pool (DeepSeek, GLM, MiniMax, Qwen, Kimi)
 	// and is fastest on artificialanalysis.ai for several routed models; pair
 	// with NewClientWithModelIDMap to rewrite slugs to Together's "Org/Model" IDs.
@@ -39,6 +43,17 @@ const (
 	// WaferBaseURL is Wafer Serverless' OpenAI-compatible surface.
 	WaferBaseURL = "https://pass.wafer.ai/v1"
 )
+
+// MiniMaxBaseURL returns the regional MiniMax OpenAI-compatible endpoint.
+// The global endpoint is the safe default for unset or unrecognized regions.
+func MiniMaxBaseURL(region string) string {
+	switch strings.ToLower(strings.TrimSpace(region)) {
+	case "cn", "china":
+		return MiniMaxCNBaseURL
+	default:
+		return MiniMaxGlobalBaseURL
+	}
+}
 
 // grokResponseHeaderTimeout is the time-to-first-byte guard for Grok models;
 // Snowflake Cortex prefill can push first-byte past the default 30s. Streaming

@@ -565,15 +565,20 @@ var Models = []Model{
 		// at the identical $0.30/$1.20 list price.
 		{Provider: providers.ProviderTogether, UpstreamID: "MiniMaxAI/MiniMax-M2.7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.06 / 0.300}},
+		{Provider: providers.ProviderMiniMax, UpstreamID: "MiniMax-M2.7",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheWriteMultiplier: 0.375 / 0.300, CacheReadMultiplier: 0.06 / 0.300}},
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m2p7",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.279, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
-	// Fireworks serves 512k context — the model's headline 1M is not what the
-	// endpoint exposes. Unlike m2.7 it accepts images, so ImageInput stays default.
+	// The direct endpoint serves 1M context, but fallback endpoints can be limited
+	// to 512K, so the model-level window stays conservative. Unlike m2.7 it accepts
+	// images, so ImageInput stays default.
 	{ID: "minimax/minimax-m3", Tier: TierHigh, ContextWindow: 512_000, AgenticUse: AgenticLow, Providers: []ProviderBinding{
 		{Provider: providers.ProviderFireworks, UpstreamID: "accounts/fireworks/models/minimax-m3",
 			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.20}},
+		{Provider: providers.ProviderMiniMax, UpstreamID: "MiniMax-M3",
+			Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.06 / 0.300}},
 		{Provider: providers.ProviderOpenRouter, Price: Pricing{InputUSDPer1M: 0.300, OutputUSDPer1M: 1.200, CacheReadMultiplier: 0.10}},
 	}},
 	{ID: "z-ai/glm-5", Tier: TierHigh, ContextWindow: 202_752, ImageInput: ImageInputUnsupported, Providers: []ProviderBinding{

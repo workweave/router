@@ -54,6 +54,7 @@ const (
 	ProviderFireworks  = "fireworks"
 	ProviderBedrock    = "bedrock"
 	ProviderMakora     = "makora"
+	ProviderMiniMax    = "minimax"
 	ProviderTogether   = "together"
 	ProviderXAI        = "xai"
 	// ProviderMeta is Meta's Model API (api.meta.ai), OpenAI-compatible Chat Completions surface.
@@ -88,7 +89,8 @@ const (
 	FamilyAnthropic
 	// FamilyOpenAICompat speaks the OpenAI Chat Completions wire format
 	// (OpenAI itself plus every OpenAI-compatible upstream: OpenRouter,
-	// Fireworks, Bedrock's OpenAI-compat surface, Makora, Together, XAI, Wafer).
+	// Fireworks, Bedrock's OpenAI-compat surface, Makora, MiniMax, Together,
+	// XAI, Wafer).
 	FamilyOpenAICompat
 	// FamilyGemini speaks the Google Generative Language (Gemini) wire format.
 	FamilyGemini
@@ -104,6 +106,7 @@ var ProviderFamilies = map[string]TranslationFamily{
 	ProviderFireworks:  FamilyOpenAICompat,
 	ProviderBedrock:    FamilyOpenAICompat,
 	ProviderMakora:     FamilyOpenAICompat,
+	ProviderMiniMax:    FamilyOpenAICompat,
 	ProviderTogether:   FamilyOpenAICompat,
 	ProviderXAI:        FamilyOpenAICompat,
 	ProviderMeta:       FamilyOpenAICompat,
@@ -184,6 +187,7 @@ var APIKeyEnvVars = map[string]string{
 	ProviderFireworks:  "FIREWORKS_API_KEY",
 	ProviderBedrock:    "AWS_BEARER_TOKEN_BEDROCK",
 	ProviderMakora:     "MAKORA_API_KEY",
+	ProviderMiniMax:    "MINIMAX_API_KEY",
 	ProviderTogether:   "TOGETHER_API_KEY",
 	ProviderXAI:        "XAI_API_KEY",
 	ProviderMeta:       "META_API_KEY",

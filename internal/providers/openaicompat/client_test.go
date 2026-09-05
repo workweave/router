@@ -18,6 +18,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMiniMaxBaseURL(t *testing.T) {
+	tests := map[string]string{
+		"":       openaicompat.MiniMaxGlobalBaseURL,
+		"global": openaicompat.MiniMaxGlobalBaseURL,
+		"cn":     openaicompat.MiniMaxCNBaseURL,
+		"China":  openaicompat.MiniMaxCNBaseURL,
+	}
+
+	for region, want := range tests {
+		t.Run(region, func(t *testing.T) {
+			assert.Equal(t, want, openaicompat.MiniMaxBaseURL(region))
+		})
+	}
+}
+
 func TestProxy_ForwardsToChatCompletionsUnderVersionedBaseURL(t *testing.T) {
 	var (
 		gotPath string

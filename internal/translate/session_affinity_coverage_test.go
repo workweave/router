@@ -48,6 +48,7 @@ var expectedSessionAffinityMechanism = map[string]sessionAffinityMechanism{
 var defaultMechanismProviders = map[string]struct{}{
 	providers.ProviderFireworks: {},
 	providers.ProviderMakora:    {},
+	providers.ProviderMiniMax:   {},
 	providers.ProviderTogether:  {},
 	providers.ProviderMeta:      {},
 	providers.ProviderWafer:     {},

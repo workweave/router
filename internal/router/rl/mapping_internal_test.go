@@ -35,6 +35,7 @@ var defaultRosterPrefixProviders = map[string]struct{}{
 	providers.ProviderFireworks:  {},
 	providers.ProviderBedrock:    {},
 	providers.ProviderMakora:     {},
+	providers.ProviderMiniMax:    {},
 	providers.ProviderTogether:   {},
 	// Muse Spark is not in the trained roster yet; bare ID is best-effort.
 	providers.ProviderMeta: {},

@@ -51,6 +51,7 @@ func TestFamilyForKnownProviders(t *testing.T) {
 		providers.ProviderFireworks:      providers.FamilyOpenAICompat,
 		providers.ProviderBedrock:        providers.FamilyOpenAICompat,
 		providers.ProviderMakora:         providers.FamilyOpenAICompat,
+		providers.ProviderMiniMax:        providers.FamilyOpenAICompat,
 		providers.ProviderTogether:       providers.FamilyOpenAICompat,
 		providers.ProviderXAI:            providers.FamilyOpenAICompat,
 		providers.ProviderMeta:           providers.FamilyOpenAICompat,

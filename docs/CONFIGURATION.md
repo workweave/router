@@ -34,6 +34,9 @@ Claude Code keep using the user's logged-in plan.
 | `OPENAI_API_KEY`      | *(none)*                                                  | Enables the OpenAI provider (Chat Completions API). |
 | `OPENAI_BASE_URL`     | `https://api.openai.com`                                  | Override for OpenAI (e.g. Azure OpenAI). |
 | `ROUTER_CODEX_BASE_URL` | `https://chatgpt.com/backend-api/codex`                  | Local-testing override for the ChatGPT subscription Responses backend; leave unset in production. |
+| `MINIMAX_API_KEY`     | *(none)*                                                   | Enables the native MiniMax provider through its OpenAI-compatible API. |
+| `MINIMAX_REGION`      | `global`                                                   | Set to `cn` (or `china`) to use the mainland-China endpoint. |
+| `MINIMAX_BASE_URL`    | regional default                                           | Override the MiniMax endpoint; defaults to `https://api.minimax.io/v1` globally or `https://api.minimaxi.com/v1` for mainland China. |
 | `ROUTER_SUBSCRIPTION_POOLS_ENABLED` | `false`                                         | Enables encrypted server-side subscription enrollment and account-management endpoints. Set `false` as the emergency pool-disable switch. |
 | `ROUTER_SUBSCRIPTION_PLAN_AWARE_ROUTING` | `false`                                | Removes models covered only by exhausted Claude/Codex plans from automatic routing per user; restores the normal roster when every linked plan is exhausted. |
 | `WEAVE_CODEX_OAUTH_ISSUER` | `https://auth.openai.com` | Optional Codex OAuth issuer override for self-hosted testing. |

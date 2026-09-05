@@ -33,6 +33,7 @@ func TestCatalog_BindingsReferenceCanonicalProviders(t *testing.T) {
 		providers.ProviderFireworks:        {},
 		providers.ProviderBedrock:          {},
 		providers.ProviderMakora:           {},
+		providers.ProviderMiniMax:          {},
 		providers.ProviderTogether:         {},
 		providers.ProviderXAI:              {},
 		providers.ProviderMeta:             {},
@@ -142,6 +143,30 @@ func TestResolveBinding_GemmaUsesNativeGoogleUpstreamID(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, providers.ProviderGoogle, b.Provider)
 	assert.Equal(t, "gemma-4-26b-a4b-it", b.UpstreamID)
+}
+
+func TestResolveBinding_MiniMaxUsesNativeModelIDs(t *testing.T) {
+	cases := []struct {
+		model       string
+		upstreamID  string
+		inputPrice  float64
+		outputPrice float64
+	}{
+		{model: "minimax/minimax-m3", upstreamID: "MiniMax-M3", inputPrice: 0.300, outputPrice: 1.200},
+		{model: "minimax/minimax-m2.7", upstreamID: "MiniMax-M2.7", inputPrice: 0.300, outputPrice: 1.200},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			binding, ok := ResolveBinding(tc.model, map[string]struct{}{providers.ProviderMiniMax: {}})
+			require.True(t, ok)
+			assert.Equal(t, providers.ProviderMiniMax, binding.Provider)
+			assert.Equal(t, tc.upstreamID, binding.UpstreamID)
+			assert.Equal(t, tc.inputPrice, binding.Price.InputUSDPer1M)
+			assert.Equal(t, tc.outputPrice, binding.Price.OutputUSDPer1M)
+			assert.Equal(t, 0.20, binding.Price.EffectiveCacheReadMultiplier())
+		})
+	}
 }
 
 func TestGPT56ProCatalogRowsAreDirectOpenAIRoutable(t *testing.T) {
