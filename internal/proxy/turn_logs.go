@@ -179,13 +179,14 @@ func sha256Hex(b []byte) string {
 // upstream call, reusing the upstream span's attributes as the metadata base
 // and appending content attributes per capture mode. No-op when capture is
 // off. base is cloned before appending so the span's attributes aren't mutated.
-func (s *Service) recordCallLog(ctx context.Context, base []*commonv1.KeyValue, isErr bool, reqBody, respBody []byte, respTruncated bool) {
+func (s *Service) recordCallLog(ctx context.Context, base []*commonv1.KeyValue, routeMs int64, isErr bool, reqBody, respBody []byte, respTruncated bool) {
 	mode := s.effectiveCaptureMode(ctx)
 	if mode == CaptureOff {
 		return
 	}
 
-	content := otel.NewAttrBuilder(6).
+	content := otel.NewAttrBuilder(7).
+		Int64("latency.route_ms", routeMs).
 		Int64("io.request_bytes", int64(len(reqBody))).
 		Int64("io.response_bytes", int64(len(respBody))).
 		Bool("io.truncated", respTruncated)

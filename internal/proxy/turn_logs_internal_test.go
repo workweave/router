@@ -150,6 +150,28 @@ func (c *logCollector) attrs(t *testing.T) map[string]string {
 	return out
 }
 
+func (c *logCollector) intAttr(t *testing.T, key string) int64 {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, b := range c.bodies {
+		var req collogspb.ExportLogsServiceRequest
+		require.NoError(t, proto.Unmarshal(b, &req))
+		for _, rl := range req.ResourceLogs {
+			for _, sl := range rl.ScopeLogs {
+				for _, lr := range sl.LogRecords {
+					for _, kv := range lr.Attributes {
+						if kv.Key == key {
+							return kv.GetValue().GetIntValue()
+						}
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+
 func (c *logCollector) count(t *testing.T) int {
 	t.Helper()
 	c.mu.Lock()
@@ -188,7 +210,7 @@ func TestRecordCallLog_OffEmitsNothing(t *testing.T) {
 	buf := otel.NewBuffer(em)
 	ctx := buf.WithContext(context.Background())
 	base := otel.NewAttrBuilder(1).String("decision.model", "claude-opus-4-8").Build()
-	s.recordCallLog(ctx, base, false, []byte("req"), []byte("resp"), false)
+	s.recordCallLog(ctx, base, 42, false, []byte("req"), []byte("resp"), false)
 	otel.Flush(ctx)
 
 	require.NoError(t, em.Shutdown(context.Background()))
@@ -202,13 +224,14 @@ func TestRecordCallLog_FullCapturesBodies(t *testing.T) {
 	buf := otel.NewBuffer(em)
 	ctx := buf.WithContext(context.Background())
 	base := otel.NewAttrBuilder(1).String("decision.model", "claude-opus-4-8").Build()
-	s.recordCallLog(ctx, base, false, []byte(`{"req":1}`), []byte(`{"resp":2}`), false)
+	s.recordCallLog(ctx, base, 42, false, []byte(`{"req":1}`), []byte(`{"resp":2}`), false)
 	otel.Flush(ctx)
 
 	require.NoError(t, em.Shutdown(context.Background()))
 	require.Equal(t, 1, coll.count(t))
 	a := coll.attrs(t)
 	assert.Equal(t, "claude-opus-4-8", a["decision.model"]) // base metadata carried over
+	assert.Equal(t, int64(42), coll.intAttr(t, "latency.route_ms"))
 	assert.Equal(t, `{"req":1}`, a["io.request_body"])
 	assert.Equal(t, `{"resp":2}`, a["io.response_body"])
 	assert.Empty(t, a["io.request_sha256"])
@@ -220,7 +243,7 @@ func TestRecordCallLog_HashedOmitsRawText(t *testing.T) {
 
 	buf := otel.NewBuffer(em)
 	ctx := buf.WithContext(context.Background())
-	s.recordCallLog(ctx, nil, false, []byte("secret-prompt"), []byte("secret-response"), false)
+	s.recordCallLog(ctx, nil, 42, false, []byte("secret-prompt"), []byte("secret-response"), false)
 	otel.Flush(ctx)
 
 	require.NoError(t, em.Shutdown(context.Background()))
@@ -249,7 +272,7 @@ func TestDeferredCallLog_ReadsBodyAtRunTime(t *testing.T) {
 	base := otel.NewAttrBuilder(1).String("decision.model", "m").Build()
 	h.fn = func() {
 		body, trunc := capturedResponse(cw)
-		s.recordCallLog(ctx, base, false, []byte("req"), body, trunc)
+		s.recordCallLog(ctx, base, 42, false, []byte("req"), body, trunc)
 		otel.Flush(ctx)
 	}
 
@@ -281,7 +304,7 @@ func TestRecordCallLog_RedactorApplied(t *testing.T) {
 
 	buf := otel.NewBuffer(em)
 	ctx := buf.WithContext(context.Background())
-	s.recordCallLog(ctx, nil, false, []byte("raw-req"), []byte("raw-resp"), false)
+	s.recordCallLog(ctx, nil, 42, false, []byte("raw-req"), []byte("raw-resp"), false)
 	otel.Flush(ctx)
 
 	require.NoError(t, em.Shutdown(context.Background()))

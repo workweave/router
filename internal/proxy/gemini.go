@@ -348,7 +348,7 @@ func (s *Service) ProxyGeminiGenerateContent(ctx context.Context, body []byte, w
 		Attrs: geminiUpstreamBuilder.Build(),
 	})
 	respBody, respTrunc := capturedResponse(contentCap)
-	s.recordCallLog(ctx, geminiUpstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
+	s.recordCallLog(ctx, geminiUpstreamBuilder.Build(), routeMs, proxyErr != nil, body, respBody, respTrunc)
 	otel.Flush(ctx)
 
 	// Persist last-turn usage to the pin row so the next turn's planner

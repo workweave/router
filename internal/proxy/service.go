@@ -4345,7 +4345,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	respBody, respTrunc := capturedResponse(contentCap)
 	// Eval bodies are captured offline; exclude them from call-log so they are not mistaken for serving traffic.
 	if !agentShadowMode {
-		s.recordCallLog(ctx, upstreamBuilder.Build(), proxyErr != nil, body, respBody, respTrunc)
+		s.recordCallLog(ctx, upstreamBuilder.Build(), routeMs, proxyErr != nil, body, respBody, respTrunc)
 	}
 	otel.Flush(ctx)
 
@@ -6662,7 +6662,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			reqBody = h.requestBody
 		}
 		respBody, respTrunc := capturedResponse(contentCap)
-		s.recordCallLog(ctx, callLogBase, proxyErr != nil, reqBody, respBody, respTrunc)
+		s.recordCallLog(ctx, callLogBase, routeMs, proxyErr != nil, reqBody, respBody, respTrunc)
 		otel.Flush(ctx)
 	}
 	// The /v1/responses surface (ProxyOpenAIResponses) finalizes its
